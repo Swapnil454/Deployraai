@@ -5,6 +5,7 @@ import { oauthRouter, apiAuthRouter } from "./routes/auth.routes.js";
 import githubRoutes from "./routes/github.routes.js";
 import projectRoutes from "./routes/project.routes.js";
 import integrationRoutes from "./routes/integration.routes.js";
+import fixPrRoutes from "./routes/fixPr.routes.js";
 import deploymentRoutes from "./routes/deployment.routes.js";
 
 const app = express();
@@ -24,6 +25,7 @@ app.use("/api/github", githubRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/integrations", integrationRoutes);
 app.use("/api/deployments", deploymentRoutes);
+app.use("/api/fix-prs", fixPrRoutes);
 
 app.get("/", (req, res) => {
     res.send({

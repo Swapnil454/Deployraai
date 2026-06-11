@@ -20,7 +20,8 @@ import {
   createRenderWebService,
   getRenderDeploys,
   updateRenderEnvVars,
-  triggerRenderDeploy
+  triggerRenderDeploy,
+  getRenderServices
 } from "../services/providers/render.service.js";
 import {
   getVercelToken,
@@ -28,9 +29,12 @@ import {
   createVercelProject,
   updateVercelEnvVars,
   triggerVercelDeploy,
-  getVercelDeployments
+  getVercelDeployments,
+  getVercelProjects
 } from "../services/providers/vercel.service.js";
-
+import { checkBackendHealth, checkFrontendHealth, checkCors } from "../services/healthCheck.service.js";
+import { sanitizeDeploymentLogs } from "../utils/sanitizeLogs.js";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 // Helper to construct a log entry
 const createLog = (level, step, message, metadata = {}) => ({
   level,
@@ -130,59 +134,74 @@ export const triggerFrontendDeployment = async (req, res) => {
     if (project.status !== 'configured') return res.status(400).json({ error: "Project is not fully configured" });
 
     const platform = project.configuration.frontendPlatform;
+    if (platform !== 'vercel') return generateMockDeployment(req, res, 'frontend');
 
-    // Clean up any hanging deployments from other platforms
     await Deployment.updateMany(
-      { projectId, type: 'frontend', status: 'running', platform: { $ne: platform } },
-      { $set: { status: 'failed', errorMessage: 'Superseded by deployment on another platform', completedAt: new Date() } }
+      { projectId, retryOfDeploymentId: req.body?.retryOfDeploymentId || undefined,
+      type: 'frontend', status: 'running' },
+      { $set: { status: 'failed', errorMessage: 'Superseded', completedAt: new Date() } }
     );
-
-    const existing = await Deployment.findOne({ projectId, type: 'frontend', platform, status: 'running' });
-    if (existing) {
-      return res.status(200).json({ success: true, deploymentId: existing._id, message: "Deployment already running" });
-    }
-
-    if (platform !== 'vercel') {
-      return generateMockDeployment(req, res, 'frontend');
-    }
-
-    const envKeys = {};
-    if (project.configuration.envVariables && project.configuration.envVariables.frontend) {
-      envKeys.frontend = project.configuration.envVariables.frontend.map(e => e.key);
-    }
-
-    const configSnapshot = {
-      installCommand: project.configuration.installCommand,
-      buildCommand: project.configuration.frontendBuildCommand,
-      outputDirectory: project.configuration.outputDirectory,
-      envKeys,
-      envSnapshotStr: project.configuration.envVariables?.frontend ? JSON.stringify(project.configuration.envVariables.frontend) : ""
-    };
-
-    const source = {
-      repoOwner: project.repoOwner,
-      repoName: project.repoName,
-      repoFullName: project.repoFullName,
-      branch: project.selectedBranch,
-      commitSha: null,
-      rootDirectory: project.configuration.frontendRoot
-    };
 
     const deployment = await Deployment.create({
       userId,
       projectId,
+      retryOfDeploymentId: req.body?.retryOfDeploymentId || undefined,
       type: 'frontend',
       serviceName: 'frontend',
       platform,
       status: 'running',
-      source,
-      configSnapshot
+      source: { repoFullName: project.repoFullName, branch: project.selectedBranch, rootDirectory: project.configuration.frontendRoot }
     });
 
     res.status(202).json({ success: true, deploymentId: deployment._id, message: "Deployment started" });
+    executeFrontendDeployment(deployment, project, []);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to trigger deployment" });
+  }
+};
 
-    // Background orchestrator
-    (async () => {
+export const triggerBackendDeployment = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.userId;
+
+    const project = await Project.findById(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    if (project.userId.toString() !== userId.toString()) return res.status(403).json({ error: "Access denied" });
+    if (project.status !== 'configured') return res.status(400).json({ error: "Project is not fully configured" });
+
+    const platform = project.configuration.backendPlatform;
+    if (platform !== 'railway' && platform !== 'render') return generateMockDeployment(req, res, 'backend');
+
+    await Deployment.updateMany(
+      { projectId, retryOfDeploymentId: req.body?.retryOfDeploymentId || undefined,
+      type: 'backend', status: 'running' },
+      { $set: { status: 'failed', errorMessage: 'Superseded', completedAt: new Date() } }
+    );
+
+    const deployment = await Deployment.create({
+      userId,
+      projectId,
+      retryOfDeploymentId: req.body?.retryOfDeploymentId || undefined,
+      type: 'backend',
+      serviceName: 'backend',
+      platform,
+      status: 'running',
+      source: { repoFullName: project.repoFullName, branch: project.selectedBranch, rootDirectory: project.configuration.backendRoot }
+    });
+
+    res.status(202).json({ success: true, deploymentId: deployment._id, message: "Deployment started" });
+    executeBackendDeployment(deployment, project, []);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to trigger deployment" });
+  }
+};
+
+const executeFrontendDeployment = async (deployment, project, injectedEnvVars = []) => {
+  const projectId = project._id;
+  const userId = project.userId;
+  const platform = project.configuration.frontendPlatform;
+
       const appendLog = async (level, step, message, metadata={}) => {
         await Deployment.findByIdAndUpdate(deployment._id, {
           $push: { logs: createLog(level, step, message, metadata) }
@@ -211,18 +230,16 @@ export const triggerFrontendDeployment = async (req, res) => {
         }
         await appendLog('success', 'env_setup', 'Frontend variables prepared');
 
-        const previousDeployments = await Deployment.find({ projectId, platform: 'vercel', providerServiceId: { $exists: true, $ne: null } }).sort({ createdAt: -1 }).limit(1);
-        let providerServiceId;
+        let providerServiceId = project.configuration.vercelProjectId;
         let deploymentUrl;
         let projectName = `deploy-ai-${projectId.toString().slice(-6)}`;
 
         try {
-          if (previousDeployments.length > 0) {
-             providerServiceId = previousDeployments[0].providerServiceId;
-             
-             const previousEnvSnapshot = previousDeployments[0].configSnapshot?.envSnapshotStr || "";
-             const currentEnvSnapshot = configSnapshot.envSnapshotStr;
-             const envChanged = previousEnvSnapshot !== currentEnvSnapshot;
+          if (providerServiceId) {
+             const previousDeploy = await Deployment.findOne({ projectId, platform: { $in: ['vercel', 'multiple'] }, providerServiceId }).sort({ createdAt: -1 });
+             const previousEnvSnapshot = previousDeploy?.configSnapshot?.envSnapshotStr || "";
+             const currentEnvSnapshot = JSON.stringify([...(project.configuration.envVariables?.frontend || []), ...(injectedEnvVars || [])]);
+             const envChanged = previousEnvSnapshot !== currentEnvSnapshot || (injectedEnvVars && injectedEnvVars.length > 0);
 
              if (envChanged) {
                await appendLog('info', 'project_update', `Found existing Vercel project (${projectName}). Updating environment variables...`);
@@ -248,19 +265,35 @@ export const triggerFrontendDeployment = async (req, res) => {
              }
           } else {
              await appendLog('info', 'project_create', 'Creating new Vercel Project linked to GitHub...');
-             const vercelProj = await createVercelProject(token, {
-               name: projectName,
-               repoFullName: project.repoFullName,
-               branch: project.selectedBranch,
-               rootDir: project.configuration.frontendRoot,
-               buildCommand: project.configuration.frontendBuildCommand,
-               installCommand: project.configuration.installCommand,
-               outputDirectory: project.configuration.outputDirectory,
-               envVars
-             });
-             providerServiceId = vercelProj.id;
-
-             await appendLog('success', 'project_create', 'Vercel Project created successfully');
+             try {
+               const vercelProj = await createVercelProject(token, {
+                 name: projectName,
+                 repoFullName: project.repoFullName,
+                 branch: project.selectedBranch,
+                 rootDir: project.configuration.frontendRoot,
+                 buildCommand: project.configuration.frontendBuildCommand,
+                 installCommand: project.configuration.installCommand,
+                 outputDirectory: project.configuration.outputDirectory,
+                 envVars
+               });
+               providerServiceId = vercelProj.id;
+               project.configuration.vercelProjectId = providerServiceId;
+               await project.save();
+               await appendLog('success', 'project_create', 'Vercel Project created successfully');
+             } catch (createErr) {
+               if (createErr.message.includes('already in use') || createErr.message.includes('exists')) {
+                 await appendLog('info', 'project_update', 'Vercel project already exists in provider. Linking...');
+                 const projectsRes = await getVercelProjects(token);
+                 const existingProj = projectsRes.projects.find(p => p.name === projectName);
+                 if (existingProj) {
+                   providerServiceId = existingProj.id;
+                   project.configuration.vercelProjectId = providerServiceId;
+                   await project.save();
+                   await appendLog('success', 'project_update', 'Linked successfully. Triggering redeployment...');
+                   await updateVercelEnvVars(token, providerServiceId, envVars);
+                 } else { throw createErr; }
+               } else { throw createErr; }
+             }
              await appendLog('info', 'deploy_trigger', 'Triggering initial Vercel deployment...');
              try {
                const deployRes = await triggerVercelDeploy(token, {
@@ -329,6 +362,7 @@ export const triggerFrontendDeployment = async (req, res) => {
             errorMessage: finalErrorMessage,
             completedAt: new Date()
           });
+           return deploymentUrl;
 
         } catch (svcErr) {
           if (svcErr.message.includes('repo') || svcErr.message.includes('github') || svcErr.message.includes('installation')) {
@@ -347,82 +381,14 @@ export const triggerFrontendDeployment = async (req, res) => {
         await appendLog('error', 'system', `Deployment failed: ${err.message}`);
         await Deployment.findByIdAndUpdate(deployment._id, { status: 'failed', errorMessage: err.message, completedAt: new Date() });
       }
-    })();
 
-  } catch (error) {
-    console.error("Trigger frontend deployment error:", error);
-    res.status(500).json({ error: "Failed to trigger deployment" });
-  }
 };
 
-export const triggerBackendDeployment = async (req, res) => {
-  try {
-    const { projectId } = req.params;
-    const userId = req.user.userId;
+const executeBackendDeployment = async (deployment, project, injectedEnvVars = []) => {
+  const projectId = project._id;
+  const userId = project.userId;
+  const platform = project.configuration.backendPlatform;
 
-    const project = await Project.findById(projectId);
-    if (!project) return res.status(404).json({ error: "Project not found" });
-    if (project.userId.toString() !== userId.toString()) return res.status(403).json({ error: "Access denied" });
-    if (project.status !== 'configured') return res.status(400).json({ error: "Project is not fully configured" });
-
-    const platform = project.configuration.backendPlatform;
-
-    // Clean up any hanging deployments from other platforms
-    await Deployment.updateMany(
-      { projectId, type: 'backend', status: 'running', platform: { $ne: platform } },
-      { $set: { status: 'failed', errorMessage: 'Superseded by deployment on another platform', completedAt: new Date() } }
-    );
-
-    const existing = await Deployment.findOne({ projectId, type: 'backend', platform, status: 'running' });
-    if (existing) {
-      return res.status(200).json({ success: true, deploymentId: existing._id, message: "Deployment already running" });
-    }
-    if (platform !== 'railway' && platform !== 'render') {
-      return generateMockDeployment(req, res, 'backend');
-    }
-
-    const envKeys = {};
-    if (project.configuration.envVariables && project.configuration.envVariables.backend) {
-      envKeys.backend = project.configuration.envVariables.backend.map(e => e.key);
-    }
-
-    const configSnapshot = {
-      installCommand: project.configuration.installCommand,
-      buildCommand: project.configuration.backendBuildCommand,
-      startCommand: project.configuration.backendStartCommand,
-      outputDirectory: project.configuration.outputDirectory,
-      envKeys
-    };
-
-    const source = {
-      repoOwner: project.repoOwner,
-      repoName: project.repoName,
-      repoFullName: project.repoFullName,
-      branch: project.selectedBranch,
-      commitSha: null,
-      rootDirectory: project.configuration.backendRoot
-    };
-
-    const deployment = await Deployment.create({
-      userId,
-      projectId,
-      type: 'backend',
-      serviceName: 'backend',
-      platform,
-      status: 'running',
-      source,
-      configSnapshot,
-      logs: [
-        createLog('info', 'validation', 'Backend deployment requested', { projectId }),
-        createLog('info', 'validation', 'Project ownership verified'),
-        createLog('info', 'validation', 'Configuration loaded', { platform, branch: project.selectedBranch })
-      ]
-    });
-
-    res.status(201).json({ success: true, deploymentId: deployment._id });
-
-    // Background orchestrator
-    (async () => {
       const appendLog = async (level, step, message, metadata={}) => {
         await Deployment.findByIdAndUpdate(deployment._id, {
           $push: { logs: createLog(level, step, message, metadata) }
@@ -465,10 +431,17 @@ export const triggerBackendDeployment = async (req, res) => {
             await appendLog('warning', 'project_create', `Failed to fetch workspaces: ${wsErr.message}`);
           }
 
-          await appendLog('info', 'project_create', 'Creating Railway project');
-          const railProj = await createRailwayProject(token, `deploy-ai-${projectId.toString().slice(-6)}`, teamId);
-          const providerProjectId = railProj.projectCreate.id;
-          await appendLog('success', 'project_create', 'Railway project created', { providerProjectId });
+          let providerProjectId = project.configuration.railwayProjectId;
+      if (!providerProjectId) {
+         await appendLog('info', 'project_create', 'Creating Railway project');
+         const railProj = await createRailwayProject(token, `deploy-ai-${projectId.toString().slice(-6)}`, teamId);
+         providerProjectId = railProj.projectCreate.id;
+         project.configuration.railwayProjectId = providerProjectId;
+         await project.save();
+         await appendLog('success', 'project_create', 'Railway project created', { providerProjectId });
+      } else {
+         await appendLog('info', 'project_update', 'Found existing Railway project');
+      }
 
           await appendLog('info', 'env_setup', 'Resolving Railway environment');
           const envs = await getProjectEnvironments(token, providerProjectId);
@@ -538,13 +511,12 @@ export const triggerBackendDeployment = async (req, res) => {
 
           try {
             // Find if we already have a Render service for this project
-            const previousDeployments = await Deployment.find({ projectId, platform: 'render', providerServiceId: { $exists: true, $ne: null } }).sort({ createdAt: -1 }).limit(1);
-            let providerServiceId;
-            let deploymentUrl;
+            let providerServiceId = project.configuration.renderServiceId;
+        let deploymentUrl;
 
-            if (previousDeployments.length > 0) {
-               providerServiceId = previousDeployments[0].providerServiceId;
-               deploymentUrl = previousDeployments[0].deploymentUrl;
+        if (providerServiceId) {
+           const prevDepl = await Deployment.findOne({ projectId, platform: { $in: ['render', 'multiple'] }, providerServiceId }).sort({ createdAt: -1 });
+           deploymentUrl = prevDepl?.deploymentUrl;
                
                await appendLog('info', 'project_update', `Found existing Render service. Updating environment variables...`);
                await updateRenderEnvVars(token, providerServiceId, envVars);
@@ -554,18 +526,36 @@ export const triggerBackendDeployment = async (req, res) => {
                await appendLog('success', 'deploy_trigger', 'Render redeployment started successfully');
             } else {
                await appendLog('info', 'project_create', 'Creating new Render Web Service linked to GitHub...');
-               const renderSvc = await createRenderWebService(token, owner.id, {
-                 name: `deploy-ai-${projectId.toString().slice(-6)}`,
-                 repoFullName: project.repoFullName,
-                 branch: project.selectedBranch,
-                 rootDir: project.configuration.backendRoot,
-                 buildCommand: project.configuration.backendBuildCommand,
-                 startCommand: project.configuration.backendStartCommand,
-                 envVars
-               });
-               providerServiceId = renderSvc.id || renderSvc.service?.id;
-               deploymentUrl = renderSvc.serviceDetails?.url || renderSvc.service?.serviceDetails?.url;
-               await appendLog('success', 'project_create', 'Render Web Service created successfully');
+               try {
+             const renderSvc = await createRenderWebService(token, owner.id, {
+               name: `deploy-ai-${projectId.toString().slice(-6)}`,
+               repoFullName: project.repoFullName,
+               branch: project.selectedBranch,
+               rootDir: project.configuration.backendRoot,
+               buildCommand: project.configuration.backendBuildCommand,
+               startCommand: project.configuration.backendStartCommand,
+               envVars
+             });
+             providerServiceId = renderSvc.id || renderSvc.service?.id;
+             deploymentUrl = renderSvc.serviceDetails?.url || renderSvc.service?.serviceDetails?.url;
+             project.configuration.renderServiceId = providerServiceId;
+             await project.save();
+             await appendLog('success', 'project_create', 'Render Web Service created successfully');
+           } catch (createErr) {
+             if (createErr.message.includes('already in use') || createErr.message.includes('exists')) {
+               await appendLog('info', 'project_update', 'Render service already exists. Linking...');
+               const servicesRes = await getRenderServices(token);
+               const existingSvc = servicesRes.find(s => s.service.name === `deploy-ai-${projectId.toString().slice(-6)}`);
+               if (existingSvc) {
+                 providerServiceId = existingSvc.service.id;
+                 deploymentUrl = existingSvc.service.serviceDetails?.url;
+                 project.configuration.renderServiceId = providerServiceId;
+                 await project.save();
+                 await appendLog('success', 'project_update', 'Linked successfully. Triggering redeployment...');
+                 await updateRenderEnvVars(token, providerServiceId, envVars);
+               } else { throw createErr; }
+             } else { throw createErr; }
+           }
                await appendLog('success', 'deploy_trigger', 'Render deployment automatically started');
             }
 
@@ -616,6 +606,7 @@ export const triggerBackendDeployment = async (req, res) => {
               errorMessage: finalErrorMessage,
               completedAt: new Date()
             });
+           return deploymentUrl;
 
           } catch (svcErr) {
             // Render rejects private repos if not authorized. We must catch this.
@@ -634,14 +625,190 @@ export const triggerBackendDeployment = async (req, res) => {
           $push: { logs: createLog('error', 'deploy_trigger', err.message) }
         });
       }
-    })();
 
+};
+
+export const triggerFullDeployment = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.userId;
+
+    const project = await Project.findById(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    if (project.userId.toString() !== userId.toString()) return res.status(403).json({ error: "Access denied" });
+    if (project.status !== 'configured') return res.status(400).json({ error: "Project is not fully configured" });
+
+    if (!project.configuration.frontendPlatform || project.configuration.frontendPlatform === 'none') {
+       return res.status(400).json({ error: "Frontend platform not configured" });
+    }
+    if (!project.configuration.backendPlatform || project.configuration.backendPlatform === 'none') {
+       return res.status(400).json({ error: "Backend platform not configured" });
+    }
+
+    await Deployment.updateMany(
+      { projectId, retryOfDeploymentId: req.body?.retryOfDeploymentId || undefined,
+      type: 'full', status: 'running' },
+      { $set: { status: 'failed', errorMessage: 'Superseded by new full deployment', completedAt: new Date() } }
+    );
+
+    const deployment = await Deployment.create({
+      userId,
+      projectId,
+      retryOfDeploymentId: req.body?.retryOfDeploymentId || undefined,
+      type: 'full',
+      serviceName: 'Full Stack',
+      platform: 'multiple',
+      status: 'running',
+      source: {
+        repoFullName: project.repoFullName,
+        branch: project.selectedBranch,
+      },
+      logs: [
+        createLog('info', 'validation', 'Full-stack deployment requested', { projectId }),
+        createLog('info', 'validation', 'Project ownership verified'),
+        createLog('info', 'validation', 'Configuration loaded')
+      ]
+    });
+
+    res.status(202).json({ success: true, deploymentId: deployment._id, message: "Full deployment started" });
+
+    (async () => {
+       const appendLog = async (level, step, message, metadata={}) => {
+         await Deployment.findByIdAndUpdate(deployment._id, {
+           $push: { logs: createLog(level, step, message, metadata) }
+         });
+       };
+
+       try {
+         await appendLog('info', 'deploying_backend', 'Step 1: Executing Backend Deployment');
+         let backendUrl = await executeBackendDeployment(deployment, project, []);
+         
+         if (!backendUrl) {
+            await appendLog('warning', 'deploying_backend', 'Backend deployed but URL was not returned. Proceeding anyway.');
+            backendUrl = "http://unknown-backend-url";
+         } else {
+            await appendLog('success', 'deploying_backend', `Backend deployed successfully at ${backendUrl}`);
+         }
+
+         await appendLog('info', 'deploying_frontend', 'Step 2: Executing Frontend Deployment with NEXT_PUBLIC_API_URL injected');
+         const injectedFrontendEnv = [{ key: 'NEXT_PUBLIC_API_URL', value: backendUrl }];
+         let frontendUrl = await executeFrontendDeployment(deployment, project, injectedFrontendEnv);
+
+         if (!frontendUrl) {
+            await appendLog('warning', 'deploying_frontend', 'Frontend deployed but URL was not returned. Proceeding anyway.');
+            frontendUrl = "http://unknown-frontend-url";
+         } else {
+            await appendLog('success', 'deploying_frontend', `Frontend deployment completed successfully. URL: ${frontendUrl}`);
+         }
+
+         await appendLog('info', 'updating_backend_cors', 'Step 3: Redeploying Backend with CORS_ORIGIN injected');
+         const injectedBackendEnv = [{ key: 'CORS_ORIGIN', value: frontendUrl }];
+         await executeBackendDeployment(deployment, project, injectedBackendEnv);
+
+         // --- HEALTH CHECKS ---
+         await appendLog('info', 'checking_backend', 'Step 4: Running Backend Health Check');
+         const backendHealth = await checkBackendHealth(backendUrl, appendLog);
+         if (backendHealth.status === 'failed') {
+             await appendLog('error', 'checking_backend', backendHealth.message);
+         } else if (backendHealth.status === 'warning') {
+             await appendLog('warning', 'checking_backend', backendHealth.message);
+             await appendLog('info', 'checking_backend', 'Recommendation: Add a /health endpoint returning JSON for stronger verification.');
+         } else {
+             await appendLog('success', 'checking_backend', backendHealth.message);
+         }
+
+         await appendLog('info', 'checking_frontend', 'Step 5: Running Frontend Health Check');
+         const frontendHealth = await checkFrontendHealth(frontendUrl, appendLog);
+         if (frontendHealth.status === 'failed') {
+             await appendLog('error', 'checking_frontend', frontendHealth.message);
+         } else if (frontendHealth.status === 'warning') {
+             await appendLog('warning', 'checking_frontend', frontendHealth.message);
+         } else {
+             await appendLog('success', 'checking_frontend', frontendHealth.message);
+         }
+
+         await appendLog('info', 'checking_full_stack', 'Step 6: Running CORS Check');
+         const corsHealth = await checkCors(frontendUrl, backendUrl, appendLog);
+         if (corsHealth.status === 'failed') {
+             await appendLog('error', 'checking_full_stack', corsHealth.message);
+         } else if (corsHealth.status === 'warning') {
+             await appendLog('warning', 'checking_full_stack', corsHealth.message);
+         } else {
+             await appendLog('success', 'checking_full_stack', corsHealth.message);
+         }
+
+         // Evaluate Final Verification
+         const healthCheckSummary = {
+             backend: { ...backendHealth, url: backendUrl, checkedAt: new Date() },
+             frontend: { ...frontendHealth, url: frontendUrl, checkedAt: new Date() },
+             cors: { ...corsHealth, checkedAt: new Date() },
+             database: { status: backendHealth.db === 'connected' ? 'passed' : backendHealth.db === 'error' ? 'failed' : 'unknown', message: backendHealth.db ? `DB Status: ${backendHealth.db}` : 'N/A', checkedAt: new Date() }
+         };
+
+         const finalSummary = {
+             frontendUrl,
+             backendUrl,
+             durationMs: Date.now() - new Date(deployment.startedAt).getTime(),
+         };
+
+         let finalStatus = 'success';
+         let failedStep = null;
+         let failureReason = null;
+         let suggestedFix = null;
+
+         if (backendHealth.status === 'failed') {
+             finalStatus = 'failed';
+             failedStep = 'Backend health check';
+             failureReason = backendHealth.message;
+             suggestedFix = 'Check MONGO_URI, PORT handling, or server start command.';
+         } else if (frontendHealth.status === 'failed') {
+             finalStatus = 'failed';
+             failedStep = 'Frontend health check';
+             failureReason = frontendHealth.message;
+             suggestedFix = 'Check frontend build logs, output directory, or syntax errors.';
+         } else if (corsHealth.status === 'failed') {
+             finalStatus = 'failed';
+             failedStep = 'CORS Check';
+             failureReason = corsHealth.message;
+             suggestedFix = 'Ensure your backend uses the cors() middleware and correctly reads process.env.CORS_ORIGIN.';
+         } else if (healthCheckSummary.database.status === 'failed') {
+             finalStatus = 'failed';
+             failedStep = 'Database Check';
+             failureReason = 'Backend reported Database connection failure';
+             suggestedFix = 'Verify MONGO_URI string inside Project Settings.';
+         }
+
+         finalSummary.status = finalStatus;
+         finalSummary.failedStep = failedStep;
+         finalSummary.failureReason = failureReason;
+         finalSummary.suggestedFix = suggestedFix;
+
+         await appendLog(finalStatus === 'success' ? 'success' : 'error', 'checking_full_stack', `Full-stack deployment orchestration completed with status: ${finalStatus}`);
+         
+         await Deployment.findByIdAndUpdate(deployment._id, { 
+            status: finalStatus, 
+            deploymentUrl: frontendUrl,
+            healthCheck: healthCheckSummary,
+            finalSummary,
+            completedAt: new Date(),
+            ...(finalStatus === 'failed' ? { errorMessage: failureReason } : {})
+         });
+
+       } catch (err) {
+         console.error("Full stack deploy error:", err);
+         await appendLog('error', 'system', `Full deployment failed: ${err.message}`);
+         await Deployment.findByIdAndUpdate(deployment._id, { 
+            status: 'failed', 
+            errorMessage: err.message, 
+            completedAt: new Date() 
+         });
+       }
+    })();
   } catch (error) {
-    console.error("Trigger backend deployment error:", error);
-    if (!res.headersSent) res.status(500).json({ error: "Failed to trigger backend deployment" });
+    console.error("Trigger full deployment error:", error);
+    if (!res.headersSent) res.status(500).json({ error: "Failed to trigger full deployment" });
   }
 };
-export const triggerFullDeployment = (req, res) => generateMockDeployment(req, res, 'full');
 
 export const getDeployment = async (req, res) => {
   try {
@@ -705,5 +872,130 @@ export const syncDeployment = async (req, res) => {
   } catch (error) {
     console.error("Sync deployment error:", error);
     res.status(500).json({ error: "Failed to sync deployment" });
+  }
+};
+
+export const explainDeploymentError = async (req, res) => {
+  try {
+    const { deploymentId } = req.params;
+    const deployment = await Deployment.findById(deploymentId);
+    
+    if (!deployment) return res.status(404).json({ error: "Deployment not found" });
+    if (deployment.userId.toString() !== req.user.userId.toString()) return res.status(403).json({ error: "Access denied" });
+    if (deployment.status !== 'failed' && deployment.status !== 'warning') {
+      return res.status(400).json({ error: "Explanation is only available for failed or warning deployments" });
+    }
+
+    if (deployment.aiAnalysis && deployment.aiAnalysis.summary) {
+       return res.json({ success: true, aiAnalysis: deployment.aiAnalysis });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+       return res.status(500).json({ error: "AI Provider not configured. Please add GEMINI_API_KEY." });
+    }
+
+    const sanitizedLogs = sanitizeDeploymentLogs(deployment.logs || []);
+    const logString = sanitizedLogs.map(l => `[${l.level}] ${l.step}: ${l.message}`).join('\n');
+
+    const prompt = `You are an AI deployment assistant. Analyze the failed deployment and return ONLY valid JSON.
+Do not wrap it in markdown code blocks. Just return the raw JSON object.
+
+Deployment Type: ${deployment.type}
+Status: ${deployment.status}
+Failed Step: ${deployment.finalSummary?.failedStep || 'Unknown'}
+Frontend URL: ${deployment.finalSummary?.frontendUrl ? 'available' : 'missing'}
+Backend URL: ${deployment.finalSummary?.backendUrl ? 'available' : 'missing'}
+
+Health Checks:
+Backend: ${deployment.healthCheck?.backend?.status || 'N/A'}
+Frontend: ${deployment.healthCheck?.frontend?.status || 'N/A'}
+CORS: ${deployment.healthCheck?.cors?.status || 'N/A'}
+Database: ${deployment.healthCheck?.database?.status || 'N/A'}
+
+Logs:
+${logString}
+
+Task:
+Explain the failure in simple language and suggest practical fixes for a developer.
+If the failure is specifically a missing backend health route (/health missing), set fixType to "missing_health_route".
+If the failure is specifically a missing or wrong CORS configuration preventing frontend from calling backend, set fixType to "cors_origin".
+For ONLY these two issues, set canAutoFix to true and provide a fixPlan.
+For all other issues, set canAutoFix to false, fixType to "unknown" and fixPlan to null.
+
+Response MUST match this exact JSON schema:
+{
+  "summary": "String",
+  "likelyCause": "String",
+  "failedStep": "String",
+  "suggestedFixes": ["String", "String"],
+  "severity": "low" | "medium" | "high",
+  "canAutoFix": Boolean,
+  "fixType": "missing_health_route" | "cors_origin" | "unknown",
+  "fixPlan": {
+    "targetFiles": ["String"],
+    "changes": ["String"]
+  } | null
+}`;
+
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+
+    const result = await model.generateContent(prompt);
+    let jsonText = result.response.text().trim();
+    
+    if (jsonText.startsWith('```json')) {
+       jsonText = jsonText.replace(/^```json/, '').replace(/```$/, '').trim();
+    } else if (jsonText.startsWith('```')) {
+       jsonText = jsonText.replace(/^```/, '').replace(/```$/, '').trim();
+    }
+
+    let aiAnalysis;
+    try {
+      aiAnalysis = JSON.parse(jsonText);
+      aiAnalysis.generatedAt = new Date();
+    } catch (e) {
+      console.error("AI JSON parse error:", e, "Text:", jsonText);
+      aiAnalysis = {
+         summary: "Deployment failed, but AI explanation could not be parsed.",
+         likelyCause: "Unknown configuration or runtime error.",
+         failedStep: deployment.finalSummary?.failedStep || "unknown",
+         suggestedFixes: ["Check the logs manually.", "Verify environment variables."],
+         severity: "medium",
+         canAutoFix: false,
+         generatedAt: new Date()
+      };
+    }
+
+    deployment.aiAnalysis = aiAnalysis;
+    await deployment.save();
+
+    res.json({ success: true, aiAnalysis });
+  } catch (error) {
+    console.error("Explain error:", error);
+    res.status(500).json({ error: "Failed to generate AI explanation" });
+  }
+};
+
+export const retryDeployment = async (req, res) => {
+  try {
+    const { deploymentId } = req.params;
+    const oldDeployment = await Deployment.findById(deploymentId);
+    
+    if (!oldDeployment) return res.status(404).json({ error: "Deployment not found" });
+    if (oldDeployment.userId.toString() !== req.user.userId.toString()) return res.status(403).json({ error: "Access denied" });
+
+    req.params.projectId = oldDeployment.projectId.toString();
+    req.body = { retryOfDeploymentId: oldDeployment._id.toString() };
+
+    if (oldDeployment.type === 'frontend') {
+       return triggerFrontendDeployment(req, res);
+    } else if (oldDeployment.type === 'backend') {
+       return triggerBackendDeployment(req, res);
+    } else {
+       return triggerFullDeployment(req, res);
+    }
+  } catch (error) {
+    console.error("Retry deployment error:", error);
+    res.status(500).json({ error: "Failed to retry deployment" });
   }
 };

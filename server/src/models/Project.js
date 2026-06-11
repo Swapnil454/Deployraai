@@ -37,6 +37,10 @@ const ProjectSchema = new mongoose.Schema({
     backendStartCommand: { type: String },
     installCommand: { type: String },
     outputDirectory: { type: String },
+    
+    vercelProjectId: { type: String },
+    renderServiceId: { type: String },
+    railwayProjectId: { type: String },
 
     envVariables: {
       frontend: [EnvVariableSchema],

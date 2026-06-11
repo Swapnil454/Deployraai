@@ -127,3 +127,7 @@ export const getVercelDeployments = async (token, projectId) => {
   // Fetch latest deployments for the project
   return vercelAPI(token, 'GET', `/v6/deployments?projectId=${projectId}&limit=1`);
 };
+
+export const getVercelProjects = async (token) => {
+  return vercelAPI(token, 'GET', '/v9/projects');
+};

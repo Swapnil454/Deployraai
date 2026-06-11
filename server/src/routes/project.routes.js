@@ -9,11 +9,14 @@ router.use(requireAuth);
 
 router.post("/analyze", analyzeProject);
 
+import { listProjectFixPrs } from "../controllers/fixPr.controller.js";
+
 // Phase 3 Endpoints
 router.post("/", createProject);
 router.get("/", getProjects);
 router.get("/:id", getProject);
 router.put("/:id/config", updateProjectConfig);
 router.get("/:projectId/deployments", getProjectDeployments);
+router.get("/:projectId/fix-prs", listProjectFixPrs);
 
 export default router;
