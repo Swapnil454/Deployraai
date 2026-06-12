@@ -87,3 +87,11 @@ export const updateRenderEnvVars = async (token, serviceId, envVars) => {
 export const triggerRenderDeploy = async (token, serviceId) => {
   return renderAPI(token, 'POST', `/services/${serviceId}/deploys`, { clearCache: "do_not_clear" });
 };
+
+export const getRenderServices = async (token) => {
+  return renderAPI(token, 'GET', '/services?limit=100');
+};
+
+export const getRenderService = async (token, serviceId) => {
+  return renderAPI(token, 'GET', `/services/${serviceId}`);
+};

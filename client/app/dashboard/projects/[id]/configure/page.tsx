@@ -1,19 +1,24 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, Loader2, Save, Plus, Trash2, Upload, Eye, EyeOff, CheckCircle2, AlertCircle, Edit2 } from "lucide-react";
 
 export default function ConfigureProjectPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const projectId = params.id;
+  const deploymentIdQuery = searchParams.get('deploymentId');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [project, setProject] = useState<any>(null);
   const [toast, setToast] = useState<{message: string, type: "success"|"error"} | null>(null);
+
+  const [configFixSuggestion, setConfigFixSuggestion] = useState<any>(null);
+  const [applyingFix, setApplyingFix] = useState(false);
 
   const [editingEnvs, setEditingEnvs] = useState<{frontend: boolean, backend: boolean, shared: boolean}>({
     frontend: false,
@@ -57,7 +62,69 @@ export default function ConfigureProjectPage() {
 
   useEffect(() => {
     fetchProject();
-  }, [projectId]);
+    if (deploymentIdQuery) {
+      fetchDeploymentForFix();
+    }
+  }, [projectId, deploymentIdQuery]);
+
+  const fetchDeploymentForFix = async () => {
+    try {
+       const res = await fetch(`http://localhost:5000/api/deployments/${deploymentIdQuery}`, { credentials: "include" });
+       if (res.ok) {
+          const data = await res.json();
+          if (data.aiAnalysis?.configFixSuggestion) {
+             setConfigFixSuggestion(data.aiAnalysis.configFixSuggestion);
+          }
+       }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleApplyConfigFix = async () => {
+   if (!configFixSuggestion) return;
+   
+   if (configFixSuggestion.fieldPath.includes('envVariables')) {
+      const pathParts = configFixSuggestion.fieldPath.split('.');
+      const group = pathParts[2]; // backend
+      const key = pathParts[3]; // MONGO_URI
+      
+      const updated = { ...config };
+      updated.envVariables[group].push({ key, value: "", isSecret: true });
+      setConfig(updated);
+      setConfigFixSuggestion(null);
+      showToast(`Added ${key} to ${group} environment variables. Please enter the value and save.`, "success");
+      return;
+   }
+   
+   try {
+     setApplyingFix(true);
+     const res = await fetch(`http://localhost:5000/api/deployments/${deploymentIdQuery}/apply-config-fix`, {
+        method: "POST",
+        credentials: "include"
+     });
+     if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.error || "Failed to apply fix");
+     }
+     const data = await res.json();
+     showToast("Configuration updated successfully. You can retry deployment now.", "success");
+     
+     const mappedConfig = { ...data.project.configuration };
+     const mapEnvs = (envs: any[]) => envs.map(e => ({ ...e, showValue: false }));
+     if (mappedConfig.envVariables) {
+        mappedConfig.envVariables.frontend = mapEnvs(mappedConfig.envVariables.frontend || []);
+        mappedConfig.envVariables.backend = mapEnvs(mappedConfig.envVariables.backend || []);
+        mappedConfig.envVariables.shared = mapEnvs(mappedConfig.envVariables.shared || []);
+     }
+     setConfig(mappedConfig);
+     setConfigFixSuggestion(null);
+   } catch(err: any) {
+     showToast(err.message || "Failed to apply fix", "error");
+   } finally {
+     setApplyingFix(false);
+   }
+  };
 
   const fetchProject = async (silent = false) => {
     try {
@@ -220,6 +287,44 @@ export default function ConfigureProjectPage() {
       
       <div className="mx-auto w-full max-w-4xl">
         
+        {configFixSuggestion && (
+          <div className="mb-8 rounded-xl border border-orange-500/30 bg-orange-500/10 p-6 shadow-lg shadow-orange-500/5">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertCircle className="h-6 w-6 text-orange-400" />
+              <h2 className="text-lg font-bold text-white">Suggested Configuration Fix</h2>
+            </div>
+            
+            <div className="space-y-4">
+              <p className="text-sm text-zinc-300 bg-black/40 p-4 rounded-lg border border-zinc-800/50">
+                <span className="font-semibold text-white block mb-1">Issue:</span>
+                {configFixSuggestion.reason}
+              </p>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-red-500/5 border border-red-500/20 p-4 rounded-lg">
+                  <p className="text-xs text-zinc-500 font-semibold mb-1 uppercase tracking-wider">Current Value</p>
+                  <code className="text-red-400 text-sm">{configFixSuggestion.currentValue || 'None'}</code>
+                </div>
+                <div className="bg-emerald-500/5 border border-emerald-500/20 p-4 rounded-lg">
+                  <p className="text-xs text-zinc-500 font-semibold mb-1 uppercase tracking-wider">Suggested Value</p>
+                  <code className="text-emerald-400 text-sm">{configFixSuggestion.suggestedValue || 'None'}</code>
+                </div>
+              </div>
+
+              <div className="pt-4 flex justify-end">
+                <button
+                  onClick={handleApplyConfigFix}
+                  disabled={applyingFix}
+                  className="flex items-center gap-2 rounded-lg bg-orange-600 px-6 py-2.5 text-sm font-bold text-white transition-colors hover:bg-orange-500 disabled:opacity-50 shadow-lg shadow-orange-500/20"
+                >
+                  {applyingFix ? <Loader2 className="h-4 w-4 animate-spin" /> : <Edit2 className="h-4 w-4" />}
+                  Apply Fix
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
           <div className="flex items-center gap-4">

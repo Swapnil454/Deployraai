@@ -280,6 +280,30 @@ export default function DeployPage() {
                 </div>
               )}
 
+              {/* Full Stack Action */}
+              {frontendPlatform !== "none" && backendPlatform !== "none" && (
+                <>
+                  <div className="border-t border-zinc-800"></div>
+                  <div>
+                    <h3 className="text-sm font-medium text-zinc-400 mb-2">Full Stack Orchestration</h3>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className={`h-2 w-2 rounded-full ${isFrontendConnected && isBackendConnected ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                        <span className="text-sm text-white">{isFrontendConnected && isBackendConnected ? 'Ready for Full Pipeline' : 'Requires both connections'}</span>
+                      </div>
+                      <button 
+                        onClick={() => triggerDeployment('full')}
+                        disabled={!isFrontendConnected || !isBackendConnected || deploying}
+                        className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {deploying && !activeDeploymentId ? <Loader2 className="h-4 w-4 animate-spin inline mr-2" /> : null}
+                        Deploy Full Stack
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
               {frontendPlatform === "none" && backendPlatform === "none" && (
                 <div className="text-sm text-zinc-500 text-center py-4">
                   No deployment platforms configured. Go back to Configuration to select platforms.
@@ -293,19 +317,48 @@ export default function DeployPage() {
         {/* Logs Panel */}
         {activeDeploymentId && deploymentLogs && (
           <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
-            <h2 className="text-lg font-semibold text-white mb-4">Deployment Logs</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-semibold text-white">Deployment Logs</h2>
+              {deploymentLogs.logs.length > 0 && (
+                 <span className="text-sm font-medium text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20 capitalize">
+                    Current Step: {deploymentLogs.logs[deploymentLogs.logs.length - 1].step.replace(/_/g, ' ')}
+                 </span>
+              )}
+            </div>
             <div className="flex justify-between items-center mb-4 text-sm">
               <span className="text-zinc-400 capitalize">{deploymentLogs.type} deployment • {deploymentLogs.platform}</span>
               <div className="flex items-center gap-4">
-                {deploymentLogs.deploymentUrl && (
-                  <a href={deploymentLogs.deploymentUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
+                {deploymentLogs.finalSummary?.frontendUrl ? (
+                  <a href={deploymentLogs.finalSummary.frontendUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
                     <ExternalLink className="h-3 w-3" /> Visit App
                   </a>
+                ) : (
+                  deploymentLogs.deploymentUrl && (
+                    <a href={deploymentLogs.deploymentUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
+                      <ExternalLink className="h-3 w-3" /> Visit App
+                    </a>
+                  )
                 )}
-                {deploymentLogs.providerDashboardUrl && (
-                  <a href={deploymentLogs.providerDashboardUrl} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
-                    <ExternalLink className="h-3 w-3" /> Dashboard
+                {deploymentLogs.finalSummary?.backendUrl && (
+                  <a href={deploymentLogs.finalSummary.backendUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
+                    <ExternalLink className="h-3 w-3" /> Backend API
                   </a>
+                )}
+                {deploymentLogs.finalSummary?.frontendDashboardUrl && (
+                  <a href={deploymentLogs.finalSummary.frontendDashboardUrl} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
+                    <ExternalLink className="h-3 w-3" /> Frontend Dashboard
+                  </a>
+                )}
+                {deploymentLogs.finalSummary?.backendDashboardUrl ? (
+                  <a href={deploymentLogs.finalSummary.backendDashboardUrl} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
+                    <ExternalLink className="h-3 w-3" /> Backend Dashboard
+                  </a>
+                ) : (
+                  deploymentLogs.providerDashboardUrl && (
+                    <a href={deploymentLogs.providerDashboardUrl} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
+                      <ExternalLink className="h-3 w-3" /> Dashboard
+                    </a>
+                  )
                 )}
                 <span className={`px-3 py-1 rounded-full text-xs font-medium uppercase tracking-wider
                   ${deploymentLogs.status === 'success' || deploymentLogs.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 
@@ -336,9 +389,67 @@ export default function DeployPage() {
           </div>
         )}
 
+        {/* Final Deployment Summary Card */}
+        {activeDeploymentId && deploymentLogs && (deploymentLogs.status === 'success' || deploymentLogs.status === 'failed') && deploymentLogs.finalSummary && (
+          <div className={`mt-8 rounded-xl border p-6 ${deploymentLogs.status === 'success' ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-red-500/20 bg-red-500/5'}`}>
+            <h2 className={`text-xl font-bold mb-6 flex items-center gap-2 ${deploymentLogs.status === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
+              {deploymentLogs.status === 'success' ? <CheckCircle2 className="h-6 w-6" /> : null}
+              {deploymentLogs.status === 'success' ? 'Deployment Complete' : 'Deployment Failed'}
+            </h2>
+            
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-zinc-500">Frontend URL</p>
+                  <a href={deploymentLogs.finalSummary.frontendUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 text-sm flex items-center gap-1">
+                    {deploymentLogs.finalSummary.frontendUrl} <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+                <div>
+                  <p className="text-sm text-zinc-500">Backend URL</p>
+                  <a href={deploymentLogs.finalSummary.backendUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 text-sm flex items-center gap-1">
+                    {deploymentLogs.finalSummary.backendUrl} <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+                <div>
+                  <p className="text-sm text-zinc-500">Duration</p>
+                  <p className="text-sm text-white">{Math.round(deploymentLogs.finalSummary.durationMs / 1000)} seconds</p>
+                </div>
+              </div>
+              
+              <div className="space-y-3 bg-black/40 p-4 rounded-lg border border-zinc-800">
+                <p className="text-sm font-medium text-zinc-400 border-b border-zinc-800 pb-2">Health Checks</p>
+                <HealthStatusRow label="Backend" data={deploymentLogs.healthCheck?.backend} />
+                <HealthStatusRow label="Frontend" data={deploymentLogs.healthCheck?.frontend} />
+                <HealthStatusRow label="CORS" data={deploymentLogs.healthCheck?.cors} />
+                <HealthStatusRow label="Database" data={deploymentLogs.healthCheck?.database} />
+              </div>
+            </div>
+
+            {deploymentLogs.status === 'failed' && deploymentLogs.finalSummary.failedStep && (
+              <div className="mt-6 p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                <p className="text-sm font-bold text-red-400 mb-1">Failed Step: {deploymentLogs.finalSummary.failedStep}</p>
+                <p className="text-sm text-red-300 mb-3">{deploymentLogs.finalSummary.failureReason}</p>
+                <div className="p-3 bg-red-950/50 rounded border border-red-500/10">
+                  <p className="text-xs font-semibold text-zinc-400 mb-1">Suggested Fix</p>
+                  <p className="text-sm text-white">{deploymentLogs.finalSummary.suggestedFix}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Recent Deployments */}
         <div className="mt-8 space-y-6">
-          <h2 className="text-lg font-semibold text-white">Recent Deployments</h2>
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold text-white">Recent Deployments</h2>
+            <button 
+              onClick={() => router.push(`/dashboard/projects/${projectId}/deployments`)}
+              className="text-sm text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1"
+            >
+              View Deployment History <ExternalLink className="h-3 w-3" />
+            </button>
+          </div>
           {deploymentsHistory.length === 0 ? (
             <div className="text-sm text-zinc-500 text-center py-8 rounded-xl border border-zinc-800 border-dashed">No deployments yet</div>
           ) : (
@@ -453,6 +564,30 @@ function ConnectionRow({ name, status, subtext, action, customActionText = "Conn
           </button>
         ) : (
           <span className="text-sm text-zinc-500 px-3 py-1">Not connected</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HealthStatusRow({ label, data }: any) {
+  if (!data) return null;
+  const colors = {
+    passed: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+    warning: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20',
+    failed: 'text-red-400 bg-red-500/10 border-red-500/20',
+    skipped: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',
+    unknown: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',
+  };
+  const colorClass = (colors as any)[data.status] || colors.unknown;
+
+  return (
+    <div className="flex justify-between items-center text-sm py-1 border-b border-zinc-800/50 last:border-0">
+      <span className="text-zinc-300">{label}</span>
+      <div className="text-right flex flex-col items-end">
+        <span className={`px-2 py-0.5 rounded text-xs border ${colorClass} uppercase tracking-wider font-medium`}>{data.status}</span>
+        {(data.status === 'warning' || data.status === 'failed') && data.message && (
+          <p className="text-xs text-zinc-500 mt-1 max-w-[200px] truncate" title={data.message}>{data.message}</p>
         )}
       </div>
     </div>

@@ -4,8 +4,11 @@ import {
   triggerBackendDeployment,
   triggerFullDeployment,
   getDeployment,
-  syncDeployment
+  syncDeployment,
+  explainDeploymentError,
+  retryDeployment
 } from "../controllers/deployment.controller.js";
+import { applyConfigFix } from "../controllers/configFix.controller.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
@@ -18,5 +21,12 @@ router.post("/:projectId/full", triggerFullDeployment);
 
 router.get("/:deploymentId", getDeployment);
 router.post("/:deploymentId/sync", syncDeployment);
+router.post("/:deploymentId/explain-error", explainDeploymentError);
+router.post("/:deploymentId/retry", retryDeployment);
+router.post("/:deploymentId/apply-config-fix", applyConfigFix);
+
+// Auto-Fix PR route
+import { createFixPr } from "../controllers/fixPr.controller.js";
+router.post("/:deploymentId/create-fix-pr", createFixPr);
 
 export default router;
