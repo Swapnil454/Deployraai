@@ -80,6 +80,8 @@ const DeploymentSchema = new mongoose.Schema({
   finalSummary: {
     frontendUrl: { type: String },
     backendUrl: { type: String },
+    frontendDashboardUrl: { type: String },
+    backendDashboardUrl: { type: String },
     status: { type: String },
     durationMs: { type: Number },
     failedStep: { type: String },
@@ -100,12 +102,21 @@ const DeploymentSchema = new mongoose.Schema({
     suggestedFixes: [{ type: String }],
     severity: { type: String, enum: ['low', 'medium', 'high'] },
     canAutoFix: { type: Boolean, default: false },
-    fixType: { type: String, enum: ['missing_health_route', 'cors_origin', 'unknown'] },
+    fixType: { type: String, enum: ['missing_health_route', 'cors_origin', 'build_error', 'unknown'] },
     fixPlan: {
       targetFiles: [{ type: String }],
       changes: [{ type: String }]
     },
     fixStatus: { type: String, enum: ['not_requested', 'pr_created', 'failed', 'merged_unknown'], default: 'not_requested' },
+    failureCategory: { type: String, enum: ['repo_issue', 'config_issue', 'provider_issue', 'platform_internal_bug', 'unknown'] },
+    userAction: { type: String, enum: ['create_fix_pr', 'update_config', 'reconnect_provider', 'contact_support', 'retry'] },
+    configFixSuggestion: {
+      fieldPath: { type: String },
+      currentValue: { type: mongoose.Schema.Types.Mixed },
+      suggestedValue: { type: mongoose.Schema.Types.Mixed },
+      reason: { type: String },
+      confidence: { type: String, enum: ['low', 'medium', 'high'] }
+    },
     generatedAt: { type: Date }
   },
 

@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import Deployment from "../models/Deployment.js";
 import Project from "../models/Project.js";
 import ConnectedAccount from "../models/ConnectedAccount.js";
-import { decryptSecret } from "../utils/encryption.js";
+import { decryptSecret, encryptSecret } from "../utils/encryption.js";
 import {
   getRailwayToken,
   getRailwayMe,
@@ -21,7 +21,8 @@ import {
   getRenderDeploys,
   updateRenderEnvVars,
   triggerRenderDeploy,
-  getRenderServices
+  getRenderServices,
+  getRenderService
 } from "../services/providers/render.service.js";
 import {
   getVercelToken,
@@ -30,7 +31,9 @@ import {
   updateVercelEnvVars,
   triggerVercelDeploy,
   getVercelDeployments,
-  getVercelProjects
+  getVercelProjects,
+  getVercelProject,
+  getVercelDeploymentEvents
 } from "../services/providers/vercel.service.js";
 import { checkBackendHealth, checkFrontendHealth, checkCors } from "../services/healthCheck.service.js";
 import { sanitizeDeploymentLogs } from "../utils/sanitizeLogs.js";
@@ -223,15 +226,21 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
 
         await appendLog('info', 'env_setup', 'Preparing frontend environment variables');
         const envVars = [];
-        if (project.configuration.envVariables && project.configuration.envVariables.frontend) {
-           for (const env of project.configuration.envVariables.frontend) {
-              envVars.push({ key: env.key, value: decryptSecret(env.valueEncrypted) });
-           }
-        }
+         if (project.configuration.envVariables && project.configuration.envVariables.frontend) {
+            for (const env of project.configuration.envVariables.frontend) {
+               if (env.key && env.key.trim() !== '') {
+                 envVars.push({ key: env.key, value: decryptSecret(env.valueEncrypted) });
+               }
+            }
+         }
+         if (injectedEnvVars && injectedEnvVars.length > 0) {
+            envVars.push(...injectedEnvVars);
+         }
         await appendLog('success', 'env_setup', 'Frontend variables prepared');
 
         let providerServiceId = project.configuration.vercelProjectId;
         let deploymentUrl;
+        let dashboardUrl;
         let projectName = `deploy-ai-${projectId.toString().slice(-6)}`;
 
         try {
@@ -336,7 +345,43 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
                   await appendLog('success', 'deploy_trigger', 'Vercel deployment is READY and successful!');
                   if (latest.url) {
                     deploymentUrl = `https://${latest.url}`;
-                    await Deployment.findByIdAndUpdate(deployment._id, { deploymentUrl, providerUrl: deploymentUrl });
+                    let currentDashUrl = `https://vercel.com/${user.username}/${projectName}`;
+                    if (latest.inspectorUrl) {
+                      currentDashUrl = latest.inspectorUrl;
+                    }
+                    dashboardUrl = currentDashUrl;
+                    try {
+                      const projectData = await getVercelProject(token, providerServiceId);
+                      let prodUrl = null;
+                      if (projectData && projectData.targets && projectData.targets.production) {
+                        const prodTarget = projectData.targets.production;
+                        if (prodTarget.alias && prodTarget.alias.length > 0) {
+                          const mainAlias = prodTarget.alias.find(a => a.includes('vercel.app')) || prodTarget.alias[0];
+                          if (mainAlias) {
+                            prodUrl = `https://${mainAlias}`;
+                          }
+                        }
+                        if (!prodUrl && prodTarget.url) {
+                          prodUrl = `https://${prodTarget.url}`;
+                        }
+                      }
+                      
+                      if (prodUrl) {
+                         deploymentUrl = prodUrl;
+                         await appendLog('info', 'deploy_trigger', `Fetched Vercel production URL: ${deploymentUrl}`);
+                      } else if (projectName) {
+                         deploymentUrl = `https://${projectName}.vercel.app`;
+                         await appendLog('info', 'deploy_trigger', `Fallback Vercel production URL: ${deploymentUrl}`);
+                      }
+                    } catch (e) {
+                      console.warn("Failed to get production url from vercel:", e.message);
+                      if (projectName) deploymentUrl = `https://${projectName}.vercel.app`;
+                    }
+                    await Deployment.findByIdAndUpdate(deployment._id, { 
+                      deploymentUrl, 
+                      providerUrl: deploymentUrl,
+                      providerDashboardUrl: currentDashUrl
+                    });
                   }
                   break;
                 } else if (status === 'ERROR' || status === 'CANCELED') {
@@ -344,6 +389,20 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
                   finalStatus = 'failed';
                   finalErrorMessage = `Vercel build failed with status: ${status}`;
                   await appendLog('error', 'deploy_trigger', finalErrorMessage);
+                  
+                  try {
+                    const deployId = latest.uid || latest.id;
+                    const events = await getVercelDeploymentEvents(token, deployId);
+                    if (events && events.length > 0) {
+                      const logMsgs = events.map(e => e.text || e.message || JSON.stringify(e)).filter(Boolean);
+                      if (logMsgs.length > 0) {
+                        await appendLog('error', 'deploy_trigger', `Vercel Build Logs:\n${logMsgs.join('\n')}`);
+                      }
+                    }
+                  } catch (logErr) {
+                    console.error("Failed to fetch Vercel logs:", logErr.message);
+                  }
+                  
                   break;
                 }
               }
@@ -357,20 +416,24 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
             await appendLog('error', 'deploy_trigger', finalErrorMessage);
           }
 
-          await Deployment.findByIdAndUpdate(deployment._id, {
-            status: finalStatus,
-            errorMessage: finalErrorMessage,
-            completedAt: new Date()
-          });
-           return deploymentUrl;
+          if (deployment.type !== 'full') {
+            await Deployment.findByIdAndUpdate(deployment._id, {
+              status: finalStatus,
+              errorMessage: finalErrorMessage,
+              completedAt: new Date()
+            });
+          }
+          return { url: deploymentUrl, dashboardUrl };
 
         } catch (svcErr) {
           if (svcErr.message.includes('repo') || svcErr.message.includes('github') || svcErr.message.includes('installation')) {
              await appendLog('error', 'project_create', 'GitHub repo linking failed. Please connect repository manually in Vercel.', { error: svcErr.message });
-             await Deployment.findByIdAndUpdate(deployment._id, {
-                status: 'failed',
-                errorMessage: 'Awaiting manual GitHub connection'
-             });
+             if (deployment.type !== 'full') {
+               await Deployment.findByIdAndUpdate(deployment._id, {
+                  status: 'failed',
+                  errorMessage: 'Awaiting manual GitHub connection'
+               });
+             }
           } else {
              throw svcErr;
           }
@@ -379,7 +442,9 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
       } catch (err) {
         console.error("Frontend Background deployment error:", err);
         await appendLog('error', 'system', `Deployment failed: ${err.message}`);
-        await Deployment.findByIdAndUpdate(deployment._id, { status: 'failed', errorMessage: err.message, completedAt: new Date() });
+        if (deployment.type !== 'full') {
+          await Deployment.findByIdAndUpdate(deployment._id, { status: 'failed', errorMessage: err.message, completedAt: new Date() });
+        }
       }
 
 };
@@ -388,6 +453,7 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
   const projectId = project._id;
   const userId = project.userId;
   const platform = project.configuration.backendPlatform;
+  const projectName = `deploy-ai-${projectId.toString().slice(-6)}`;
 
       const appendLog = async (level, step, message, metadata={}) => {
         await Deployment.findByIdAndUpdate(deployment._id, {
@@ -469,7 +535,14 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
           const varsMap = {};
           if (project.configuration.envVariables && project.configuration.envVariables.backend) {
              for (const env of project.configuration.envVariables.backend) {
-                varsMap[env.key] = decryptSecret(env.valueEncrypted);
+                if (env.key && env.key.trim() !== '') {
+                  varsMap[env.key] = decryptSecret(env.valueEncrypted);
+                }
+             }
+          }
+          if (injectedEnvVars && injectedEnvVars.length > 0) {
+             for (const env of injectedEnvVars) {
+                varsMap[env.key] = env.value;
              }
           }
           await setRailwayVariables(token, providerProjectId, providerEnvironmentId, providerServiceId, varsMap);
@@ -489,141 +562,99 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
              providerUrl: `https://railway.app/project/${providerProjectId}`,
              providerDashboardUrl: `https://railway.app/project/${providerProjectId}`
           });
+          
+          return { url: null, dashboardUrl: `https://railway.app/project/${providerProjectId}` };
         } else if (platform === 'render') {
+          await appendLog('info', 'provider_connection', 'Connecting to Render...');
           const token = await getRenderToken(userId);
-          if (!token) throw new Error("Render is not connected. Please connect it first.");
+          if (!token) throw new Error('Render is not connected. Please connect Render account first.');
           
-          await appendLog('info', 'provider_connection', 'Render connection found');
-          await appendLog('info', 'provider_connection', 'Render token decrypted');
-          
-          await appendLog('info', 'provider_connection', 'Authenticating with Render API');
+          await appendLog('info', 'provider_connection', 'Render connected. Fetching owner info...');
           const owner = await getRenderOwner(token);
-          await appendLog('success', 'provider_connection', 'Render API authentication verified', { ownerId: owner.id, email: owner.email });
-
-          await appendLog('info', 'env_setup', 'Preparing backend environment variables');
-          const envVars = [];
+          
+          const varsMap = {};
           if (project.configuration.envVariables && project.configuration.envVariables.backend) {
              for (const env of project.configuration.envVariables.backend) {
-                envVars.push({ key: env.key, value: decryptSecret(env.valueEncrypted) });
+                if (env.key && env.key.trim() !== '') {
+                  varsMap[env.key] = decryptSecret(env.valueEncrypted);
+                }
              }
           }
-          await appendLog('success', 'env_setup', 'Backend variables prepared');
-
-          try {
-            // Find if we already have a Render service for this project
-            let providerServiceId = project.configuration.renderServiceId;
-        let deploymentUrl;
-
-        if (providerServiceId) {
-           const prevDepl = await Deployment.findOne({ projectId, platform: { $in: ['render', 'multiple'] }, providerServiceId }).sort({ createdAt: -1 });
-           deploymentUrl = prevDepl?.deploymentUrl;
-               
-               await appendLog('info', 'project_update', `Found existing Render service. Updating environment variables...`);
-               await updateRenderEnvVars(token, providerServiceId, envVars);
-               
-               await appendLog('info', 'deploy_trigger', 'Triggering redeployment on existing Render service...');
-               await triggerRenderDeploy(token, providerServiceId);
-               await appendLog('success', 'deploy_trigger', 'Render redeployment started successfully');
-            } else {
-               await appendLog('info', 'project_create', 'Creating new Render Web Service linked to GitHub...');
-               try {
+          if (injectedEnvVars && injectedEnvVars.length > 0) {
+             for (const env of injectedEnvVars) {
+                varsMap[env.key] = env.value;
+             }
+          }
+          const envVarsArray = Object.entries(varsMap).map(([key, value]) => ({ key, value }));
+          
+          let providerServiceId = deployment.providerServiceId || project.configuration.renderServiceId;
+          
+          if (!providerServiceId) {
+             await appendLog('info', 'project_create', 'Creating Render Web Service...');
              const renderSvc = await createRenderWebService(token, owner.id, {
-               name: `deploy-ai-${projectId.toString().slice(-6)}`,
+               name: projectName,
                repoFullName: project.repoFullName,
                branch: project.selectedBranch,
                rootDir: project.configuration.backendRoot,
                buildCommand: project.configuration.backendBuildCommand,
                startCommand: project.configuration.backendStartCommand,
-               envVars
+               envVars: envVarsArray
              });
              providerServiceId = renderSvc.id || renderSvc.service?.id;
-             deploymentUrl = renderSvc.serviceDetails?.url || renderSvc.service?.serviceDetails?.url;
              project.configuration.renderServiceId = providerServiceId;
              await project.save();
-             await appendLog('success', 'project_create', 'Render Web Service created successfully');
-           } catch (createErr) {
-             if (createErr.message.includes('already in use') || createErr.message.includes('exists')) {
-               await appendLog('info', 'project_update', 'Render service already exists. Linking...');
-               const servicesRes = await getRenderServices(token);
-               const existingSvc = servicesRes.find(s => s.service.name === `deploy-ai-${projectId.toString().slice(-6)}`);
-               if (existingSvc) {
-                 providerServiceId = existingSvc.service.id;
-                 deploymentUrl = existingSvc.service.serviceDetails?.url;
-                 project.configuration.renderServiceId = providerServiceId;
-                 await project.save();
-                 await appendLog('success', 'project_update', 'Linked successfully. Triggering redeployment...');
-                 await updateRenderEnvVars(token, providerServiceId, envVars);
-               } else { throw createErr; }
-             } else { throw createErr; }
-           }
-               await appendLog('success', 'deploy_trigger', 'Render deployment automatically started');
-            }
-
-            await Deployment.findByIdAndUpdate(deployment._id, {
-               providerServiceId,
-               deploymentUrl,
-               providerUrl: deploymentUrl,
-               providerDashboardUrl: `https://dashboard.render.com/web/${providerServiceId}`
-            });
-
-            // Poll Render deployment status
-            await appendLog('info', 'deploy_trigger', 'Waiting for Render build to complete...');
-            let isCompleted = false;
-            let finalStatus = 'failed';
-            let finalErrorMessage = null;
-            
-            for (let i = 0; i < 60; i++) { // Max 5 minutes (60 * 5s)
-              await new Promise(resolve => setTimeout(resolve, 5000));
-              try {
-                const deploys = await getRenderDeploys(token, providerServiceId);
-                if (deploys && deploys.length > 0) {
-                  const status = deploys[0].deploy.status;
-                  if (status === 'live') {
-                    isCompleted = true;
-                    finalStatus = 'completed';
-                    await appendLog('success', 'deploy_trigger', 'Render deployment is LIVE and successful!');
-                    break;
-                  } else if (status === 'build_failed' || status === 'update_failed' || status === 'canceled') {
-                    isCompleted = true;
-                    finalStatus = 'failed';
-                    finalErrorMessage = `Render build failed with status: ${status}`;
-                    await appendLog('error', 'deploy_trigger', finalErrorMessage);
-                    break;
-                  }
-                }
-              } catch (pollErr) {
-                console.error("Render polling error:", pollErr.message);
-              }
-            }
-
-            if (!isCompleted) {
-              finalErrorMessage = 'Render deployment timed out after 5 minutes';
-              await appendLog('error', 'deploy_trigger', finalErrorMessage);
-            }
-
-            await Deployment.findByIdAndUpdate(deployment._id, {
-              status: finalStatus,
-              errorMessage: finalErrorMessage,
-              completedAt: new Date()
-            });
-           return deploymentUrl;
-
-          } catch (svcErr) {
-            // Render rejects private repos if not authorized. We must catch this.
-            if (svcErr.message.includes('repo')) {
-               throw new Error(`Render failed to link GitHub repo. Ensure ${project.repoFullName} is Public on GitHub! Render API Error: ${svcErr.message}`);
-            }
-            throw svcErr;
+             await appendLog('success', 'project_create', 'Render Service created successfully');
+             
+             if (renderSvc.service?.url) {
+                return { url: renderSvc.service.url, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
+             }
+          } else {
+             await appendLog('info', 'env_setup', 'Updating Render environment variables...');
+             await updateRenderEnvVars(token, providerServiceId, envVarsArray);
+             await appendLog('success', 'env_setup', 'Backend variables updated');
+             
+             await appendLog('info', 'deploy_trigger', 'Triggering Render deployment');
+             await triggerRenderDeploy(token, providerServiceId);
+             await appendLog('success', 'deploy_trigger', 'Render deployment started');
           }
+          
+          let renderUrl = null;
+          try {
+            const svcDetails = await getRenderService(token, providerServiceId);
+            let rawUrl = null;
+            if (svcDetails && svcDetails.serviceDetails && svcDetails.serviceDetails.url) {
+               rawUrl = svcDetails.serviceDetails.url;
+            } else if (svcDetails && svcDetails.service && svcDetails.service.url) {
+               rawUrl = svcDetails.service.url;
+            } else if (svcDetails && svcDetails.url) {
+               rawUrl = svcDetails.url;
+            }
+            
+            if (rawUrl) {
+               renderUrl = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+            }
+          } catch(e) {
+            console.warn("Failed to fetch render service details to get URL:", e.message);
+          }
+
+          await Deployment.findByIdAndUpdate(deployment._id, {
+             providerServiceId,
+             providerUrl: `https://dashboard.render.com/web/${providerServiceId}`,
+             providerDashboardUrl: `https://dashboard.render.com/web/${providerServiceId}`
+          });
+          
+          return { url: renderUrl, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
         }
       } catch (err) {
         console.error("Background deploy error:", err);
-        await Deployment.findByIdAndUpdate(deployment._id, {
-          status: 'failed',
-          errorMessage: err.message,
-          completedAt: new Date(),
-          $push: { logs: createLog('error', 'deploy_trigger', err.message) }
-        });
+        if (deployment.type !== 'full') {
+          await Deployment.findByIdAndUpdate(deployment._id, {
+            status: 'failed',
+            errorMessage: err.message,
+            completedAt: new Date()
+          });
+        }
+        return { url: null, dashboardUrl: null };
       }
 
 };
@@ -681,7 +712,9 @@ export const triggerFullDeployment = async (req, res) => {
 
        try {
          await appendLog('info', 'deploying_backend', 'Step 1: Executing Backend Deployment');
-         let backendUrl = await executeBackendDeployment(deployment, project, []);
+         let backendRes = await executeBackendDeployment(deployment, project, []);
+         let backendUrl = backendRes?.url;
+         let backendDashboardUrl = backendRes?.dashboardUrl;
          
          if (!backendUrl) {
             await appendLog('warning', 'deploying_backend', 'Backend deployed but URL was not returned. Proceeding anyway.');
@@ -690,9 +723,19 @@ export const triggerFullDeployment = async (req, res) => {
             await appendLog('success', 'deploying_backend', `Backend deployed successfully at ${backendUrl}`);
          }
 
-         await appendLog('info', 'deploying_frontend', 'Step 2: Executing Frontend Deployment with NEXT_PUBLIC_API_URL injected');
-         const injectedFrontendEnv = [{ key: 'NEXT_PUBLIC_API_URL', value: backendUrl }];
-         let frontendUrl = await executeFrontendDeployment(deployment, project, injectedFrontendEnv);
+         // Find the correct Frontend ENV key for Backend URL (e.g., VITE_API_URL, NEXT_PUBLIC_API_URL)
+         let frontendApiUrlKey = 'NEXT_PUBLIC_API_URL';
+         if (project.configuration.envVariables && project.configuration.envVariables.frontend) {
+            const possibleFrontendKeys = ['VITE_API_URL', 'REACT_APP_API_URL', 'API_URL', 'NEXT_PUBLIC_API_URL'];
+            const existingFrontendKey = project.configuration.envVariables.frontend.find(e => possibleFrontendKeys.includes(e.key));
+            if (existingFrontendKey) frontendApiUrlKey = existingFrontendKey.key;
+         }
+         
+         await appendLog('info', 'deploying_frontend', `Step 2: Executing Frontend Deployment with ${frontendApiUrlKey} injected`);
+         const injectedFrontendEnv = [{ key: frontendApiUrlKey, value: backendUrl }];
+         let frontendRes = await executeFrontendDeployment(deployment, project, injectedFrontendEnv);
+         let frontendUrl = frontendRes?.url;
+         let frontendDashboardUrl = frontendRes?.dashboardUrl;
 
          if (!frontendUrl) {
             await appendLog('warning', 'deploying_frontend', 'Frontend deployed but URL was not returned. Proceeding anyway.');
@@ -701,9 +744,46 @@ export const triggerFullDeployment = async (req, res) => {
             await appendLog('success', 'deploying_frontend', `Frontend deployment completed successfully. URL: ${frontendUrl}`);
          }
 
-         await appendLog('info', 'updating_backend_cors', 'Step 3: Redeploying Backend with CORS_ORIGIN injected');
-         const injectedBackendEnv = [{ key: 'CORS_ORIGIN', value: frontendUrl }];
+         // Find the correct Backend ENV key for Frontend URL (e.g., CLIENT_URL, CORS_ORIGIN)
+         let backendCorsKey = 'CORS_ORIGIN';
+         if (project.configuration.envVariables && project.configuration.envVariables.backend) {
+            const possibleBackendKeys = ['CLIENT_URL', 'FRONTEND_URL', 'ORIGIN', 'CORS_ORIGIN'];
+            const existingBackendKey = project.configuration.envVariables.backend.find(e => possibleBackendKeys.includes(e.key));
+            if (existingBackendKey) backendCorsKey = existingBackendKey.key;
+         }
+
+         await appendLog('info', 'updating_backend_cors', `Step 3: Redeploying Backend with ${backendCorsKey} injected`);
+         const injectedBackendEnv = [{ key: backendCorsKey, value: frontendUrl }];
          await executeBackendDeployment(deployment, project, injectedBackendEnv);
+
+         // Sync automatically linked URLs back to Database so Dashboard UI is accurate
+         let dbUpdated = false;
+         if (project.configuration.envVariables) {
+             if (project.configuration.envVariables.frontend) {
+                 const fKey = project.configuration.envVariables.frontend.find(e => e.key === frontendApiUrlKey);
+                 if (fKey) {
+                     fKey.valueEncrypted = encryptSecret(backendUrl);
+                     dbUpdated = true;
+                 } else {
+                     project.configuration.envVariables.frontend.push({ key: frontendApiUrlKey, valueEncrypted: encryptSecret(backendUrl), isSecret: false });
+                     dbUpdated = true;
+                 }
+             }
+             if (project.configuration.envVariables.backend) {
+                 const bKey = project.configuration.envVariables.backend.find(e => e.key === backendCorsKey);
+                 if (bKey) {
+                     bKey.valueEncrypted = encryptSecret(frontendUrl);
+                     dbUpdated = true;
+                 } else {
+                     project.configuration.envVariables.backend.push({ key: backendCorsKey, valueEncrypted: encryptSecret(frontendUrl), isSecret: false });
+                     dbUpdated = true;
+                 }
+             }
+             if (dbUpdated) {
+                 await project.save();
+                 await appendLog('info', 'sync_env', 'Synchronized deployment URLs back to project configuration.');
+             }
+         }
 
          // --- HEALTH CHECKS ---
          await appendLog('info', 'checking_backend', 'Step 4: Running Backend Health Check');
@@ -748,6 +828,8 @@ export const triggerFullDeployment = async (req, res) => {
          const finalSummary = {
              frontendUrl,
              backendUrl,
+             frontendDashboardUrl,
+             backendDashboardUrl,
              durationMs: Date.now() - new Date(deployment.startedAt).getTime(),
          };
 
@@ -788,6 +870,7 @@ export const triggerFullDeployment = async (req, res) => {
          await Deployment.findByIdAndUpdate(deployment._id, { 
             status: finalStatus, 
             deploymentUrl: frontendUrl,
+            providerDashboardUrl: frontendDashboardUrl || backendDashboardUrl, // Keep a primary one for fallback
             healthCheck: healthCheckSummary,
             finalSummary,
             completedAt: new Date(),
@@ -897,6 +980,90 @@ export const explainDeploymentError = async (req, res) => {
     const sanitizedLogs = sanitizeDeploymentLogs(deployment.logs || []);
     const logString = sanitizedLogs.map(l => `[${l.level}] ${l.step}: ${l.message}`).join('\n');
 
+    const { isPlatformInternalBug, extractErrorStack } = await import('../utils/extractErrorStack.js');
+    if (isPlatformInternalBug(deployment.logs || [])) {
+       const { default: PlatformBugReport } = await import('../models/PlatformBugReport.js');
+       
+       const stackTrace = extractErrorStack(deployment.logs || [], deployment.finalSummary?.failureReason);
+       
+       const aiAnalysis = {
+         summary: "DeployAI encountered an internal function reference error or missing component.",
+         likelyCause: "An internal bug occurred within the DeployAI platform during this deployment step.",
+         failedStep: deployment.finalSummary?.failedStep || 'Unknown',
+         suggestedFixes: ["A bug report has been generated. Our engineering team has been notified.", "Please try deploying again later or contact support."],
+         severity: "high",
+         canAutoFix: false,
+         fixType: "unknown",
+         failureCategory: "platform_internal_bug",
+         userAction: "contact_support",
+         generatedAt: new Date()
+       };
+
+       deployment.aiAnalysis = aiAnalysis;
+       await deployment.save();
+
+       await PlatformBugReport.create({
+         userId: req.user.userId,
+         projectId: deployment.projectId,
+         deploymentId: deployment._id,
+         errorMessage: stackTrace.split('\n')[0] || "Internal Platform Error",
+         stackTraceSanitized: stackTrace,
+         sanitizedLogs: sanitizedLogs,
+         failedStep: deployment.finalSummary?.failedStep || 'Unknown',
+       });
+
+       return res.json({ success: true, aiAnalysis });
+    }
+
+    if (logString.includes("Render deployment is not available in this version")) {
+       const aiAnalysis = {
+         summary: "Render backend deployment is not yet supported in this version.",
+         likelyCause: "Render automation is still under development.",
+         failedStep: "backend_deployment",
+         suggestedFixes: ["Go to project configuration.", "Change backend platform to Railway.", "Save and deploy again."],
+         severity: "medium",
+         canAutoFix: false,
+         fixType: "unknown",
+         failureCategory: "provider_issue",
+         userAction: "update_config",
+         generatedAt: new Date()
+       };
+       deployment.aiAnalysis = aiAnalysis;
+       await deployment.save();
+       return res.json({ success: true, aiAnalysis });
+    }
+
+    const Project = (await import('../models/Project.js')).default;
+    const project = await Project.findById(deployment.projectId);
+
+    if (project && project.analysis?.backend?.dependencies?.mongoose) {
+       const hasMongoUri = project.configuration?.envVariables?.backend?.some(e => e.key === 'MONGO_URI');
+       if (!hasMongoUri && (logString.toLowerCase().includes('mongo') || logString.toLowerCase().includes('database') || logString.toLowerCase().includes('timeout'))) {
+         const aiAnalysis = {
+           summary: "Missing database connection string.",
+           likelyCause: "The backend uses Mongoose but MONGO_URI is missing from the environment variables.",
+           failedStep: "health_check",
+           suggestedFixes: ["Go to project configuration.", "Add MONGO_URI to backend environment variables.", "Redeploy."],
+           severity: "high",
+           canAutoFix: false,
+           fixType: "unknown",
+           failureCategory: "config_issue",
+           userAction: "update_config",
+           configFixSuggestion: {
+             fieldPath: "configuration.envVariables.backend.MONGO_URI",
+             currentValue: null,
+             suggestedValue: "",
+             reason: "MONGO_URI is required for MongoDB/Mongoose backend deployment.",
+             confidence: "high"
+           },
+           generatedAt: new Date()
+         };
+         deployment.aiAnalysis = aiAnalysis;
+         await deployment.save();
+         return res.json({ success: true, aiAnalysis });
+       }
+    }
+
     const prompt = `You are an AI deployment assistant. Analyze the failed deployment and return ONLY valid JSON.
 Do not wrap it in markdown code blocks. Just return the raw JSON object.
 
@@ -917,10 +1084,30 @@ ${logString}
 
 Task:
 Explain the failure in simple language and suggest practical fixes for a developer.
+Also classify the error strictly into one of the following failure categories:
+1. repo_issue: Problem is inside the user's GitHub repo (e.g., compilation error, syntax error, missing package, missing /health, CORS).
+2. config_issue: Problem is from user deployment config (e.g., missing env vars, wrong build command).
+3. provider_issue: Problem is from the hosting provider (e.g., token expired, quota exceeded).
+4. unknown: Unclear origin.
+
+Assign the most appropriate userAction based on the failureCategory:
+- repo_issue: "create_fix_pr" (if auto-fixable) or "retry"
+- config_issue: "update_config"
+- provider_issue: "reconnect_provider" or "retry"
+- unknown: "retry"
+
 If the failure is specifically a missing backend health route (/health missing), set fixType to "missing_health_route".
 If the failure is specifically a missing or wrong CORS configuration preventing frontend from calling backend, set fixType to "cors_origin".
-For ONLY these two issues, set canAutoFix to true and provide a fixPlan.
+If the failure is a compilation error, syntax error, missing npm package, or TypeScript error in the user's code, set fixType to "build_error".
+If the failure is a backend port binding error where the server hardcodes a port instead of using process.env.PORT, set fixType to "port_binding_error".
+For ONLY these FOUR issues (missing_health_route, cors_origin, build_error, port_binding_error), set canAutoFix to true and provide a fixPlan. 
+For "build_error", you MUST populate fixPlan.targetFiles with the specific file(s) that need fixing based on the build logs (e.g. "client/src/App.js", "client/package.json").
 For all other issues, set canAutoFix to false, fixType to "unknown" and fixPlan to null.
+
+If failureCategory is "config_issue", you MUST provide a configFixSuggestion. 
+A configFixSuggestion targets a specific field in the project's configuration to update.
+Allowed field paths: "configuration.backendStartCommand", "configuration.frontendBuildCommand", "configuration.frontendRoot", "configuration.backendRoot".
+Do NOT suggest values for sensitive environment variables (set suggestedValue to "").
 
 Response MUST match this exact JSON schema:
 {
@@ -930,17 +1117,45 @@ Response MUST match this exact JSON schema:
   "suggestedFixes": ["String", "String"],
   "severity": "low" | "medium" | "high",
   "canAutoFix": Boolean,
-  "fixType": "missing_health_route" | "cors_origin" | "unknown",
+  "fixType": "missing_health_route" | "cors_origin" | "build_error" | "port_binding_error" | "unknown",
   "fixPlan": {
     "targetFiles": ["String"],
     "changes": ["String"]
+  } | null,
+  "failureCategory": "repo_issue" | "config_issue" | "provider_issue" | "platform_internal_bug" | "unknown",
+  "userAction": "create_fix_pr" | "update_config" | "reconnect_provider" | "contact_support" | "retry",
+  "configFixSuggestion": {
+    "fieldPath": "String",
+    "currentValue": "String | null",
+    "suggestedValue": "String | null",
+    "reason": "String",
+    "confidence": "low" | "medium" | "high"
   } | null
 }`;
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
-    const result = await model.generateContent(prompt);
+    const generateWithRetry = async (promptText) => {
+      const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"];
+      for (const modelName of fallbackModels) {
+        const currentModel = genAI.getGenerativeModel({ model: modelName });
+        for (let i = 0; i < 3; i++) {
+          try {
+            return await currentModel.generateContent(promptText);
+          } catch (err) {
+            if (err.status === 503 || err.status === 429) {
+              console.log(`[AI Analysis] API error ${err.status} with ${modelName}, retrying in ${(i + 1) * 3} seconds...`);
+              await new Promise(res => setTimeout(res, (i + 1) * 3000));
+            } else {
+              throw err;
+            }
+          }
+        }
+      }
+      throw new Error("All Gemini models exhausted or failed with 503/429");
+    };
+
+    const result = await generateWithRetry(prompt);
     let jsonText = result.response.text().trim();
     
     if (jsonText.startsWith('```json')) {

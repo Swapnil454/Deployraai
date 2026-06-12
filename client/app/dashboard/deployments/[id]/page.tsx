@@ -195,7 +195,7 @@ export default function DeploymentDetailsPage() {
                 </ul>
               </div>
 
-              <div className="flex gap-4 pt-4 border-t border-indigo-500/10 items-center justify-between">
+                <div className="flex gap-4 pt-4 border-t border-indigo-500/10 items-center justify-between">
                 <div className="flex gap-4">
                   <div className="flex items-center gap-2 text-sm">
                     <span className="text-zinc-500">Severity:</span>
@@ -203,6 +203,18 @@ export default function DeploymentDetailsPage() {
                       {aiAnalysis.severity}
                     </span>
                   </div>
+                  {aiAnalysis.failureCategory && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-zinc-500">Category:</span>
+                      <span className={`capitalize font-medium ${
+                        aiAnalysis.failureCategory === 'platform_internal_bug' ? 'text-red-400' : 
+                        aiAnalysis.failureCategory === 'config_issue' ? 'text-orange-400' : 
+                        aiAnalysis.failureCategory === 'provider_issue' ? 'text-yellow-400' : 'text-indigo-400'
+                      }`}>
+                        {aiAnalysis.failureCategory.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 text-sm">
                     <span className="text-zinc-500">Auto-fix Possible:</span>
                     <span className={`font-medium ${aiAnalysis.canAutoFix ? 'text-emerald-400' : 'text-zinc-400'}`}>
@@ -211,7 +223,8 @@ export default function DeploymentDetailsPage() {
                   </div>
                 </div>
 
-                {aiAnalysis.canAutoFix && aiAnalysis.fixStatus !== 'pr_created' && !fixPrData && (
+                {/* Conditional Actions Based on UserAction */}
+                {aiAnalysis.userAction === 'create_fix_pr' && aiAnalysis.canAutoFix && aiAnalysis.fixStatus !== 'pr_created' && !fixPrData && (
                   <button 
                     onClick={handleCreateFixPr}
                     disabled={creatingFix}
@@ -224,12 +237,55 @@ export default function DeploymentDetailsPage() {
                     )}
                   </button>
                 )}
+
+                {aiAnalysis.userAction === 'update_config' && (
+                  <button 
+                    onClick={() => router.push(`/dashboard/projects/${deployment?.projectId}/configure?deploymentId=${deploymentId}&fix=config`)}
+                    className="flex items-center gap-2 rounded-lg bg-orange-600 px-4 py-2 text-sm font-bold text-white hover:bg-orange-500 transition-colors shadow-lg shadow-orange-500/20"
+                  >
+                    ⚙️ Fix Configuration
+                  </button>
+                )}
+
+                {aiAnalysis.userAction === 'reconnect_provider' && (
+                  <button 
+                    onClick={() => router.push('/dashboard')}
+                    className="flex items-center gap-2 rounded-lg bg-yellow-600 px-4 py-2 text-sm font-bold text-white hover:bg-yellow-500 transition-colors shadow-lg shadow-yellow-500/20"
+                  >
+                    🔌 Reconnect Provider
+                  </button>
+                )}
+                
+                {(aiAnalysis.userAction === 'retry' || !aiAnalysis.userAction) && !aiAnalysis.canAutoFix && aiAnalysis.failureCategory !== 'platform_internal_bug' && (
+                   <button 
+                    onClick={handleRetryDeployment}
+                    disabled={retrying}
+                    className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500 transition-colors shadow-lg shadow-indigo-500/20"
+                  >
+                    {retrying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    Retry
+                  </button>
+                )}
               </div>
               
               {/* Note before creating PR */}
               {aiAnalysis.canAutoFix && aiAnalysis.fixStatus !== 'pr_created' && !fixPrData && (
                 <div className="text-xs text-indigo-300/60 mt-2 italic text-right">
                   DeployAI will create a new GitHub branch and open a pull request. It will not push to main.
+                </div>
+              )}
+
+              {/* Internal Bug Report Banner */}
+              {aiAnalysis.failureCategory === 'platform_internal_bug' && (
+                <div className="mt-6 p-5 rounded-lg bg-red-950/30 border border-red-500/30 flex items-start gap-3">
+                  <AlertTriangle className="h-6 w-6 text-red-400 shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="text-red-400 font-bold mb-1">DeployAI Internal Issue</h3>
+                    <p className="text-sm text-zinc-300 leading-relaxed">
+                      This looks like a DeployAI internal issue, not a problem with your repository.
+                      A bug report has been automatically created. Our engineering team has been notified.
+                    </p>
+                  </div>
                 </div>
               )}
 

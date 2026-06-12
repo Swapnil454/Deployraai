@@ -22,6 +22,22 @@ export class GitHubService {
     return res.data.object.sha;
   }
 
+  async getRepoTree(owner, repo, sha) {
+    try {
+      const res = await this.api.get(`/repos/${owner}/${repo}/git/trees/${sha}?recursive=1`);
+      if (res.data && res.data.tree) {
+        // Filter out typical noise directories to save tokens
+        return res.data.tree
+          .filter(item => item.type === 'blob' && !item.path.includes('node_modules/') && !item.path.includes('.git/') && !item.path.includes('dist/') && !item.path.includes('build/'))
+          .map(item => item.path);
+      }
+      return [];
+    } catch (err) {
+      console.error("Failed to get repo tree:", err.message);
+      return [];
+    }
+  }
+
   async createBranch(owner, repo, newBranchName, sourceSha) {
     await this.api.post(`/repos/${owner}/${repo}/git/refs`, {
       ref: `refs/heads/${newBranchName}`,

@@ -109,6 +109,7 @@ export const triggerVercelDeploy = async (token, config) => {
   const payload = {
     name: config.name,
     project: config.projectName, // The string ID or name of the project
+    target: "production",
     gitSource: {
       type: "github",
       repo: config.repoFullName,
@@ -130,4 +131,33 @@ export const getVercelDeployments = async (token, projectId) => {
 
 export const getVercelProjects = async (token) => {
   return vercelAPI(token, 'GET', '/v9/projects');
+};
+
+export const getVercelProject = async (token, projectId) => {
+  return vercelAPI(token, 'GET', `/v9/projects/${projectId}`);
+};
+
+export const getVercelDeploymentEvents = async (token, deploymentId) => {
+  const url = `https://api.vercel.com/v2/deployments/${deploymentId}/events`;
+  const options = {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  };
+  const response = await fetch(url, options);
+  const text = await response.text();
+  try {
+    const data = JSON.parse(text);
+    return Array.isArray(data) ? data : (data.events || []);
+  } catch (err) {
+    const lines = text.split('\n').filter(Boolean);
+    const events = [];
+    for (const line of lines) {
+      try {
+        events.push(JSON.parse(line));
+      } catch (e) {}
+    }
+    return events;
+  }
 };

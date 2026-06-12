@@ -328,15 +328,37 @@ export default function DeployPage() {
             <div className="flex justify-between items-center mb-4 text-sm">
               <span className="text-zinc-400 capitalize">{deploymentLogs.type} deployment • {deploymentLogs.platform}</span>
               <div className="flex items-center gap-4">
-                {deploymentLogs.deploymentUrl && (
-                  <a href={deploymentLogs.deploymentUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
+                {deploymentLogs.finalSummary?.frontendUrl ? (
+                  <a href={deploymentLogs.finalSummary.frontendUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
                     <ExternalLink className="h-3 w-3" /> Visit App
                   </a>
+                ) : (
+                  deploymentLogs.deploymentUrl && (
+                    <a href={deploymentLogs.deploymentUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
+                      <ExternalLink className="h-3 w-3" /> Visit App
+                    </a>
+                  )
                 )}
-                {deploymentLogs.providerDashboardUrl && (
-                  <a href={deploymentLogs.providerDashboardUrl} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
-                    <ExternalLink className="h-3 w-3" /> Dashboard
+                {deploymentLogs.finalSummary?.backendUrl && (
+                  <a href={deploymentLogs.finalSummary.backendUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
+                    <ExternalLink className="h-3 w-3" /> Backend API
                   </a>
+                )}
+                {deploymentLogs.finalSummary?.frontendDashboardUrl && (
+                  <a href={deploymentLogs.finalSummary.frontendDashboardUrl} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
+                    <ExternalLink className="h-3 w-3" /> Frontend Dashboard
+                  </a>
+                )}
+                {deploymentLogs.finalSummary?.backendDashboardUrl ? (
+                  <a href={deploymentLogs.finalSummary.backendDashboardUrl} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
+                    <ExternalLink className="h-3 w-3" /> Backend Dashboard
+                  </a>
+                ) : (
+                  deploymentLogs.providerDashboardUrl && (
+                    <a href={deploymentLogs.providerDashboardUrl} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onClick={(e) => e.stopPropagation()}>
+                      <ExternalLink className="h-3 w-3" /> Dashboard
+                    </a>
+                  )
                 )}
                 <span className={`px-3 py-1 rounded-full text-xs font-medium uppercase tracking-wider
                   ${deploymentLogs.status === 'success' || deploymentLogs.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 

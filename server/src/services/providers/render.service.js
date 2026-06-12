@@ -91,3 +91,7 @@ export const triggerRenderDeploy = async (token, serviceId) => {
 export const getRenderServices = async (token) => {
   return renderAPI(token, 'GET', '/services?limit=100');
 };
+
+export const getRenderService = async (token, serviceId) => {
+  return renderAPI(token, 'GET', `/services/${serviceId}`);
+};

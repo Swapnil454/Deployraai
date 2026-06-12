@@ -4,6 +4,7 @@ import User from "../models/User.js";
 import FixPullRequest from "../models/FixPullRequest.js";
 import { GitHubService } from "../services/providers/github.service.js";
 import { decryptSecret } from "../utils/encryption.js";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const BACKEND_ENTRY_FILES = [
   "backend/src/app.js",
@@ -78,6 +79,27 @@ function patchCors(content) {
   return newContent;
 }
 
+function patchPortBinding(content) {
+  let newContent = content;
+  
+  const constPortRegex = /(const|let|var)\s+(port|PORT)\s*=\s*(\d+)\s*;?/gi;
+  if (constPortRegex.test(newContent)) {
+    newContent = newContent.replace(constPortRegex, '$1 $2 = process.env.PORT || $3;');
+  }
+  
+  const listenRegex = /app\.listen\(\s*(\d+)\s*,/g;
+  if (listenRegex.test(newContent)) {
+    newContent = newContent.replace(listenRegex, 'app.listen(process.env.PORT || $1,');
+  }
+  
+  const listenRegexNoComma = /app\.listen\(\s*(\d+)\s*\)/g;
+  if (listenRegexNoComma.test(newContent)) {
+    newContent = newContent.replace(listenRegexNoComma, 'app.listen(process.env.PORT || $1)');
+  }
+  
+  return newContent !== content ? newContent : null;
+}
+
 function updateEnvExample(content, type) {
   let newContent = content || "";
   if (type === "backend") {
@@ -100,7 +122,7 @@ export const createFixPr = async (req, res) => {
     }
 
     const fixType = deployment.aiAnalysis.fixType;
-    if (!["missing_health_route", "cors_origin"].includes(fixType)) {
+    if (!["missing_health_route", "cors_origin", "build_error"].includes(fixType)) {
       return res.status(400).json({ error: "Fix type not supported yet." });
     }
 
@@ -117,7 +139,14 @@ export const createFixPr = async (req, res) => {
     const githubToken = decryptSecret(user.githubAccessTokenEncrypted);
     const github = new GitHubService(githubToken);
 
-    const { repoOwner, repoName } = deployment.source;
+    let { repoOwner, repoName, repoFullName } = deployment.source;
+    if (!repoOwner || !repoName) {
+       if (repoFullName) {
+         [repoOwner, repoName] = repoFullName.split('/');
+       } else {
+         return res.status(400).json({ error: "Repository information missing in deployment source." });
+       }
+    }
 
     const defaultBranch = await github.getDefaultBranch(repoOwner, repoName);
     const defaultSha = await github.getBranchSha(repoOwner, repoName, defaultBranch);
@@ -127,54 +156,158 @@ export const createFixPr = async (req, res) => {
     const newBranchName = `deployai/fix-${branchSuffix}-${timestamp}`;
     await github.createBranch(repoOwner, repoName, newBranchName, defaultSha);
 
-    const entryFile = await findEntryFile(github, repoOwner, repoName, newBranchName);
-    if (!entryFile) {
-      return res.status(400).json({ error: "Could not find a recognized backend entry file." });
-    }
-
-    let changedContent = null;
-    let commitMessage = "";
+    let filesChanged = [];
     let prTitle = "";
-    let envExampleChanged = false;
+    let prBody = "";
 
-    if (fixType === "missing_health_route") {
-      changedContent = patchHealthRoute(entryFile.content);
-      if (!changedContent) return res.status(400).json({ error: "Health route already exists. No PR needed." });
-      commitMessage = "fix: add backend health check endpoint";
-      prTitle = commitMessage;
-    } else if (fixType === "cors_origin") {
-      try {
-        changedContent = patchCors(entryFile.content);
-        commitMessage = "fix: configure CORS origin for deployed frontend";
-        prTitle = commitMessage;
-        envExampleChanged = true;
-      } catch (err) {
-        return res.status(400).json({ error: err.message });
+    if (fixType === "build_error") {
+      const targetFiles = deployment.aiAnalysis.fixPlan?.targetFiles || [];
+      if (targetFiles.length === 0) {
+        return res.status(400).json({ error: "No target files identified for build error fix." });
       }
-    }
 
-    await github.createOrUpdateFile(
-      repoOwner, repoName, entryFile.path,
-      commitMessage, changedContent, entryFile.sha, newBranchName
-    );
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({ error: "AI Provider not configured. Please add GEMINI_API_KEY." });
+      }
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
-    const filesChanged = [entryFile.path];
+      const logString = deployment.logs ? deployment.logs.map(l => `[${l.level}] ${l.step}: ${l.message}`).join('\n').substring(0, 5000) : "No logs";
 
-    if (envExampleChanged) {
-      const backendDir = entryFile.path.split('/')[0] === 'backend' ? 'backend' : (entryFile.path.split('/')[0] === 'server' ? 'server' : '');
-      const envFilePath = backendDir ? `${backendDir}/.env.example` : '.env.example';
+      const repoFiles = await github.getRepoTree(repoOwner, repoName, defaultSha);
+      const repoTreeContext = repoFiles.length > 0 
+        ? `\nRepository Structure (use this to verify exact import paths):\n${repoFiles.join('\n')}\n`
+        : "";
+
+      for (const filePath of targetFiles) {
+        const fileData = await github.getFileContent(repoOwner, repoName, filePath, newBranchName);
+        if (!fileData) continue;
+        
+        const prompt = `You are an expert AI code fixer.
+We encountered a build/compilation error during deployment.
+File: ${filePath}
+
+Original File Content:
+\`\`\`
+${fileData.content}
+\`\`\`
+${repoTreeContext}
+Deployment Error Logs:
+\`\`\`
+${logString}
+\`\`\`
+
+Task:
+Rewrite the file content to fix the compilation/syntax/dependency error.
+CRITICAL: If the error involves a missing import or file resolution issue, you MUST consult the "Repository Structure" above to write the exact correct relative path. Do NOT guess file paths.
+If the file is package.json and the error is a missing dependency, add the missing dependency to "dependencies".
+Return ONLY the raw new file content. Do NOT wrap it in markdown formatting blocks like \`\`\`javascript or \`\`\`json. Return the EXACT text to be saved to the file.`;
+
+      const generateWithRetry = async (promptText) => {
+        const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"];
+        for (const modelName of fallbackModels) {
+          const currentModel = genAI.getGenerativeModel({ model: modelName });
+          for (let i = 0; i < 3; i++) {
+            try {
+              return await currentModel.generateContent(promptText);
+            } catch (err) {
+              if (err.status === 503 || err.status === 429) {
+                console.log(`[Fix PR] API error ${err.status} with ${modelName}, retrying in ${(i + 1) * 3} seconds...`);
+                await new Promise(res => setTimeout(res, (i + 1) * 3000));
+              } else {
+                throw err;
+              }
+            }
+          }
+        }
+        throw new Error("All Gemini models exhausted or failed with 503/429");
+      };
+
+      const result = await generateWithRetry(prompt);
+        let newContent = result.response.text().trim();
+        
+        if (newContent.startsWith("\`\`\`")) {
+           const lines = newContent.split("\n");
+           lines.shift();
+           if (lines.length > 0 && lines[lines.length - 1].startsWith("\`\`\`")) lines.pop();
+           newContent = lines.join("\n");
+        }
+
+        if (newContent && newContent !== fileData.content) {
+           await github.createOrUpdateFile(
+              repoOwner, repoName, filePath,
+              `fix: resolve build error in ${filePath}`, newContent, fileData.sha, newBranchName
+           );
+           filesChanged.push(filePath);
+        }
+      }
+
+      if (filesChanged.length === 0) {
+        return res.status(400).json({ error: "AI could not generate a fix for the target files." });
+      }
+
+      prTitle = "fix: resolve build compilation errors";
+      prBody = `DeployAI detected a build compilation error.\n\nProblem:\n${deployment.aiAnalysis.summary || "Build failed."}\n\nFix:\nAI rewritten files: ${filesChanged.join(', ')}.\n\nRelated Deployment:\n${deploymentId}\n\n*Safety note: Please review AI generated code carefully.*`;
       
-      const envFile = await github.getFileContent(repoOwner, repoName, envFilePath, newBranchName);
-      const updatedEnv = updateEnvExample(envFile ? envFile.content : "", "backend");
-      
+    } else {
+      const entryFile = await findEntryFile(github, repoOwner, repoName, newBranchName);
+      if (!entryFile) {
+        return res.status(400).json({ error: "Could not find a recognized backend entry file." });
+      }
+
+      let changedContent = null;
+      let commitMessage = "";
+      let envExampleChanged = false;
+
+      if (fixType === "missing_health_route" || fixType === "port_binding_error") {
+        let currentContent = entryFile.content;
+        const portPatched = patchPortBinding(currentContent);
+        if (portPatched) currentContent = portPatched;
+        
+        const healthPatched = patchHealthRoute(currentContent);
+        if (healthPatched) currentContent = healthPatched;
+        
+        if (!portPatched && !healthPatched) {
+          return res.status(400).json({ error: "Health route already exists and port is already dynamic. No PR needed." });
+        }
+        
+        changedContent = currentContent;
+        commitMessage = "fix: ensure dynamic process.env.PORT and /health endpoint";
+        prTitle = commitMessage;
+      } else if (fixType === "cors_origin") {
+        try {
+          changedContent = patchCors(entryFile.content);
+          commitMessage = "fix: configure CORS origin for deployed frontend";
+          prTitle = commitMessage;
+          envExampleChanged = true;
+        } catch (err) {
+          return res.status(400).json({ error: err.message });
+        }
+      }
+
       await github.createOrUpdateFile(
-        repoOwner, repoName, envFilePath,
-        "chore: update .env.example for CORS", updatedEnv, envFile ? envFile.sha : null, newBranchName
+        repoOwner, repoName, entryFile.path,
+        commitMessage, changedContent, entryFile.sha, newBranchName
       );
-      filesChanged.push(envFilePath);
-    }
 
-    const prBody = `DeployAI detected a deployment verification issue.\n\nProblem:\n${deployment.aiAnalysis.summary || "Deployment check failed."}\n\nFix:\nApplied safe patch for \`${fixType}\`.\n\nRelated Deployment:\n${deploymentId}\n\n*Safety note: no secrets included*`;
+      filesChanged = [entryFile.path];
+
+      if (envExampleChanged) {
+        const backendDir = entryFile.path.split('/')[0] === 'backend' ? 'backend' : (entryFile.path.split('/')[0] === 'server' ? 'server' : '');
+        const envFilePath = backendDir ? `${backendDir}/.env.example` : '.env.example';
+        
+        const envFile = await github.getFileContent(repoOwner, repoName, envFilePath, newBranchName);
+        const updatedEnv = updateEnvExample(envFile ? envFile.content : "", "backend");
+        
+        await github.createOrUpdateFile(
+          repoOwner, repoName, envFilePath,
+          "chore: update .env.example for CORS", updatedEnv, envFile ? envFile.sha : null, newBranchName
+        );
+        filesChanged.push(envFilePath);
+      }
+
+      prBody = `DeployAI detected a deployment verification issue.\n\nProblem:\n${deployment.aiAnalysis.summary || "Deployment check failed."}\n\nFix:\nApplied safe patch for \`${fixType}\`.\n\nRelated Deployment:\n${deploymentId}\n\n*Safety note: no secrets included*`;
+    }
 
     const pr = await github.createPullRequest(repoOwner, repoName, prTitle, prBody, newBranchName, defaultBranch);
 
