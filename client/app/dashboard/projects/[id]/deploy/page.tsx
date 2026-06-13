@@ -40,6 +40,7 @@ export default function DeployPage() {
     fetchData();
     fetchDeploymentsHistory();
     fetchDomains();
+    fetchMonitors();
     
     const errorParam = searchParams.get('error');
     if (errorParam) {
