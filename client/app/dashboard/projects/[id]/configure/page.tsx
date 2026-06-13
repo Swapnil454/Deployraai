@@ -69,7 +69,7 @@ export default function ConfigureProjectPage() {
 
   const fetchDeploymentForFix = async () => {
     try {
-       const res = await fetch(`http://localhost:5000/api/deployments/${deploymentIdQuery}`, { credentials: "include" });
+       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/deployments/${deploymentIdQuery}`, { credentials: "include" });
        if (res.ok) {
           const data = await res.json();
           if (data.aiAnalysis?.configFixSuggestion) {
@@ -99,7 +99,7 @@ export default function ConfigureProjectPage() {
    
    try {
      setApplyingFix(true);
-     const res = await fetch(`http://localhost:5000/api/deployments/${deploymentIdQuery}/apply-config-fix`, {
+     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/deployments/${deploymentIdQuery}/apply-config-fix`, {
         method: "POST",
         credentials: "include"
      });
@@ -129,7 +129,7 @@ export default function ConfigureProjectPage() {
   const fetchProject = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      const res = await fetch(`http://localhost:5000/api/projects/${projectId}`, { credentials: "include" });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch project");
       const data = await res.json();
       setProject(data);
@@ -176,7 +176,7 @@ export default function ConfigureProjectPage() {
   const handleSave = async () => {
     try {
       setSaving(true);
-      const res = await fetch(`http://localhost:5000/api/projects/${projectId}/config`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/config`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

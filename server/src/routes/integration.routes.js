@@ -4,7 +4,8 @@ import {
   connectProvider,
   callbackProvider,
   disconnectProvider,
-  connectApiKey
+  connectApiKey,
+  getCloudflareZones
 } from '../controllers/integration.controller.js';
 import { requireAuth } from '../middleware/auth.middleware.js';
 
@@ -13,6 +14,8 @@ const router = express.Router();
 router.use(requireAuth);
 
 router.get('/status', getIntegrationStatus);
+
+router.get('/cloudflare/zones', getCloudflareZones);
 
 // API Key specific (Render, Railway)
 router.post('/:provider/connect-api-key', connectApiKey);

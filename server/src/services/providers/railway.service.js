@@ -195,3 +195,56 @@ export const getDeploymentStatus = async (token, deploymentId) => {
   `;
   return railwayGraphQL(token, query, { id: deploymentId });
 };
+
+export const addRailwayCustomDomain = async (token, environmentId, serviceId, domain) => {
+  const query = `
+    mutation customDomainCreate($input: CustomDomainCreateInput!) {
+      customDomainCreate(input: $input) {
+        id
+        domain
+        status
+      }
+    }
+  `;
+  return railwayGraphQL(token, query, { input: { environmentId, serviceId, domain } });
+};
+
+export const getRailwayCustomDomain = async (token, domainId) => {
+  const query = `
+    query customDomain($id: String!) {
+      customDomain(id: $id) {
+        id
+        domain
+        status
+      }
+    }
+  `;
+  return railwayGraphQL(token, query, { id: domainId });
+};
+
+export const listRailwayDomains = async (token, environmentId, serviceId) => {
+  const query = `
+    query customDomains($environmentId: String!, $serviceId: String!) {
+      customDomains(environmentId: $environmentId, serviceId: $serviceId) {
+        edges {
+          node {
+            id
+            domain
+            status
+          }
+        }
+      }
+    }
+  `;
+  return railwayGraphQL(token, query, { environmentId, serviceId });
+};
+
+export const validateRailwayToken = async (token) => {
+  try {
+    const query = `query { me { id name } }`;
+    const response = await railwayGraphQL(token, query);
+    return !!response.data?.me?.id;
+  } catch (error) {
+    return false;
+  }
+};

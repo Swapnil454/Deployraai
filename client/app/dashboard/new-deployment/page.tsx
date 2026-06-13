@@ -26,7 +26,7 @@ export default function NewDeploymentPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("http://localhost:5000/api/github/repos", { credentials: "include" });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || `${process.env.NEXT_PUBLIC_API_URL}`}/api/github/repos`, { credentials: "include" });
       if (!res.ok) {
         if (res.status === 401) throw new Error("GitHub connection expired. Please reconnect GitHub.");
         throw new Error("Failed to fetch repositories");
@@ -45,7 +45,7 @@ export default function NewDeploymentPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`http://localhost:5000/api/github/repos/${repo.owner}/${repo.name}/branches`, { credentials: "include" });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/github/repos/${repo.owner}/${repo.name}/branches`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch branches");
       const data = await res.json();
       setBranches(data);
@@ -67,7 +67,7 @@ export default function NewDeploymentPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("http://localhost:5000/api/projects/analyze", {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || `${process.env.NEXT_PUBLIC_API_URL}`}/api/projects/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -143,6 +143,16 @@ export default function NewDeploymentPage() {
               <h2 className="mb-4 text-lg font-semibold text-white">Select a Repository</h2>
               {loading ? (
                 <div className="flex py-12 justify-center"><Loader2 className="h-8 w-8 animate-spin text-indigo-500" /></div>
+              ) : error === "GitHub not connected" ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <p className="mb-4 text-zinc-400">Connect GitHub to access repositories and start deployments.</p>
+                  <a
+                    href={`${process.env.NEXT_PUBLIC_API_URL}/api/integrations/github/connect?returnTo=${encodeURIComponent(window.location.href)}`}
+                    className="rounded-lg bg-white px-6 py-2 text-sm font-medium text-black transition-all hover:bg-zinc-200 active:scale-[0.98]"
+                  >
+                    Connect GitHub
+                  </a>
+                </div>
               ) : repos.length === 0 ? (
                 <p className="text-zinc-400">No public repositories found. Private repos coming soon.</p>
               ) : (
@@ -284,7 +294,7 @@ export default function NewDeploymentPage() {
                   onClick={async () => {
                     try {
                       setLoading(true);
-                      const res = await fetch("http://localhost:5000/api/projects", {
+                      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || `${process.env.NEXT_PUBLIC_API_URL}`}/api/projects`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         credentials: "include",

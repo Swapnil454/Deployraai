@@ -1,10 +1,102 @@
 import axios from "axios";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import { getAuth } from "../config/firebaseAdmin.js";
 import { encryptSecret } from "../utils/encryption.js";
 
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 const COOKIE_NAME = process.env.COOKIE_NAME || "deployai_token";
+
+export const firebaseLogin = async (req, res) => {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(400).json({ error: "Missing idToken" });
+
+  try {
+    // 1. Verify token with Firebase Admin
+    const decodedToken = await getAuth().verifyIdToken(idToken);
+    const { uid, email, name, picture, firebase } = decodedToken;
+    
+    if (!email) {
+       return res.status(400).json({ error: "Email is required from identity provider." });
+    }
+
+    // Determine specific sub-provider if possible
+    const signInProvider = firebase?.sign_in_provider;
+    let providerName = 'firebase_email';
+    if (signInProvider === 'google.com') providerName = 'firebase_google';
+    if (signInProvider === 'github.com') providerName = 'github';
+
+    // 2. Email-first lookup
+    let user = await User.findOne({ email });
+
+    if (user) {
+      // 3. User exists, preserve role and update providers array safely
+      if (!user.authProviders) {
+        user.authProviders = [];
+      }
+      
+      const existingProviderIndex = user.authProviders.findIndex(
+        p => p.providerUserId === uid && p.provider === providerName
+      );
+
+      if (existingProviderIndex !== -1) {
+        user.authProviders[existingProviderIndex].connectedAt = new Date();
+        user.authProviders[existingProviderIndex].email = email;
+      } else {
+        user.authProviders.push({
+          provider: providerName,
+          providerUserId: uid,
+          email: email
+        });
+      }
+      
+      if (!user.avatar && picture) user.avatar = picture;
+      if (!user.name && name) user.name = name;
+      
+      await user.save();
+    } else {
+      // 4. Create new user with role="user"
+      user = await User.create({
+        name: name || email.split('@')[0],
+        email: email,
+        avatar: picture,
+        role: "user",
+        authProviders: [{
+          provider: providerName,
+          providerUserId: uid,
+          email: email
+        }]
+      });
+    }
+
+    // 5. Issue the standard DeployAI JWT
+    const jwtPayload = { userId: user._id, role: user.role };
+    const jwtSecret = process.env.JWT_SECRET || 'fallback_secret_do_not_use_in_prod';
+    const jwtToken = jwt.sign(jwtPayload, jwtSecret, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+
+    const isProd = process.env.NODE_ENV === "production";
+    res.cookie(COOKIE_NAME, jwtToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar
+      }
+    });
+  } catch (error) {
+    console.error("Firebase Login Error:", error);
+    res.status(401).json({ error: error.message || "Invalid Firebase token" });
+  }
+};
 
 export const githubLogin = (req, res) => {
   // Generate random state to protect against CSRF
@@ -25,6 +117,18 @@ export const githubLogin = (req, res) => {
 
 export const githubCallback = async (req, res) => {
   const { code, state } = req.query;
+  
+  // 1. Check if this is an INTEGRATION connection (new flow)
+  if (req.cookies.oauth_state_github && state === req.cookies.oauth_state_github) {
+    req.params.provider = 'github';
+    const { requireAuth } = await import('../middleware/auth.middleware.js');
+    return requireAuth(req, res, async () => {
+      const { callbackProvider } = await import('./integration.controller.js');
+      return callbackProvider(req, res);
+    });
+  }
+
+  // 2. Otherwise, treat as LEGACY login flow
   const storedState = req.cookies.oauth_state;
 
   if (!state || state !== storedState) {
@@ -124,6 +228,11 @@ export const me = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
     
+    // Check ConnectedAccount for GitHub status in addition to legacy field
+    const { default: ConnectedAccount } = await import("../models/ConnectedAccount.js");
+    const ghAccount = await ConnectedAccount.findOne({ userId: req.user.userId, provider: 'github', status: 'connected' });
+    const isGithubConnected = !!ghAccount || user.githubConnected;
+
     res.json({
       id: user._id,
       name: user.name,
@@ -131,7 +240,7 @@ export const me = async (req, res) => {
       avatar: user.avatar,
       githubUsername: user.githubUsername,
       role: user.role,
-      githubConnected: user.githubConnected,
+      githubConnected: isGithubConnected,
       vercelConnected: user.vercelConnected,
       renderConnected: user.renderConnected,
       cloudflareConnected: user.cloudflareConnected

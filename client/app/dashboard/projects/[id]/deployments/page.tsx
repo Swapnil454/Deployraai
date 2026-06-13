@@ -19,7 +19,7 @@ export default function DeploymentsHistoryPage() {
   const fetchHistory = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`http://localhost:5000/api/projects/${projectId}/deployments`, { credentials: "include" });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/deployments`, { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         setDeployments(data);

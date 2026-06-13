@@ -18,8 +18,12 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "firebase-admin": "^14.0.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.7.0",
-    "nodemon": "^3.1.14"
+    "node-cron": "^4.2.1",
+    "nodemon": "^3.1.14",
+    "resend": "^6.12.4",
+    "uuid": "^14.0.0"
   }
 }
