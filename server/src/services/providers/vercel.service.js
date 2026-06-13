@@ -161,3 +161,28 @@ export const getVercelDeploymentEvents = async (token, deploymentId) => {
     return events;
   }
 };
+
+export const addVercelDomain = async (token, projectId, domain) => {
+  const payload = { name: domain };
+  const data = await vercelAPI(token, 'POST', `/v10/projects/${projectId}/domains`, payload);
+  return data;
+};
+
+export const getVercelDomain = async (token, projectId, domain) => {
+  const data = await vercelAPI(token, 'GET', `/v9/projects/${projectId}/domains/${domain}`);
+  return data;
+};
+
+export const removeVercelDomain = async (token, projectId, domain) => {
+  const data = await vercelAPI(token, 'DELETE', `/v9/projects/${projectId}/domains/${domain}`);
+  return data;
+};
+
+export const validateVercelToken = async (token) => {
+  try {
+    await vercelAPI(token, 'GET', `/v2/user`);
+    return true;
+  } catch (error) {
+    return false;
+  }
+};

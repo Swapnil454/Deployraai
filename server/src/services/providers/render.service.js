@@ -93,5 +93,32 @@ export const getRenderServices = async (token) => {
 };
 
 export const getRenderService = async (token, serviceId) => {
-  return renderAPI(token, 'GET', `/services/${serviceId}`);
+  const data = await renderAPI(token, 'GET', `/services/${serviceId}`);
+  return data;
+};
+
+export const addRenderCustomDomain = async (token, serviceId, domain) => {
+  const payload = { name: domain };
+  const data = await renderAPI(token, 'POST', `/services/${serviceId}/custom-domains`, payload);
+  return data;
+};
+
+export const getRenderCustomDomain = async (token, serviceId, customDomainId) => {
+  const data = await renderAPI(token, 'GET', `/services/${serviceId}/custom-domains/${customDomainId}`);
+  return data;
+};
+
+export const removeRenderCustomDomain = async (token, serviceId, customDomainId) => {
+  if (!customDomainId) return;
+  const data = await renderAPI(token, 'DELETE', `/services/${serviceId}/custom-domains/${customDomainId}`);
+  return data;
+};
+
+export const validateRenderToken = async (token) => {
+  try {
+    const data = await renderAPI(token, 'GET', '/owners');
+    return Array.isArray(data) && data.length > 0;
+  } catch (error) {
+    return false;
+  }
 };

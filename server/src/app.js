@@ -7,6 +7,8 @@ import projectRoutes from "./routes/project.routes.js";
 import integrationRoutes from "./routes/integration.routes.js";
 import fixPrRoutes from "./routes/fixPr.routes.js";
 import deploymentRoutes from "./routes/deployment.routes.js";
+import domainRoutes from "./routes/domain.routes.js";
+import monitoringRoutes from "./routes/monitoring.routes.js";
 
 const app = express();
 
@@ -26,6 +28,8 @@ app.use("/api/projects", projectRoutes);
 app.use("/api/integrations", integrationRoutes);
 app.use("/api/deployments", deploymentRoutes);
 app.use("/api/fix-prs", fixPrRoutes);
+app.use("/api", domainRoutes);
+app.use("/api", monitoringRoutes);
 
 app.get("/", (req, res) => {
     res.send({

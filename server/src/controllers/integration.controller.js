@@ -2,6 +2,10 @@ import crypto from "crypto";
 import ConnectedAccount from "../models/ConnectedAccount.js";
 import User from "../models/User.js";
 import { encryptSecret } from "../utils/encryption.js";
+import { validateRenderToken } from '../services/providers/render.service.js';
+import { validateRailwayToken } from '../services/providers/railway.service.js';
+import { validateCloudflareToken, getCloudflareZones as fetchCloudflareZones, getCloudflareToken } from '../services/providers/cloudflare.service.js';
+import { validateVercelToken } from '../services/providers/vercel.service.js';
 
 const getOauthProviders = () => ({
   vercel: {
@@ -45,7 +49,8 @@ export const getIntegrationStatus = async (req, res) => {
       vercel: { connected: false, providerType: "oauth" },
       netlify: { connected: false, providerType: "oauth" },
       railway: { connected: false, providerType: "api_key" },
-      render: { connected: false, providerType: "api_key" }
+      render: { connected: false, providerType: "api_key" },
+      cloudflare: { connected: false, providerType: "api_key" }
     };
 
     for (const acc of accounts) {
@@ -176,10 +181,23 @@ export const connectApiKey = async (req, res) => {
     const { provider } = req.params;
     const { apiKey } = req.body;
     if (!apiKey) return res.status(400).json({ error: "API key is required" });
-    if (!['render', 'railway', 'vercel'].includes(provider)) {
+    if (!['render', 'railway', 'vercel', 'cloudflare'].includes(provider)) {
       return res.status(400).json({ error: "Invalid provider for API key connection" });
     }
     
+    let isValid = false;
+    if (provider === 'render') {
+      isValid = await validateRenderToken(apiKey);
+    } else if (provider === 'railway') {
+      isValid = await validateRailwayToken(apiKey);
+    } else if (provider === 'vercel') {
+      isValid = await validateVercelToken(apiKey);
+    } else if (provider === 'cloudflare') {
+      isValid = await validateCloudflareToken(apiKey);
+    }
+
+    if (!isValid) return res.status(400).json({ error: "Invalid API key" });
+
     await ConnectedAccount.findOneAndUpdate(
       { userId: req.user.userId, provider },
       {
@@ -191,8 +209,22 @@ export const connectApiKey = async (req, res) => {
       { upsert: true, new: true }
     );
 
-    res.json({ success: true });
+    res.json({ success: true, message: `Successfully connected ${provider}` });
   } catch (error) {
-    res.status(500).json({ error: `Failed to save ${req.params.provider} API key` });
+    console.error(`Connect ${req.params.provider} error:`, error);
+    res.status(500).json({ error: `Failed to connect ${req.params.provider}` });
+  }
+};
+
+export const getCloudflareZones = async (req, res) => {
+  try {
+    const token = await getCloudflareToken(req.user.userId);
+    if (!token) return res.status(401).json({ error: "Cloudflare not connected" });
+    
+    const zones = await fetchCloudflareZones(token);
+    res.json({ success: true, zones });
+  } catch (error) {
+    console.error("Fetch Cloudflare zones error:", error);
+    res.status(500).json({ error: "Failed to fetch Cloudflare zones" });
   }
 };
