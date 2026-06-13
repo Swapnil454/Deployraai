@@ -26,7 +26,7 @@ export default function DeploymentDetailsPage() {
   const fetchDeployment = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`http://localhost:5000/api/deployments/${deploymentId}`, { credentials: "include" });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/deployments/${deploymentId}`, { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         setDeployment(data);
@@ -44,7 +44,7 @@ export default function DeploymentDetailsPage() {
   const handleExplainError = async () => {
     try {
       setExplaining(true);
-      const res = await fetch(`http://localhost:5000/api/deployments/${deploymentId}/explain-error`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/deployments/${deploymentId}/explain-error`, {
         method: "POST",
         credentials: "include"
       });
@@ -65,7 +65,7 @@ export default function DeploymentDetailsPage() {
   const handleRetryDeployment = async () => {
     try {
       setRetrying(true);
-      const res = await fetch(`http://localhost:5000/api/deployments/${deploymentId}/retry`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/deployments/${deploymentId}/retry`, {
         method: "POST",
         credentials: "include"
       });
@@ -87,7 +87,7 @@ export default function DeploymentDetailsPage() {
   const handleCreateFixPr = async () => {
     try {
       setCreatingFix(true);
-      const res = await fetch(`http://localhost:5000/api/deployments/${deploymentId}/create-fix-pr`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/deployments/${deploymentId}/create-fix-pr`, {
         method: "POST",
         credentials: "include"
       });

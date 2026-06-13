@@ -9,6 +9,7 @@ import fixPrRoutes from "./routes/fixPr.routes.js";
 import deploymentRoutes from "./routes/deployment.routes.js";
 import domainRoutes from "./routes/domain.routes.js";
 import monitoringRoutes from "./routes/monitoring.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use("/api/deployments", deploymentRoutes);
 app.use("/api/fix-prs", fixPrRoutes);
 app.use("/api", domainRoutes);
 app.use("/api", monitoringRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.get("/", (req, res) => {
     res.send({
@@ -49,3 +51,20 @@ app.post("/api/test", (req, res) => {
 });
 
 export default app;
+// trigger nodemon restart
+
+// trigger restart 2
+
+// trigger restart 3
+
+// trigger restart 4
+
+// trigger restart 5
+
+// trigger restart 6
+
+// trigger restart 7
+
+// trigger restart 8
+
+// trigger restart 9

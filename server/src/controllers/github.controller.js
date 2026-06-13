@@ -2,10 +2,19 @@ import axios from "axios";
 import User from "../models/User.js";
 import { decryptSecret } from "../utils/encryption.js";
 
+import ConnectedAccount from "../models/ConnectedAccount.js";
+
 const getGithubToken = async (userId) => {
+  // 1. Try to get token from ConnectedAccount
+  const connectedAccount = await ConnectedAccount.findOne({ userId, provider: 'github', status: 'connected' });
+  if (connectedAccount && connectedAccount.accessTokenEncrypted) {
+    return decryptSecret(connectedAccount.accessTokenEncrypted);
+  }
+
+  // 2. Fallback to legacy User model
   const user = await User.findById(userId);
-  if (!user || !user.githubConnected || !user.githubAccessTokenEncrypted) {
-    throw new Error("GitHub account not connected or token missing");
+  if (!user || (!user.githubConnected && !user.githubAccessTokenEncrypted)) {
+    throw new Error("GitHub not connected");
   }
   return decryptSecret(user.githubAccessTokenEncrypted);
 };
@@ -38,7 +47,11 @@ export const getRepos = async (req, res) => {
     if (error.response?.status === 401) {
       // Token is invalid/expired
       await User.findByIdAndUpdate(req.user.userId, { githubConnected: false });
+      await ConnectedAccount.findOneAndUpdate({ userId: req.user.userId, provider: 'github' }, { status: 'expired' });
       return res.status(401).json({ error: "GitHub connection expired. Please reconnect GitHub." });
+    }
+    if (error.message === "GitHub not connected") {
+      return res.status(401).json({ error: "GitHub not connected" });
     }
     console.error("GitHub Fetch Repos Error:", error.message);
     res.status(500).json({ error: "Failed to fetch repositories" });
@@ -65,6 +78,8 @@ export const getBranches = async (req, res) => {
     res.json(branches);
   } catch (error) {
     if (error.response?.status === 401) {
+      await User.findByIdAndUpdate(req.user.userId, { githubConnected: false });
+      await ConnectedAccount.findOneAndUpdate({ userId: req.user.userId, provider: 'github' }, { status: 'expired' });
       return res.status(401).json({ error: "GitHub connection expired. Please reconnect GitHub." });
     }
     console.error("GitHub Fetch Branches Error:", error.message);

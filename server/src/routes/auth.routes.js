@@ -1,5 +1,5 @@
 import express from "express";
-import { githubLogin, githubCallback, me, logout } from "../controllers/auth.controller.js";
+import { githubLogin, githubCallback, me, logout, firebaseLogin } from "../controllers/auth.controller.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
@@ -18,6 +18,7 @@ oauthRouter.get("/github", githubLogin);
 oauthRouter.get("/github/callback", githubCallback);
 
 const apiAuthRouter = express.Router();
+apiAuthRouter.post("/firebase-login", firebaseLogin);
 apiAuthRouter.get("/me", requireAuth, me);
 apiAuthRouter.post("/logout", logout);
 

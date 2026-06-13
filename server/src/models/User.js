@@ -5,9 +5,15 @@ const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   avatar: { type: String },
   provider: { type: String, default: 'github' },
-  githubId: { type: String, required: true, unique: true },
+  githubId: { type: String, unique: true, sparse: true },
   githubUsername: { type: String },
   role: { type: String, enum: ['user', 'admin'], default: 'user' },
+  authProviders: [{
+    provider: { type: String, enum: ['firebase_google', 'firebase_email', 'github'], required: true },
+    providerUserId: { type: String, required: true },
+    email: { type: String },
+    connectedAt: { type: Date, default: Date.now }
+  }],
   
   // Connection Statuses
   githubConnected: { type: Boolean, default: true },

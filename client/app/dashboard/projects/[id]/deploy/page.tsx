@@ -54,8 +54,8 @@ export default function DeployPage() {
     try {
       setLoading(true);
       const [projRes, intRes] = await Promise.all([
-        fetch(`http://localhost:5000/api/projects/${projectId}`, { credentials: "include" }),
-        fetch(`http://localhost:5000/api/integrations/status`, { credentials: "include" })
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}`, { credentials: "include" }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/integrations/status`, { credentials: "include" })
       ]);
       
       if (!projRes.ok || !intRes.ok) throw new Error("Failed to load");
@@ -74,7 +74,7 @@ export default function DeployPage() {
 
   const fetchDeploymentsHistory = async () => {
     try {
-      const res = await fetch(`http://localhost:5000/api/projects/${projectId}/deployments`, { credentials: "include" });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/deployments`, { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         setDeploymentsHistory(data);
@@ -84,7 +84,7 @@ export default function DeployPage() {
 
   const fetchDomains = async () => {
     try {
-      const res = await fetch(`http://localhost:5000/api/projects/${projectId}/domains`, { credentials: "include" });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/domains`, { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         setDomainSetups(data);
@@ -94,7 +94,7 @@ export default function DeployPage() {
 
   const fetchMonitors = async () => {
     try {
-      const res = await fetch(`http://localhost:5000/api/projects/${projectId}/monitors`, { credentials: "include" });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/monitors`, { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         setMonitors(data.monitors || []);
@@ -107,7 +107,7 @@ export default function DeployPage() {
     if (activeDeploymentId) {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`http://localhost:5000/api/deployments/${activeDeploymentId}`, { credentials: "include" });
+          const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/deployments/${activeDeploymentId}`, { credentials: "include" });
           if (res.ok) {
             const data = await res.json();
             setDeploymentLogs(data);
@@ -128,7 +128,7 @@ export default function DeployPage() {
   const triggerDeployment = async (type: 'frontend' | 'backend' | 'full') => {
     try {
       setDeploying(true);
-      const res = await fetch(`http://localhost:5000/api/deployments/${projectId}/${type}`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/deployments/${projectId}/${type}`, {
         method: "POST",
         credentials: "include"
       });
@@ -148,13 +148,13 @@ export default function DeployPage() {
 
   const handleOAuthConnect = (provider: string) => {
     const returnTo = encodeURIComponent(`${window.location.origin}/dashboard/projects/${projectId}/deploy`);
-    window.location.href = `http://localhost:5000/api/integrations/${provider}/connect?returnTo=${returnTo}`;
+    window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/api/integrations/${provider}/connect?returnTo=${returnTo}`;
   };
 
   const handleApiKeySubmit = async () => {
     try {
       setSavingKey(true);
-      const res = await fetch(`http://localhost:5000/api/integrations/${activeModalProvider}/connect-api-key`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/integrations/${activeModalProvider}/connect-api-key`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: "include",
@@ -175,7 +175,7 @@ export default function DeployPage() {
   const handleAddDomain = async () => {
     try {
       setAddingDomain(true);
-      const res = await fetch(`http://localhost:5000/api/projects/${projectId}/domains`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/domains`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -198,7 +198,7 @@ export default function DeployPage() {
   const handleVerifyDomain = async (domainId: string) => {
     try {
       setVerifyingDomain(domainId);
-      const res = await fetch(`http://localhost:5000/api/domains/${domainId}/verify`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/domains/${domainId}/verify`, {
         method: "POST",
         credentials: "include"
       });
@@ -215,7 +215,7 @@ export default function DeployPage() {
   const handleDeleteDomain = async (domainId: string) => {
     if (!confirm("Are you sure you want to delete this domain?")) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/domains/${domainId}`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/domains/${domainId}`, {
         method: "DELETE",
         credentials: "include"
       });
@@ -231,7 +231,7 @@ export default function DeployPage() {
     if (!activeDisconnectProvider) return;
     try {
       setDisconnecting(true);
-      const res = await fetch(`http://localhost:5000/api/integrations/${activeDisconnectProvider}/disconnect`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/integrations/${activeDisconnectProvider}/disconnect`, {
         method: 'POST',
         credentials: "include"
       });
@@ -249,7 +249,7 @@ export default function DeployPage() {
   const handleCheckMonitor = async (monitorId: string) => {
     try {
       setCheckingMonitorId(monitorId);
-      const res = await fetch(`http://localhost:5000/api/monitors/${monitorId}/check-now`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/monitors/${monitorId}/check-now`, {
         method: "POST",
         credentials: "include"
       });
@@ -266,7 +266,7 @@ export default function DeployPage() {
   const handleConnectCloudflare = async () => {
     try {
       setSavingCloudflareKey(true);
-      const res = await fetch(`http://localhost:5000/api/integrations/cloudflare/connect-api-key`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/integrations/cloudflare/connect-api-key`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: "include",
@@ -289,7 +289,7 @@ export default function DeployPage() {
   const handleApplyCloudflareDns = async (domainId: string, dryRun: boolean = false) => {
     try {
       setApplyingDns(domainId);
-      const res = await fetch(`http://localhost:5000/api/domains/${domainId}/apply-cloudflare-dns?dryRun=${dryRun}`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/domains/${domainId}/apply-cloudflare-dns?dryRun=${dryRun}`, {
         method: 'POST',
         credentials: "include"
       });

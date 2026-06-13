@@ -8,6 +8,14 @@ import { validateCloudflareToken, getCloudflareZones as fetchCloudflareZones, ge
 import { validateVercelToken } from '../services/providers/vercel.service.js';
 
 const getOauthProviders = () => ({
+  github: {
+    clientId: process.env.GITHUB_CLIENT_ID,
+    clientSecret: process.env.GITHUB_CLIENT_SECRET,
+    authorizeUrl: "https://github.com/login/oauth/authorize",
+    tokenUrl: "https://github.com/login/oauth/access_token",
+    callbackUrl: process.env.GITHUB_CALLBACK_URL,
+    scopes: "read:user user:email public_repo"
+  },
   vercel: {
     clientId: process.env.VERCEL_CLIENT_ID,
     clientSecret: process.env.VERCEL_CLIENT_SECRET,
@@ -84,7 +92,7 @@ export const connectProvider = async (req, res) => {
   res.cookie(`oauth_state_${provider}`, state, { httpOnly: true, maxAge: 10 * 60 * 1000 });
   res.cookie(`oauth_return_${provider}`, returnTo, { httpOnly: true, maxAge: 10 * 60 * 1000 });
 
-  const authUrl = `${config.authorizeUrl}?client_id=${config.clientId}&redirect_uri=${encodeURIComponent(config.callbackUrl)}&state=${state}&response_type=code`;
+  const authUrl = `${config.authorizeUrl}?client_id=${config.clientId}&redirect_uri=${encodeURIComponent(config.callbackUrl)}&state=${state}&response_type=code&prompt=consent`;
   
   res.redirect(authUrl);
 };
@@ -146,6 +154,22 @@ export const callbackProvider = async (req, res) => {
         const errorMsg = data.error?.message || data.error_description || data.error || err.message || "Unknown token error";
         throw new Error(`Vercel exchange failed: ${errorMsg}. Debug: ID=${config.clientId}, SecLen=${config.clientSecret.length}`);
       }
+    } else if (provider === 'github' && config.clientId && config.clientSecret) {
+      const { default: axios } = await import('axios');
+      const response = await axios.post(
+        config.tokenUrl,
+        {
+          client_id: config.clientId,
+          client_secret: config.clientSecret,
+          code: code,
+          redirect_uri: config.callbackUrl,
+        },
+        { headers: { Accept: 'application/json' } }
+      );
+      if (!response.data.access_token) {
+        throw new Error("GitHub token exchange failed: " + JSON.stringify(response.data));
+      }
+      accessToken = response.data.access_token;
     }
     
     await ConnectedAccount.findOneAndUpdate(
@@ -170,6 +194,21 @@ export const disconnectProvider = async (req, res) => {
   const { provider } = req.params;
   try {
     await ConnectedAccount.findOneAndDelete({ userId: req.user.userId, provider });
+    
+    // Also clear legacy flags on the User model
+    const update = {};
+    if (provider === 'github') {
+      update.githubConnected = false;
+      update.githubAccessTokenEncrypted = "";
+    } else if (provider === 'vercel') {
+      update.vercelConnected = false;
+      update.vercelAccessTokenEncrypted = "";
+    }
+    
+    if (Object.keys(update).length > 0) {
+      await User.findByIdAndUpdate(req.user.userId, update);
+    }
+
     res.json({ success: true, message: `Disconnected ${provider}` });
   } catch (error) {
     res.status(500).json({ error: "Failed to disconnect" });

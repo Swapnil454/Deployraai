@@ -3,25 +3,36 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { LogOut, Rocket, Clock, GitBranch, Settings, Loader2 } from "lucide-react";
+import { LogOut, Rocket, Clock, GitBranch, Settings, Loader2, CheckCircle2, Link2 } from "lucide-react";
 
 export default function DashboardPage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
+  
+  const [activeModalProvider, setActiveModalProvider] = useState<string | null>(null);
+  const [activeDisconnectProvider, setActiveDisconnectProvider] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+
   const router = useRouter();
 
   useEffect(() => {
     // Check if user is authenticated
     const fetchUser = async () => {
       try {
-        const response = await fetch("http://localhost:5000/api/auth/me", {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || `${process.env.NEXT_PUBLIC_API_URL}`}/api/auth/me`, {
           credentials: "include"
         });
 
         if (response.ok) {
           const userData = await response.json();
+          if (userData.role === 'admin') {
+            router.push('/admin');
+            return;
+          }
           setUser(userData);
           fetchProjects();
         } else {
@@ -37,7 +48,7 @@ export default function DashboardPage() {
 
     const fetchProjects = async () => {
       try {
-        const res = await fetch("http://localhost:5000/api/projects", { credentials: "include" });
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || `${process.env.NEXT_PUBLIC_API_URL}`}/api/projects`, { credentials: "include" });
         if (res.ok) {
           setProjects(await res.json());
         }
@@ -53,13 +64,70 @@ export default function DashboardPage() {
 
   const handleLogout = async () => {
     try {
-      await fetch("http://localhost:5000/api/auth/logout", {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL || `${process.env.NEXT_PUBLIC_API_URL}`}/api/auth/logout`, {
         method: "POST",
         credentials: "include"
       });
       router.push("/");
     } catch (error) {
       console.error("Logout failed", error);
+    }
+  };
+
+  const refreshUser = async () => {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, { credentials: "include" });
+      if (res.ok) setUser(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleOAuthConnect = (provider: string) => {
+    const returnTo = encodeURIComponent(`${window.location.origin}/dashboard`);
+    window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/api/integrations/${provider}/connect?returnTo=${returnTo}`;
+  };
+
+  const handleApiKeySubmit = async () => {
+    try {
+      setSavingKey(true);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/integrations/${activeModalProvider}/connect-api-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: "include",
+        body: JSON.stringify({ apiKey })
+      });
+      if (res.ok) {
+        setActiveModalProvider(null);
+        setApiKey("");
+        await refreshUser();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to connect API key");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!activeDisconnectProvider) return;
+    try {
+      setDisconnecting(true);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/integrations/${activeDisconnectProvider}/disconnect`, {
+        method: 'POST',
+        credentials: "include"
+      });
+      if (res.ok) {
+        setActiveDisconnectProvider(null);
+        await refreshUser();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDisconnecting(false);
     }
   };
 
@@ -108,41 +176,34 @@ export default function DashboardPage() {
           {/* Connected Accounts Card */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
             <h2 className="mb-4 text-xl font-semibold text-white">Connected Accounts</h2>
-            <div className="space-y-4">
-              
-              <div className="flex items-center justify-between rounded-lg bg-zinc-800/50 p-3">
-                <span className="text-zinc-300">GitHub</span>
-                <div className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${user.githubConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                  <span className="text-sm text-zinc-400">{user.githubConnected ? 'Connected' : 'Not connected'}</span>
-                </div>
+              <div className="rounded-lg bg-zinc-800/50 divide-y divide-zinc-800/50">
+                <ConnectionRow 
+                  name="GitHub" 
+                  status={user.githubConnected} 
+                  action={() => handleOAuthConnect('github')}
+                  onDisconnect={() => setActiveDisconnectProvider('github')}
+                />
+                <ConnectionRow 
+                  name="Vercel" 
+                  status={user.vercelConnected} 
+                  action={() => setActiveModalProvider('vercel')}
+                  customActionText="Connect Token"
+                  onDisconnect={() => setActiveDisconnectProvider('vercel')}
+                />
+                <ConnectionRow 
+                  name="Render" 
+                  status={user.renderConnected} 
+                  action={() => setActiveModalProvider('render')}
+                  customActionText="Connect API Key"
+                  onDisconnect={() => setActiveDisconnectProvider('render')}
+                />
+                <ConnectionRow 
+                  name="Cloudflare" 
+                  status={user.cloudflareConnected} 
+                  subtext="Coming soon"
+                  action={null}
+                />
               </div>
-
-              <div className="flex items-center justify-between rounded-lg bg-zinc-800/50 p-3">
-                <span className="text-zinc-300">Vercel</span>
-                <div className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${user.vercelConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                  <span className="text-sm text-zinc-400">{user.vercelConnected ? 'Connected' : 'Not connected'}</span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between rounded-lg bg-zinc-800/50 p-3">
-                <span className="text-zinc-300">Render</span>
-                <div className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${user.renderConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                  <span className="text-sm text-zinc-400">{user.renderConnected ? 'Connected' : 'Not connected'}</span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between rounded-lg bg-zinc-800/50 p-3">
-                <span className="text-zinc-300">Cloudflare</span>
-                <div className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${user.cloudflareConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                  <span className="text-sm text-zinc-400">{user.cloudflareConnected ? 'Connected' : 'Not connected'}</span>
-                </div>
-              </div>
-
-            </div>
           </div>
 
           {/* Quick Actions */}
@@ -224,6 +285,89 @@ export default function DashboardPage() {
           )}
         </div>
 
+      </div>
+
+      {activeModalProvider && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-bold text-white capitalize">Connect {activeModalProvider}</h3>
+            <p className="mb-4 text-sm text-zinc-400">
+              {activeModalProvider} does not support standard OAuth connection for this automation flow. Paste your {activeModalProvider} API Key/Token. It will be encrypted and stored securely.
+            </p>
+            <input
+              type="password"
+              placeholder={`Enter ${activeModalProvider} token...`}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              className="mb-4 w-full rounded-lg border border-zinc-800 bg-black p-3 text-sm text-white focus:border-indigo-500 focus:outline-none"
+            />
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setActiveModalProvider(null)} className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white">Cancel</button>
+              <button 
+                onClick={handleApiKeySubmit} 
+                disabled={!apiKey || savingKey}
+                className="flex items-center gap-2 rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50"
+              >
+                {savingKey && <Loader2 className="h-4 w-4 animate-spin" />}
+                Save Key
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeDisconnectProvider && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-bold text-white capitalize">Disconnect {activeDisconnectProvider}</h3>
+            <p className="mb-4 text-sm text-zinc-400">
+              Are you sure you want to disconnect {activeDisconnectProvider}? This will remove your credentials and you will need to reconnect before deploying.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setActiveDisconnectProvider(null)} className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white">Cancel</button>
+              <button 
+                onClick={handleDisconnect} 
+                disabled={disconnecting}
+                className="flex items-center gap-2 rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-2 text-sm font-medium text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+              >
+                {disconnecting && <Loader2 className="h-4 w-4 animate-spin" />}
+                Disconnect
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+function ConnectionRow({ name, status, subtext, action, customActionText = "Connect", onDisconnect }: any) {
+  return (
+    <div className="flex items-center justify-between p-4">
+      <div>
+        <h4 className="text-sm font-medium text-white">{name}</h4>
+        {subtext && <p className="text-xs text-zinc-500 mt-0.5">{subtext}</p>}
+      </div>
+      <div>
+        {status ? (
+          <button 
+            onClick={onDisconnect || (() => {})}
+            className="flex items-center gap-1 text-sm text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 hover:text-emerald-300 px-3 py-1 rounded-full border border-emerald-500/20 transition-colors"
+            title="Click to disconnect"
+          >
+            <CheckCircle2 className="h-4 w-4" /> Connected
+          </button>
+        ) : action ? (
+          <button 
+            onClick={action}
+            className="flex items-center gap-1 text-sm text-zinc-300 hover:text-white bg-zinc-800 hover:bg-zinc-700 px-3 py-1 rounded-full transition-colors"
+          >
+            <Link2 className="h-4 w-4" /> {customActionText}
+          </button>
+        ) : (
+          <span className="text-sm text-zinc-500 px-3 py-1">Not connected</span>
+        )}
       </div>
     </div>
   );
