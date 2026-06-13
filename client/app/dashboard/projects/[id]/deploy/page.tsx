@@ -20,29 +20,26 @@ export default function DeployPage() {
   const [disconnecting, setDisconnecting] = useState(false);
 
   const [activeDeploymentId, setActiveDeploymentId] = useState<string | null>(null);
-  const [deploymentLogs, setDeploymentLogs] = useState<any>({});
+  const [deploymentLogs, setDeploymentLogs] = useState<any>(null);
   const [deploymentsHistory, setDeploymentsHistory] = useState<any[]>([]);
-  const [errorParamMsg, setErrorParamMsg] = useState<string | null>(null);
+  const [deploying, setDeploying] = useState(false);
 
   const [domainSetups, setDomainSetups] = useState<any[]>([]);
   const [rootDomainInput, setRootDomainInput] = useState("");
   const [addingDomain, setAddingDomain] = useState(false);
   const [verifyingDomain, setVerifyingDomain] = useState<string | null>(null);
-
   const [cloudflareKey, setCloudflareKey] = useState("");
   const [savingCloudflareKey, setSavingCloudflareKey] = useState(false);
   const [applyingDns, setApplyingDns] = useState<string | null>(null);
   const [dnsPreview, setDnsPreview] = useState<any[]>([]);
 
   const [monitors, setMonitors] = useState<any[]>([]);
-  const [checkingMonitor, setCheckingMonitor] = useState<string | null>(null);
-  const [deploying, setDeploying] = useState(false);
+  const [checkingMonitorId, setCheckingMonitorId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchData();
     fetchDeploymentsHistory();
     fetchDomains();
-    fetchMonitors();
     
     const errorParam = searchParams.get('error');
     if (errorParam) {
@@ -116,6 +113,9 @@ export default function DeployPage() {
             if (data.status === 'success' || data.status === 'failed') {
                clearInterval(interval);
                fetchDeploymentsHistory();
+               if (data.status === 'success') {
+                 fetchMonitors();
+               }
             }
           }
         } catch (e) { console.error(e); }
@@ -171,6 +171,61 @@ export default function DeployPage() {
     }
   };
 
+  const handleAddDomain = async () => {
+    try {
+      setAddingDomain(true);
+      const res = await fetch(`http://localhost:5000/api/projects/${projectId}/domains`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ rootDomain: rootDomainInput })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRootDomainInput("");
+        fetchDomains();
+      } else {
+        alert(data.error || "Failed to add domain");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAddingDomain(false);
+    }
+  };
+
+  const handleVerifyDomain = async (domainId: string) => {
+    try {
+      setVerifyingDomain(domainId);
+      const res = await fetch(`http://localhost:5000/api/domains/${domainId}/verify`, {
+        method: "POST",
+        credentials: "include"
+      });
+      if (res.ok) {
+        fetchDomains();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setVerifyingDomain(null);
+    }
+  };
+
+  const handleDeleteDomain = async (domainId: string) => {
+    if (!confirm("Are you sure you want to delete this domain?")) return;
+    try {
+      const res = await fetch(`http://localhost:5000/api/domains/${domainId}`, {
+        method: "DELETE",
+        credentials: "include"
+      });
+      if (res.ok) {
+        fetchDomains();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleDisconnect = async () => {
     if (!activeDisconnectProvider) return;
     try {
@@ -190,64 +245,56 @@ export default function DeployPage() {
     }
   };
 
-  const handleAddDomain = async () => {
+  const handleCheckMonitor = async (monitorId: string) => {
     try {
-      setAddingDomain(true);
-      const res = await fetch(`http://localhost:5000/api/projects/${projectId}/domains`, {
+      setCheckingMonitorId(monitorId);
+      const res = await fetch(`http://localhost:5000/api/monitors/${monitorId}/check-now`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ rootDomain: rootDomainInput })
+        credentials: "include"
       });
       if (res.ok) {
-        setRootDomainInput("");
-        fetchDomains();
+        fetchMonitors();
       }
-    } catch (err) {
-      console.error(err);
+    } catch (e) {
+      console.error(e);
     } finally {
-      setAddingDomain(false);
+      setCheckingMonitorId(null);
     }
-  };
-
-  const handleVerifyDomain = async (domainId: string) => {
-    try {
-      setVerifyingDomain(domainId);
-      const res = await fetch(`http://localhost:5000/api/domains/${domainId}/verify`, { method: "POST", credentials: "include" });
-      if (res.ok) fetchDomains();
-    } catch (err) { console.error(err); } finally { setVerifyingDomain(null); }
-  };
-
-  const handleDeleteDomain = async (domainId: string) => {
-    try {
-      const res = await fetch(`http://localhost:5000/api/domains/${domainId}`, { method: "DELETE", credentials: "include" });
-      if (res.ok) fetchDomains();
-    } catch (err) { console.error(err); }
   };
 
   const handleConnectCloudflare = async () => {
     try {
       setSavingCloudflareKey(true);
       const res = await fetch(`http://localhost:5000/api/integrations/cloudflare/connect-api-key`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         credentials: "include",
         body: JSON.stringify({ apiKey: cloudflareKey })
       });
       if (res.ok) {
         setCloudflareKey("");
         fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to connect Cloudflare");
       }
-    } catch (err) { console.error(err); } finally { setSavingCloudflareKey(false); }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingCloudflareKey(false);
+    }
   };
 
-  const handleApplyCloudflareDns = async (domainId: string, isDryRun: boolean = true) => {
+  const handleApplyCloudflareDns = async (domainId: string, dryRun: boolean = false) => {
     try {
       setApplyingDns(domainId);
-      const res = await fetch(`http://localhost:5000/api/domains/${domainId}/apply-cloudflare-dns?dryRun=${isDryRun}`, { method: "POST", credentials: "include" });
+      const res = await fetch(`http://localhost:5000/api/domains/${domainId}/apply-cloudflare-dns?dryRun=${dryRun}`, {
+        method: 'POST',
+        credentials: "include"
+      });
       const data = await res.json();
       if (res.ok) {
-        if (isDryRun) {
+        if (dryRun) {
           setDnsPreview(data.preview || []);
         } else {
           setDnsPreview([]);
@@ -256,18 +303,14 @@ export default function DeployPage() {
       } else {
         alert(data.error || "Failed to apply DNS");
       }
-    } catch (err) { console.error(err); } finally { setApplyingDns(null); }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setApplyingDns(null);
+    }
   };
 
-  const handleCheckMonitor = async (monitorId: string) => {
-    try {
-      setCheckingMonitor(monitorId);
-      const res = await fetch(`http://localhost:5000/api/monitors/${monitorId}/check-now`, { method: 'POST', credentials: "include" });
-      if (res.ok) fetchMonitors();
-    } catch (err) { console.error(err); } finally { setCheckingMonitor(null); }
-  };
-
-  if (loading || !project) {
+  if (loading) {
     return <div className="flex min-h-screen items-center justify-center bg-black"><Loader2 className="h-8 w-8 animate-spin text-indigo-500" /></div>;
   }
 
@@ -426,151 +469,66 @@ export default function DeployPage() {
 
             </div>
           </div>
+        </div>
 
-          {/* Section 2: Custom Domains & Monitoring */}
-          <div className="space-y-6">
-            <h2 className="text-lg font-semibold text-white">2. Domains & Monitoring</h2>
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 space-y-6">
+        {/* Monitoring Section */}
+        {monitors && monitors.length > 0 && (
+          <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+            <div className="flex items-center justify-between border-b border-zinc-800 bg-black/40 px-6 py-4">
               <div>
-                <h3 className="text-sm font-medium text-white mb-2">Add Custom Domain</h3>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="e.g., myapp.com"
-                    value={rootDomainInput}
-                    onChange={(e) => setRootDomainInput(e.target.value)}
-                    className="flex-1 bg-black border border-zinc-800 rounded px-3 py-2 text-sm text-white"
-                  />
-                  <button
-                    onClick={handleAddDomain}
-                    disabled={addingDomain || !rootDomainInput}
-                    className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded text-sm"
-                  >
-                    {addingDomain ? 'Adding...' : 'Add'}
-                  </button>
-                </div>
+                <h3 className="text-sm font-semibold text-white">Monitoring</h3>
+                <p className="text-xs text-zinc-500 mt-1">Status of your deployed services.</p>
               </div>
-
-              {domainSetups.length > 0 && (
-                <div className="space-y-4">
-                  {domainSetups.map(domain => (
-                    <div key={domain._id} className="p-4 border border-zinc-800 rounded bg-black">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-medium text-white">{domain.frontendDomain}</span>
-                        <span className={`text-xs px-2 py-1 rounded ${domain.status === 'active' ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'}`}>
-                          {domain.status.replace('_', ' ')}
+              <button
+                onClick={() => router.push(`/dashboard/projects/${projectId}/monitoring`)}
+                className="flex items-center gap-2 rounded bg-zinc-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 transition-colors"
+              >
+                View Dashboard <ExternalLink className="h-3 w-3" />
+              </button>
+            </div>
+            
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {monitors.map((monitor: any, index: number) => (
+                  <div key={index} className="rounded-lg border border-zinc-800 bg-black/50 p-4 relative">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <h4 className="text-sm font-medium text-white capitalize">{monitor.type}</h4>
+                        <a href={monitor.url} target="_blank" rel="noreferrer" className="text-xs text-indigo-400 hover:underline">
+                          {monitor.url.replace(/^https?:\/\//, '')}
+                        </a>
+                      </div>
+                      <div className="flex flex-col items-end">
+                        <span className={`flex items-center gap-1.5 text-xs font-medium ${monitor.status === 'online' ? 'text-emerald-400' : monitor.status === 'degraded' ? 'text-yellow-400' : monitor.status === 'offline' ? 'text-red-400' : 'text-zinc-500'}`}>
+                          <span className={`h-2 w-2 rounded-full ${monitor.status === 'online' ? 'bg-emerald-400' : monitor.status === 'degraded' ? 'bg-yellow-400' : monitor.status === 'offline' ? 'bg-red-400' : 'bg-zinc-500'}`}></span>
+                          {monitor.status === 'unknown' ? 'Not checked' : monitor.status}
                         </span>
                       </div>
-                      
-                      {domain.status === 'pending_dns' && (
-                        <div className="mt-4">
-                          <p className="text-xs text-zinc-400 mb-2">Configure these DNS records with your registrar:</p>
-                          <div className="text-xs font-mono bg-zinc-900 p-2 rounded mb-2">
-                            {domain.dnsRecords?.map((rec: any, i: number) => (
-                               <div key={i} className="flex items-center justify-between">
-                                  <p>{rec.type} Record | {rec.name} | {rec.value}</p>
-                                  {rec.status === 'conflict' && <span className="text-red-400 bg-red-400/10 px-2 py-0.5 rounded text-[10px] ml-2 uppercase">Conflict</span>}
-                                  {rec.status === 'verified' && <span className="text-green-400 bg-green-400/10 px-2 py-0.5 rounded text-[10px] ml-2 uppercase">Verified</span>}
-                               </div>
-                            ))}
-                          </div>
-                          
-                          <div className="mt-4 border-t border-zinc-800 pt-4">
-                            <h4 className="text-sm text-white mb-2">Cloudflare Auto-DNS</h4>
-                            {!isCloudflareConnected ? (
-                              <div className="flex flex-col gap-2">
-                                <div className="flex gap-2">
-                                  <input 
-                                    type="password" 
-                                    placeholder="Cloudflare API Token" 
-                                    className="flex-1 bg-black border border-zinc-800 rounded px-3 py-2 text-sm text-white"
-                                    value={cloudflareKey}
-                                    onChange={(e) => setCloudflareKey(e.target.value)}
-                                  />
-                                  <button onClick={handleConnectCloudflare} disabled={savingCloudflareKey || !cloudflareKey} className="bg-zinc-800 text-white px-3 py-1 rounded text-sm hover:bg-zinc-700">
-                                    {savingCloudflareKey ? 'Connecting...' : 'Connect'}
-                                  </button>
-                                </div>
-                                <p className="text-[11px] text-zinc-500">
-                                  Create a Custom Token in your <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">Cloudflare Profile</a> with <strong>Zone: Read</strong> and <strong>DNS: Edit</strong> permissions.
-                                </p>
-                              </div>
-                            ) : dnsPreview.length > 0 ? (
-                              <div className="bg-zinc-900/80 border border-zinc-800 p-3 rounded-lg mb-2">
-                                <h5 className="text-xs font-semibold text-white mb-2">DNS Change Preview</h5>
-                                <ul className="text-[11px] space-y-1 mb-3">
-                                  {dnsPreview.map((p, i) => (
-                                    <li key={i} className={`flex items-start gap-2 ${p.action === 'conflict' ? 'text-red-400' : p.action === 'skip' ? 'text-zinc-500' : 'text-green-400'}`}>
-                                      <span className="font-mono mt-0.5">{p.record}:</span>
-                                      <span>{p.reason}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                                <div className="flex gap-2">
-                                  <button onClick={() => setDnsPreview([])} className="bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1.5 rounded text-xs flex-1">Cancel</button>
-                                  <button onClick={() => handleApplyCloudflareDns(domain._id, false)} disabled={applyingDns === domain._id} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded text-xs flex-1 font-medium">
-                                    {applyingDns === domain._id ? 'Applying...' : 'Confirm & Apply'}
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <button onClick={() => handleApplyCloudflareDns(domain._id, true)} disabled={applyingDns === domain._id} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded text-sm w-full">
-                                {applyingDns === domain._id ? 'Checking...' : 'Apply Cloudflare DNS'}
-                              </button>
-                            )}
-                          </div>
-
-                          <div className="mt-4 flex gap-2 justify-end border-t border-zinc-800 pt-4">
-                             <button onClick={() => handleDeleteDomain(domain._id)} className="text-red-400 text-sm hover:text-red-300">Remove</button>
-                             <button onClick={() => handleVerifyDomain(domain._id)} disabled={verifyingDomain === domain._id} className="bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1 rounded text-sm">
-                               {verifyingDomain === domain._id ? 'Verifying...' : 'Verify DNS'}
-                             </button>
-                          </div>
-                        </div>
-                      )}
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Monitoring Section */}
-              {monitors.length > 0 && (
-                <div className="mt-8 border-t border-zinc-800 pt-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-medium text-white">Active Monitors</h3>
-                    <button
-                      onClick={() => router.push(`/dashboard/projects/${projectId}/monitoring`)}
-                      className="text-xs font-medium text-indigo-400 hover:text-indigo-300"
-                    >
-                      View Details &rarr;
-                    </button>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    {monitors.map((mon) => (
-                      <div key={mon._id} className="rounded border border-zinc-800 bg-black p-3 flex justify-between items-center">
-                        <div>
-                          <h4 className="text-xs font-medium text-white capitalize flex items-center gap-2">
-                            <div className={`w-1.5 h-1.5 rounded-full ${mon.status === 'online' ? 'bg-green-400' : mon.status === 'offline' ? 'bg-red-400' : mon.status === 'degraded' ? 'bg-yellow-400' : 'bg-zinc-400'}`}></div>
-                            {mon.name}
-                          </h4>
-                          <span className="text-[10px] text-zinc-500">{mon.url}{mon.healthPath !== '/' ? mon.healthPath : ''}</span>
-                        </div>
-                        <button
-                          onClick={() => handleCheckMonitor(mon._id)}
-                          disabled={checkingMonitor === mon._id}
-                          className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-white px-2 py-1 rounded disabled:opacity-50"
-                        >
-                          {checkingMonitor === mon._id ? '...' : 'Check Now'}
-                        </button>
+                    
+                    <div className="flex items-center justify-between mt-4 pt-4 border-t border-zinc-800/50">
+                      <div className="text-xs text-zinc-500 flex gap-4">
+                        <span>{monitor.lastResponseTimeMs ? `${monitor.lastResponseTimeMs}ms` : '-'}</span>
+                        <span title={monitor.lastCheckedAt ? new Date(monitor.lastCheckedAt).toLocaleString() : 'Never'}>
+                          Checked {monitor.lastCheckedAt ? new Date(monitor.lastCheckedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Never'}
+                        </span>
                       </div>
-                    ))}
+                      <button
+                        onClick={() => handleCheckMonitor(monitor._id)}
+                        disabled={checkingMonitorId === monitor._id}
+                        className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white px-3 py-1.5 rounded flex items-center gap-2 transition-colors disabled:opacity-50"
+                      >
+                        {checkingMonitorId === monitor._id ? (
+                          <><Loader2 className="h-3 w-3 animate-spin" /> Checking...</>
+                        ) : 'Check Now'}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Logs Panel */}
         {activeDeploymentId && deploymentLogs && (
@@ -738,6 +696,190 @@ export default function DeployPage() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Custom Domain Section */}
+        <div className="mt-8 space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold text-white">Custom Domain</h2>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
+            <div className="flex gap-4 items-end mb-6">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-zinc-400 mb-2">Root Domain</label>
+                <input 
+                  type="text" 
+                  placeholder="example.com"
+                  value={rootDomainInput}
+                  onChange={(e) => setRootDomainInput(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-800 bg-black p-3 text-sm text-white focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+              <button 
+                onClick={handleAddDomain}
+                disabled={!rootDomainInput || addingDomain}
+                className="rounded-lg bg-indigo-500 px-6 py-3 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50 flex items-center gap-2"
+              >
+                {addingDomain && <Loader2 className="h-4 w-4 animate-spin" />}
+                Add Domain
+              </button>
+            </div>
+            
+            {domainSetups.length > 0 && (
+              <div className="space-y-6">
+                {domainSetups.map(domain => (
+                  <div key={domain._id} className="rounded-lg border border-zinc-800 bg-black/40 p-4">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <h3 className="text-md font-medium text-white">{domain.rootDomain}</h3>
+                        <p className="text-xs text-zinc-500 mt-1">Status: <span className="uppercase text-indigo-400">{domain.status}</span></p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => handleVerifyDomain(domain._id)}
+                          disabled={verifyingDomain === domain._id}
+                          className="rounded bg-zinc-800 px-3 py-1 text-xs font-medium text-white hover:bg-zinc-700 disabled:opacity-50 flex items-center gap-2"
+                        >
+                          {verifyingDomain === domain._id && <Loader2 className="h-3 w-3 animate-spin" />}
+                          Verify DNS
+                        </button>
+                        {domain.status !== 'active' && (
+                          <button 
+                            onClick={() => handleDeleteDomain(domain._id)}
+                            className="rounded border border-red-500/20 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400 hover:bg-red-500/20 flex items-center gap-2"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="grid md:grid-cols-2 gap-4 mb-4">
+                      <div className="p-3 bg-zinc-900 rounded border border-zinc-800">
+                        <p className="text-xs text-zinc-500 mb-1">Frontend (Vercel)</p>
+                        <p className="text-sm text-white">https://{domain.frontendDomain}</p>
+                        <p className="text-sm text-white mt-1">https://{domain.wwwDomain}</p>
+                        <p className="text-xs text-zinc-500 mt-2">Verification: {domain.frontendVerification}</p>
+                      </div>
+                      <div className="p-3 bg-zinc-900 rounded border border-zinc-800">
+                        <p className="text-xs text-zinc-500 mb-1">Backend ({domain.backendProvider})</p>
+                        <p className="text-sm text-white">https://{domain.backendDomain}</p>
+                        <p className="text-xs text-zinc-500 mt-2">Verification: {domain.backendVerification}</p>
+                        {domain.backendVerification === 'manual_setup_required' && (
+                          <p className="text-xs text-amber-400 mt-1">Manual setup required in {domain.backendProvider} dashboard.</p>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {domain.dnsRecords && domain.dnsRecords.length > 0 && (
+                      <div>
+                        <p className="text-sm font-medium text-zinc-400 mb-2">DNS Records to Add:</p>
+                        <div className="overflow-x-auto rounded border border-zinc-800">
+                          <table className="w-full text-left text-sm text-zinc-400">
+                            <thead className="bg-zinc-900 text-xs uppercase text-zinc-500">
+                              <tr>
+                                <th className="px-4 py-2">Type</th>
+                                <th className="px-4 py-2">Name</th>
+                                <th className="px-4 py-2">Value</th>
+                                <th className="px-4 py-2">Purpose</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-zinc-800 bg-black/40">
+                              {domain.dnsRecords.map((rec: any, i: number) => (
+                                <tr key={i}>
+                                  <td className="px-4 py-2 font-mono">{rec.type}</td>
+                                  <td className="px-4 py-2 font-mono">{rec.name}</td>
+                                  <td className="px-4 py-2 font-mono text-indigo-300">{rec.value}</td>
+                                  <td className="px-4 py-2 capitalize">{rec.purpose}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {domain.status !== 'active' && (
+                      <div className="mt-4 pt-4 border-t border-zinc-800">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-sm font-medium text-white">Cloudflare DNS Automation</h4>
+                          {isCloudflareConnected ? (
+                            <span className="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded">Connected</span>
+                          ) : (
+                            <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-1 rounded">Not connected</span>
+                          )}
+                        </div>
+                        
+                        {!isCloudflareConnected ? (
+                          <div className="flex flex-col gap-2">
+                            <div className="flex gap-2 items-center">
+                              <input 
+                                type="password"
+                                placeholder="Cloudflare API Token..."
+                                value={cloudflareKey}
+                                onChange={(e) => setCloudflareKey(e.target.value)}
+                                className="flex-1 rounded border border-zinc-800 bg-black p-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                              />
+                              <button
+                                onClick={handleConnectCloudflare}
+                                disabled={!cloudflareKey || savingCloudflareKey}
+                                className="rounded bg-indigo-500 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-600 disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
+                              >
+                                {savingCloudflareKey && <Loader2 className="h-3 w-3 animate-spin" />}
+                                Connect
+                              </button>
+                            </div>
+                            <p className="text-[11px] text-zinc-500 mt-1">
+                              Create a Custom Token in your <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">Cloudflare Profile</a> with these Permissions:
+                              <br />• <strong>Zone</strong> / <strong>Zone</strong> / <strong>Read</strong>
+                              <br />• <strong>Zone</strong> / <strong>DNS</strong> / <strong>Edit</strong>
+                              <br />Set Zone Resources to <strong>Include</strong> / <strong>All zones</strong> (or specific domain).
+                            </p>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleApplyCloudflareDns(domain._id, true)}
+                                disabled={applyingDns === domain._id}
+                                className="rounded border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs font-medium text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-50 flex items-center gap-2"
+                              >
+                                {applyingDns === domain._id && <Loader2 className="h-3 w-3 animate-spin" />}
+                                Preview Changes
+                              </button>
+                              
+                              {dnsPreview.length > 0 && applyingDns !== domain._id && (
+                                <button
+                                  onClick={() => handleApplyCloudflareDns(domain._id, false)}
+                                  className="rounded bg-indigo-500 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-600 flex items-center gap-2"
+                                >
+                                  Apply DNS Automatically
+                                </button>
+                              )}
+                            </div>
+                            
+                            {dnsPreview.length > 0 && applyingDns !== domain._id && (
+                              <div className="mt-3 space-y-1">
+                                {dnsPreview.map((p, i) => (
+                                  <div key={i} className="text-xs flex gap-2">
+                                    <span className={`px-1.5 py-0.5 rounded capitalize ${p.action === 'create' ? 'bg-green-500/10 text-green-400' : p.action === 'skip' ? 'bg-zinc-800 text-zinc-400' : p.action === 'conflict' ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>
+                                      {p.action}
+                                    </span>
+                                    <span className="text-zinc-300 font-mono">{p.record}</span>
+                                    <span className="text-zinc-500">- {p.reason}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
       </div>

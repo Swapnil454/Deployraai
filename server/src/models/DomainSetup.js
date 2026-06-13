@@ -49,7 +49,7 @@ const DomainSetupSchema = new mongoose.Schema({
       name: String,
       value: String,
       purpose: String, // e.g., "frontend", "www", "backend", "verification"
-      status: { type: String, enum: ["pending", "verified", "failed", "conflict", "active", "synced"], default: "pending" }
+      status: { type: String, enum: ["pending", "verified", "failed"], default: "pending" }
     }
   ],
   

@@ -173,6 +173,11 @@ export const getVercelDomain = async (token, projectId, domain) => {
   return data;
 };
 
+export const forceVerifyVercelDomain = async (token, projectId, domain) => {
+  const data = await vercelAPI(token, 'POST', `/v9/projects/${projectId}/domains/${domain}/verify`);
+  return data;
+};
+
 export const removeVercelDomain = async (token, projectId, domain) => {
   const data = await vercelAPI(token, 'DELETE', `/v9/projects/${projectId}/domains/${domain}`);
   return data;

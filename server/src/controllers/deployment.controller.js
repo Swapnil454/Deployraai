@@ -24,6 +24,7 @@ import {
   getRenderServices,
   getRenderService
 } from "../services/providers/render.service.js";
+import { createDefaultMonitors } from '../services/monitoring.service.js';
 import {
   getVercelToken,
   getVercelUser,
@@ -713,16 +714,23 @@ export const triggerFullDeployment = async (req, res) => {
        try {
          await appendLog('info', 'deploying_backend', 'Step 1: Executing Backend Deployment');
          let backendRes = await executeBackendDeployment(deployment, project, []);
-         let backendUrl = backendRes?.url;
+         let providerBackendUrl = backendRes?.url;
+         let backendUrl = providerBackendUrl;
          let backendDashboardUrl = backendRes?.dashboardUrl;
          
-         if (!backendUrl) {
-            await appendLog('warning', 'deploying_backend', 'Backend deployed but URL was not returned. Proceeding anyway.');
-            backendUrl = "http://unknown-backend-url";
-         } else {
-            await appendLog('success', 'deploying_backend', `Backend deployed successfully at ${backendUrl}`);
-         }
+         const DomainSetup = (await import('../models/DomainSetup.js')).default;
+         const domainSetup = await DomainSetup.findOne({ projectId, status: 'active' });
 
+         if (domainSetup && domainSetup.backendDomain) {
+             backendUrl = `https://${domainSetup.backendDomain}`;
+             await appendLog('info', 'custom_domain', `Overriding backend URL with active custom domain: ${backendUrl}`);
+         } else if (!backendUrl) {
+             await appendLog('warning', 'deploying_backend', 'Backend deployed but URL was not returned. Proceeding anyway.');
+             backendUrl = "http://unknown-backend-url";
+             providerBackendUrl = backendUrl;
+         } else {
+             await appendLog('success', 'deploying_backend', `Backend deployed successfully at ${backendUrl}`);
+         }
          // Find the correct Frontend ENV key for Backend URL (e.g., VITE_API_URL, NEXT_PUBLIC_API_URL)
          let frontendApiUrlKey = 'NEXT_PUBLIC_API_URL';
          if (project.configuration.envVariables && project.configuration.envVariables.frontend) {
@@ -734,14 +742,19 @@ export const triggerFullDeployment = async (req, res) => {
          await appendLog('info', 'deploying_frontend', `Step 2: Executing Frontend Deployment with ${frontendApiUrlKey} injected`);
          const injectedFrontendEnv = [{ key: frontendApiUrlKey, value: backendUrl }];
          let frontendRes = await executeFrontendDeployment(deployment, project, injectedFrontendEnv);
-         let frontendUrl = frontendRes?.url;
+         let providerFrontendUrl = frontendRes?.url;
+         let frontendUrl = providerFrontendUrl;
          let frontendDashboardUrl = frontendRes?.dashboardUrl;
 
-         if (!frontendUrl) {
-            await appendLog('warning', 'deploying_frontend', 'Frontend deployed but URL was not returned. Proceeding anyway.');
-            frontendUrl = "http://unknown-frontend-url";
+         if (domainSetup && domainSetup.frontendDomain) {
+             frontendUrl = `https://${domainSetup.frontendDomain}`;
+             await appendLog('info', 'custom_domain', `Overriding frontend URL with active custom domain: ${frontendUrl}`);
+         } else if (!frontendUrl) {
+             await appendLog('warning', 'deploying_frontend', 'Frontend deployed but URL was not returned. Proceeding anyway.');
+             frontendUrl = "http://unknown-frontend-url";
+             providerFrontendUrl = frontendUrl;
          } else {
-            await appendLog('success', 'deploying_frontend', `Frontend deployment completed successfully. URL: ${frontendUrl}`);
+             await appendLog('success', 'deploying_frontend', `Frontend deployment completed successfully. URL: ${frontendUrl}`);
          }
 
          // Find the correct Backend ENV key for Frontend URL (e.g., CLIENT_URL, CORS_ORIGIN)
@@ -867,6 +880,14 @@ export const triggerFullDeployment = async (req, res) => {
 
          await appendLog(finalStatus === 'success' ? 'success' : 'error', 'checking_full_stack', `Full-stack deployment orchestration completed with status: ${finalStatus}`);
          
+         if (finalStatus === 'success') {
+             try {
+                 await createDefaultMonitors(projectId, frontendUrl, backendUrl);
+             } catch (monitorErr) {
+                 console.error("Failed to auto-create monitors after deployment:", monitorErr);
+             }
+         }
+
          await Deployment.findByIdAndUpdate(deployment._id, { 
             status: finalStatus, 
             deploymentUrl: frontendUrl,

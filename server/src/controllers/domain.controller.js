@@ -3,11 +3,11 @@ import Project from "../models/Project.js";
 import Deployment from "../models/Deployment.js";
 import dns from "dns/promises";
 import https from "https";
-import { getVercelToken, addVercelDomain, getVercelDomain, removeVercelDomain } from "../services/providers/vercel.service.js";
-import { getRenderToken, addRenderCustomDomain, getRenderCustomDomain, removeRenderCustomDomain } from "../services/providers/render.service.js";
+import { getVercelToken, addVercelDomain, getVercelDomain, removeVercelDomain, forceVerifyVercelDomain } from "../services/providers/vercel.service.js";
+import { getRenderToken, addRenderCustomDomain, getRenderCustomDomain, removeRenderCustomDomain, forceVerifyRenderDomain, listRenderCustomDomains } from "../services/providers/render.service.js";
 import { getRailwayToken, addRailwayCustomDomain, getRailwayCustomDomain, listRailwayDomains } from "../services/providers/railway.service.js";
-import { getCloudflareToken, findZoneByDomain, getDnsRecords, createDnsRecord, updateDnsRecord } from "../services/providers/cloudflare.service.js";
 import { createDefaultMonitors } from "../services/monitoring.service.js";
+import { getCloudflareToken, findZoneByDomain, getDnsRecords, createDnsRecord, updateDnsRecord } from "../services/providers/cloudflare.service.js";
 
 const validateDomain = (domain) => {
   const regex = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
@@ -65,7 +65,13 @@ export const addCustomDomain = async (req, res) => {
       try {
         const token = await getVercelToken(userId);
         if (token) {
-          await addVercelDomain(token, vercelProjectId, frontendDomain);
+          const vData = await addVercelDomain(token, vercelProjectId, frontendDomain);
+          // Check for verification challenges
+          if (vData && vData.verification && Array.isArray(vData.verification)) {
+            vData.verification.forEach(v => {
+              domainSetup.dnsRecords.push({ type: v.type, name: v.domain.replace(`.${rootDomain}`, ''), value: v.value, purpose: `frontend_verification` });
+            });
+          }
           // Don't fail the whole block if www fails, or vice versa
           try { await addVercelDomain(token, vercelProjectId, wwwDomain); } catch (e) {}
         }
@@ -145,54 +151,91 @@ export const verifyDomainLogic = async (domainSetup) => {
   let frontendVerified = false;
   let backendVerified = false;
 
-  // 1. DNS Resolution
   try {
-    const records = await dns.resolve4(domainSetup.frontendDomain);
-    if (records.includes("76.76.21.21")) frontendVerified = true;
-  } catch (e) {
-    // ignore
-  }
+    if (domainSetup.frontendProvider === "vercel") {
+      const token = await getVercelToken(domainSetup.userId);
+      if (token) {
+        // Force aggressive verification check first
+        try { await forceVerifyVercelDomain(token, domainSetup.providerProjectId, domainSetup.frontendDomain); } catch (e) {}
 
-  try {
-    const records = await dns.resolveCname(domainSetup.backendDomain);
-    if (records.some(r => r.includes("onrender.com") || r.includes("railway.app"))) {
-      backendVerified = true;
+        const vData = await getVercelDomain(token, domainSetup.providerProjectId, domainSetup.frontendDomain);
+        if (vData && vData.verified) {
+          frontendVerified = true;
+        } else if (vData && vData.verification && Array.isArray(vData.verification)) {
+          // Add TXT challenges to DNS records for user
+          const existingTxTs = domainSetup.dnsRecords.filter(r => r.type === 'TXT');
+          vData.verification.forEach(v => {
+            if (!existingTxTs.find(r => r.value === v.value)) {
+                let name = v.domain.replace(`.${domainSetup.rootDomain}`, '');
+                if (name === domainSetup.rootDomain) name = '@';
+                domainSetup.dnsRecords.push({ type: v.type, name, value: v.value, purpose: `frontend_verification` });
+            }
+          });
+        }
+      }
     }
   } catch (e) {
-    // ignore
+    console.error("Vercel verify check error:", e);
   }
 
-  // 2. HTTPS Verification
-  const checkHttps = (url) => {
-    return new Promise((resolve) => {
-      https.get(url, (res) => {
-        resolve(res.statusCode >= 200 && res.statusCode < 400);
-      }).on('error', () => {
-        resolve(false);
-      });
-    });
-  };
+  try {
+    if (domainSetup.backendProvider === "render") {
+      const token = await getRenderToken(domainSetup.userId);
+      if (token) {
+        const project = await Project.findById(domainSetup.projectId);
+        const latestDeployment = await Deployment.findOne({ projectId: domainSetup.projectId, status: { $in: ["completed", "success"] } }).sort({ createdAt: -1 });
+        const backendServiceId = latestDeployment?.providerServiceId || project?.configuration?.renderServiceId;
+        
+        if (backendServiceId) {
+           let domainId = domainSetup.providerBackendDomainId;
+           
+           if (!domainId) {
+               const domains = await listRenderCustomDomains(token, backendServiceId);
+               if (Array.isArray(domains)) {
+                   const matched = domains.find(d => d.customDomain?.name === domainSetup.backendDomain || d.name === domainSetup.backendDomain);
+                   if (matched) {
+                       domainId = matched.id || matched.customDomain?.id;
+                       domainSetup.providerBackendDomainId = domainId;
+                   }
+               }
+           }
 
-  let frontendHttps = false;
-  let backendHttps = false;
+           if (domainId) {
+               // Force aggressive verification check first
+               try { await forceVerifyRenderDomain(token, backendServiceId, domainId); } catch (e) {}
 
-  if (frontendVerified) {
-    frontendHttps = await checkHttps(`https://${domainSetup.frontendDomain}`);
+               const rData = await getRenderCustomDomain(token, backendServiceId, domainId);
+               if (rData && (rData.verificationStatus === "verified" || rData.customDomain?.verificationStatus === "verified")) {
+                  backendVerified = true;
+               }
+           }
+        }
+      }
+    } else if (domainSetup.backendProvider === "railway") {
+        // Skip railway for now
+        backendVerified = false;
+    }
+  } catch (e) {
+    console.error("Render verify check error:", e);
   }
-  
-  if (backendVerified) {
-    backendHttps = await checkHttps(`https://${domainSetup.backendDomain}/health`);
-  }
 
-  domainSetup.frontendVerification = (frontendVerified && frontendHttps) ? "verified" : "pending";
+  domainSetup.frontendVerification = frontendVerified ? "verified" : "pending";
   if (domainSetup.backendVerification !== "manual_setup_required") {
-      domainSetup.backendVerification = (backendVerified && backendHttps) ? "verified" : "pending";
+      domainSetup.backendVerification = backendVerified ? "verified" : "pending";
   }
 
   if (domainSetup.frontendVerification === "verified" && domainSetup.backendVerification === "verified") {
+    const wasActive = domainSetup.status === "active";
     domainSetup.status = "active";
-    // Phase 5C: Auto-create monitors when domain becomes fully active
-    await createDefaultMonitors(domainSetup.projectId).catch(err => console.error("Monitor auto-create error:", err));
+    
+    if (!wasActive) {
+      // Auto-create monitors when domain first becomes fully active
+      try {
+        await createDefaultMonitors(domainSetup.projectId);
+      } catch (monitorErr) {
+        console.error("Failed to auto-create monitors after domain activation:", monitorErr);
+      }
+    }
   } else if (domainSetup.frontendVerification === "verified" || domainSetup.backendVerification === "verified") {
     domainSetup.status = "partially_active";
   } else {

@@ -108,6 +108,16 @@ export const getRenderCustomDomain = async (token, serviceId, customDomainId) =>
   return data;
 };
 
+export const listRenderCustomDomains = async (token, serviceId) => {
+  const data = await renderAPI(token, 'GET', `/services/${serviceId}/custom-domains`);
+  return data;
+};
+
+export const forceVerifyRenderDomain = async (token, serviceId, customDomainId) => {
+  const data = await renderAPI(token, 'POST', `/services/${serviceId}/custom-domains/${customDomainId}/verify`);
+  return data;
+};
+
 export const removeRenderCustomDomain = async (token, serviceId, customDomainId) => {
   if (!customDomainId) return;
   const data = await renderAPI(token, 'DELETE', `/services/${serviceId}/custom-domains/${customDomainId}`);

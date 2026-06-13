@@ -1,110 +1,122 @@
+import { Resend } from 'resend';
 import Monitor from '../models/Monitor.js';
 import MonitorCheck from '../models/MonitorCheck.js';
-import User from '../models/User.js';
 import Project from '../models/Project.js';
 import DomainSetup from '../models/DomainSetup.js';
-import { Resend } from 'resend';
+import Deployment from '../models/Deployment.js';
+import User from '../models/User.js';
+import { v4 as uuidv4 } from 'uuid';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-const fromEmail = process.env.ALERT_FROM_EMAIL || 'DeployAI <alerts@deployai.com>';
+const ALERT_FROM_EMAIL = process.env.ALERT_FROM_EMAIL || 'DeployAI <alerts@deployai.test>';
 
-export const createDefaultMonitors = async (projectId) => {
+export const createDefaultMonitors = async (projectId, passedFrontendUrl = null, passedBackendUrl = null) => {
   const project = await Project.findById(projectId);
-  if (!project) return;
+  if (!project) throw new Error("Project not found");
 
-  const domainSetups = await DomainSetup.find({ projectId, status: 'active' });
-  const activeDomain = domainSetups[0];
+  const domainSetup = await DomainSetup.findOne({ projectId, status: 'active' }).sort({ createdAt: -1 });
+  const latestDeployment = await Deployment.findOne({ projectId, status: 'success', type: 'full' }).sort({ createdAt: -1 });
 
-  const monitors = [];
+  let frontendUrl = passedFrontendUrl;
+  let backendUrl = passedBackendUrl;
 
-  // Frontend Monitor
-  let frontendUrl = project.configuration?.frontendPlatformUrl || `https://${project.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}.vercel.app`;
-  if (activeDomain) frontendUrl = `https://${activeDomain.frontendDomain}`;
+  if (!frontendUrl && domainSetup) {
+    frontendUrl = `https://${domainSetup.frontendDomain}`;
+  } else if (!frontendUrl && latestDeployment) {
+    frontendUrl = latestDeployment.frontendUrl;
+  }
 
-  // Backend Monitor
-  let backendUrl = project.configuration?.backendPlatformUrl || '';
-  if (activeDomain) backendUrl = `https://${activeDomain.backendDomain}`;
+  if (!backendUrl && domainSetup) {
+    backendUrl = `https://${domainSetup.backendDomain}`;
+  } else if (!backendUrl && latestDeployment) {
+    backendUrl = latestDeployment.backendUrl;
+  }
 
-  const defaultMonitorsToCreate = [];
+  if (!frontendUrl && !backendUrl) {
+    return { created: 0, message: "No URLs available to monitor" };
+  }
+
+  let createdCount = 0;
 
   if (frontendUrl) {
-    defaultMonitorsToCreate.push({
-      userId: project.userId,
-      projectId: project._id,
-      domainSetupId: activeDomain ? activeDomain._id : null,
-      name: 'Frontend',
-      type: 'frontend',
-      url: frontendUrl,
-      healthPath: '/'
-    });
+    // Check if exists
+    let feMonitor = await Monitor.findOne({ projectId, type: 'frontend', url: frontendUrl });
+    if (!feMonitor) {
+      feMonitor = new Monitor({
+        userId: project.userId,
+        projectId,
+        domainSetupId: domainSetup?._id,
+        name: `${project.name} Frontend`,
+        type: 'frontend',
+        url: frontendUrl,
+        healthPath: '/'
+      });
+      await feMonitor.save();
+      createdCount++;
+    }
   }
 
   if (backendUrl) {
-    defaultMonitorsToCreate.push({
-      userId: project.userId,
-      projectId: project._id,
-      domainSetupId: activeDomain ? activeDomain._id : null,
-      name: 'Backend',
-      type: 'backend',
-      url: backendUrl,
-      healthPath: '/health'
-    });
-  }
-
-  for (let mon of defaultMonitorsToCreate) {
-    try {
-      await Monitor.findOneAndUpdate(
-        { projectId: mon.projectId, type: mon.type, url: mon.url },
-        { $set: mon },
-        { upsert: true, new: true }
-      );
-    } catch (e) {
-      console.error(`Error creating default ${mon.type} monitor:`, e);
+    let beMonitor = await Monitor.findOne({ projectId, type: 'backend', url: backendUrl });
+    if (!beMonitor) {
+      beMonitor = new Monitor({
+        userId: project.userId,
+        projectId,
+        domainSetupId: domainSetup?._id,
+        name: `${project.name} Backend`,
+        type: 'backend',
+        url: backendUrl,
+        healthPath: '/health'
+      });
+      await beMonitor.save();
+      createdCount++;
     }
   }
+
+  return { created: createdCount, frontendUrl, backendUrl };
 };
 
-const sendAlertEmail = async (monitor, user, project, type) => {
-  if (!resend) {
-    console.log(`[Alert] Would send ${type} email to ${user.email} for monitor ${monitor.url}`);
-    return;
-  }
-
-  const subject = type === 'offline' 
-    ? `DeployAI Alert: ${monitor.name} is offline`
-    : `DeployAI Recovery: ${monitor.name} is back online`;
-
-  const html = type === 'offline' 
-    ? `
-      <h2>DeployAI Monitor Alert</h2>
-      <p><strong>Project:</strong> ${project.name}</p>
-      <p><strong>Service:</strong> ${monitor.name}</p>
-      <p><strong>URL:</strong> ${monitor.url}${monitor.healthPath === '/' ? '' : monitor.healthPath}</p>
+const sendAlertEmail = async (monitor, user, type = 'down') => {
+  if (!resend) return;
+  
+  const idempotencyKey = uuidv4();
+  
+  let subject = '';
+  let html = '';
+  
+  if (type === 'down') {
+    subject = `DeployAI Alert: ${monitor.name} is offline`;
+    html = `
+      <h3>DeployAI Monitoring Alert</h3>
+      <p><strong>Service:</strong> ${monitor.name} (${monitor.type})</p>
+      <p><strong>URL:</strong> ${monitor.url}${monitor.healthPath !== '/' ? monitor.healthPath : ''}</p>
       <p><strong>Failures:</strong> ${monitor.consecutiveFailures} consecutive checks</p>
       <p><strong>Last error:</strong> ${monitor.lastErrorMessage}</p>
-      <p><strong>Last checked:</strong> ${new Date().toISOString()}</p>
-    `
-    : `
-      <h2>DeployAI Monitor Recovery</h2>
-      <p><strong>Project:</strong> ${project.name}</p>
-      <p><strong>Service:</strong> ${monitor.name}</p>
-      <p><strong>URL:</strong> ${monitor.url}${monitor.healthPath === '/' ? '' : monitor.healthPath}</p>
-      <p>Your service is back online!</p>
+      <p><strong>Last checked:</strong> ${monitor.lastCheckedAt}</p>
+      <p>Please check your application dashboard.</p>
     `;
+  } else if (type === 'up') {
+    subject = `DeployAI Recovery: ${monitor.name} is back online`;
+    html = `
+      <h3>DeployAI Monitoring Recovery</h3>
+      <p><strong>Service:</strong> ${monitor.name} (${monitor.type})</p>
+      <p><strong>URL:</strong> ${monitor.url}${monitor.healthPath !== '/' ? monitor.healthPath : ''}</p>
+      <p>Your service is now responding correctly.</p>
+    `;
+  }
 
   try {
-    // using idempotency key based on monitor ID and status to prevent duplicate sending
     await resend.emails.send({
-      from: fromEmail,
+      from: ALERT_FROM_EMAIL,
       to: user.email,
       subject,
       html,
       headers: {
-        'X-Entity-Ref-ID': `${monitor._id}-${type}-${Date.now()}`
+        'Idempotency-Key': idempotencyKey
       }
     });
   } catch (error) {
-    console.error(`Failed to send alert email for ${monitor._id}:`, error);
+    console.error("Failed to send alert email:", error);
   }
 };
 
@@ -112,59 +124,63 @@ export const runMonitorCheck = async (monitorId) => {
   const monitor = await Monitor.findById(monitorId);
   if (!monitor || !monitor.isEnabled) return null;
 
-  const targetUrl = `${monitor.url}${monitor.healthPath === '/' ? '' : monitor.healthPath}`;
-  let status = 'offline';
-  let statusCode = null;
-  let responseTimeMs = 0;
-  let errorMessage = null;
+  const targetUrl = monitor.healthPath !== '/' 
+    ? (monitor.url.endsWith('/') ? monitor.url.slice(0, -1) + monitor.healthPath : monitor.url + monitor.healthPath) 
+    : monitor.url;
 
   const startTime = Date.now();
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  let statusCode = null;
+  let status = 'offline';
+  let errorMessage = null;
 
   try {
-    let response = await fetch(targetUrl, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'DeployAI-Monitor/1.0' }
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => { controller.abort(); }, 10000);
     
-    // If backend health is 404 on /health, retry /api/health and then /
-    if (monitor.type === 'backend' && response.status === 404 && monitor.healthPath === '/health') {
-      const fallbackUrls = [`${monitor.url}/api/health`, `${monitor.url}/`];
-      for (const fallbackUrl of fallbackUrls) {
-        response = await fetch(fallbackUrl, {
-          signal: controller.signal,
-          headers: { 'User-Agent': 'DeployAI-Monitor/1.0' }
-        });
-        if (response.status !== 404) {
-           break;
-        }
-      }
+    // Add retry for /health -> /api/health then /
+    let res = await fetch(targetUrl, { 
+      headers: { 'User-Agent': 'DeployAI-Monitor/1.0' },
+      signal: controller.signal
+    });
+
+    if (monitor.type === 'backend' && res.status === 404 && monitor.healthPath === '/health') {
+       // Retry with /api/health
+       const apiHealthUrl = monitor.url.endsWith('/') ? monitor.url + 'api/health' : monitor.url + '/api/health';
+       res = await fetch(apiHealthUrl, { 
+         headers: { 'User-Agent': 'DeployAI-Monitor/1.0' },
+         signal: controller.signal
+       });
+       if (res.status === 404) {
+         // Fallback to /
+         res = await fetch(monitor.url, { 
+           headers: { 'User-Agent': 'DeployAI-Monitor/1.0' },
+           signal: controller.signal
+         });
+       }
     }
 
-    responseTimeMs = Date.now() - startTime;
-    statusCode = response.status;
-
-    if (statusCode >= 200 && statusCode < 400) {
-      status = responseTimeMs > 3000 ? 'degraded' : 'online';
-    } else if (statusCode >= 400 && statusCode < 500) {
-      status = 'degraded'; // 404s might just mean bad routing but service is up
-      errorMessage = `HTTP ${statusCode}`;
-    } else {
+    clearTimeout(timeout);
+    statusCode = res.status;
+    
+    if (res.status >= 200 && res.status < 400) {
+      status = 'online';
+    } else if (res.status >= 400 && res.status < 500) {
+      status = 'degraded';
+    } else if (res.status >= 500) {
       status = 'offline';
-      errorMessage = `HTTP ${statusCode}`;
     }
-
-  } catch (error) {
-    responseTimeMs = Date.now() - startTime;
+  } catch (err) {
+    errorMessage = err.name === 'AbortError' ? 'Request timeout' : err.message;
     status = 'offline';
-    errorMessage = error.name === 'AbortError' ? 'Request timeout' : error.message;
-  } finally {
-    clearTimeout(timeoutId);
   }
 
-  // Create Check Record
-  await MonitorCheck.create({
+  const responseTimeMs = Date.now() - startTime;
+  
+  if (status === 'online' && responseTimeMs > 3000) {
+    status = 'degraded';
+  }
+
+  const check = new MonitorCheck({
     userId: monitor.userId,
     projectId: monitor.projectId,
     monitorId: monitor._id,
@@ -174,56 +190,58 @@ export const runMonitorCheck = async (monitorId) => {
     responseTimeMs,
     errorMessage
   });
+  await check.save();
 
-  // Update Monitor Stats
-  const previousStatus = monitor.status;
-  const isOnlineOrDegraded = status === 'online' || status === 'degraded';
-
-  monitor.totalChecks += 1;
   monitor.lastCheckedAt = new Date();
   monitor.lastStatusCode = statusCode;
   monitor.lastResponseTimeMs = responseTimeMs;
   monitor.lastErrorMessage = errorMessage;
-  monitor.status = status;
+  monitor.totalChecks += 1;
 
-  if (isOnlineOrDegraded) {
+  if (status === 'online' || status === 'degraded') {
     monitor.successfulChecks += 1;
     monitor.consecutiveFailures = 0;
+    
+    if (monitor.alertStatus === 'sent') {
+      const user = await User.findById(monitor.userId);
+      await sendAlertEmail(monitor, user, 'up');
+      monitor.alertStatus = 'recovered';
+    }
   } else {
     monitor.failedChecks += 1;
     monitor.consecutiveFailures += 1;
-  }
-
-  monitor.uptimePercentage = (monitor.successfulChecks / monitor.totalChecks) * 100;
-
-  // Alerting Logic
-  if (monitor.consecutiveFailures >= 3) {
-    const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000);
-    if (!monitor.lastAlertSentAt || monitor.lastAlertSentAt < thirtyMinsAgo) {
-      const user = await User.findById(monitor.userId);
-      const project = await Project.findById(monitor.projectId);
-      if (user && project) {
-        await sendAlertEmail(monitor, user, project, 'offline');
+    
+    if (monitor.consecutiveFailures >= 3) {
+      const thirtyMinsAgo = new Date(Date.now() - 30 * 60000);
+      if (!monitor.lastAlertSentAt || monitor.lastAlertSentAt < thirtyMinsAgo) {
+        const user = await User.findById(monitor.userId);
+        await sendAlertEmail(monitor, user, 'down');
         monitor.lastAlertSentAt = new Date();
         monitor.alertCount += 1;
         monitor.alertStatus = 'sent';
       }
     }
-  } else if (isOnlineOrDegraded && monitor.alertStatus === 'sent') {
-    // Recovery
-    const user = await User.findById(monitor.userId);
-    const project = await Project.findById(monitor.projectId);
-    if (user && project) {
-      await sendAlertEmail(monitor, user, project, 'recovered');
-      monitor.alertStatus = 'recovered';
-    }
   }
 
+  monitor.status = status;
+  monitor.uptimePercentage = (monitor.successfulChecks / monitor.totalChecks) * 100;
+  
   await monitor.save();
   return monitor;
 };
 
-export const getMonitorSummary = async (projectId) => {
-  const monitors = await Monitor.find({ projectId });
-  return monitors;
+export const runProjectMonitors = async (projectId) => {
+  const monitors = await Monitor.find({ projectId, isEnabled: true });
+  const results = [];
+  for (const m of monitors) {
+    const res = await runMonitorCheck(m._id);
+    results.push(res);
+  }
+  return results;
+};
+
+export const runAllMonitors = async () => {
+  const monitors = await Monitor.find({ isEnabled: true });
+  // Process in batches or parallel
+  await Promise.all(monitors.map(m => runMonitorCheck(m._id).catch(console.error)));
 };

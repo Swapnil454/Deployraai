@@ -1,6 +1,7 @@
 import app from "./app.js";
 import connect from "./connect.js";
 import dotenv from "dotenv";
+import { initCron } from "./cron.js";
 
 dotenv.config({ override: true });
 
@@ -13,6 +14,7 @@ connect(process.env.MONGO_URI)
 
         const server = app.listen(PORT, HOST, () => {
             console.log(`Server started successfully at http://${HOST}:${PORT}`);
+            initCron();
         });
 
         server.on('error', (error) => {
