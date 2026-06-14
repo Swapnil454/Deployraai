@@ -6,9 +6,13 @@ import { ProjectIcon } from "./ProjectIcon";
 export const ProjectAvatar = ({ project }: { project: any }) => {
   const [imgErrorCount, setImgErrorCount] = useState(0);
   
-  const root = project.configuration?.frontendRoot ? `${project.configuration.frontendRoot}/` : '';
-  const branch = project.selectedBranch || 'main';
-  const repo = project.repoFullName;
+  if (!project) return <ProjectIcon name="Unknown" />;
+
+  const isObject = typeof project === 'object';
+  const root = isObject && project.configuration?.frontendRoot ? `${project.configuration.frontendRoot}/` : '';
+  const branch = isObject && project.selectedBranch ? project.selectedBranch : 'main';
+  const repo = isObject ? project.repoFullName : null;
+  const repoName = isObject ? (project.repoName || project.name) : 'Unknown';
   
   const possibleFiles = [
     'logo.png',
@@ -21,7 +25,7 @@ export const ProjectAvatar = ({ project }: { project: any }) => {
   ];
 
   if (!repo || imgErrorCount >= possibleFiles.length) {
-    return <ProjectIcon name={project.repoName} />;
+    return <ProjectIcon name={repoName} />;
   }
 
   const currentFile = possibleFiles[imgErrorCount];

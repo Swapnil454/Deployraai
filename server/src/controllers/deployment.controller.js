@@ -4,6 +4,7 @@ import Project from "../models/Project.js";
 import ConnectedAccount from "../models/ConnectedAccount.js";
 import { decryptSecret, encryptSecret } from "../utils/encryption.js";
 import User from "../models/User.js";
+import { captureDeploymentScreenshot } from "../services/screenshot.service.js";
 import {
   getRailwayToken,
   getRailwayMe,
@@ -385,7 +386,8 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
                     await Deployment.findByIdAndUpdate(deployment._id, { 
                       deploymentUrl, 
                       providerUrl: deploymentUrl,
-                      providerDashboardUrl: currentDashUrl
+                      providerDashboardUrl: currentDashUrl,
+                      providerDeploymentId: latest.uid || latest.id
                     });
                   }
                   break;
@@ -425,8 +427,14 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
             await Deployment.findByIdAndUpdate(deployment._id, {
               status: finalStatus,
               errorMessage: finalErrorMessage,
-              completedAt: new Date()
+              completedAt: new Date(),
+              'finalSummary.frontendUrl': deploymentUrl,
+              'finalSummary.status': finalStatus
             });
+            
+            if (finalStatus === 'completed' && deploymentUrl) {
+               captureDeploymentScreenshot(deployment._id, deploymentUrl).catch(console.error);
+            }
           }
           return { url: deploymentUrl, dashboardUrl };
 
@@ -903,6 +911,10 @@ export const triggerFullDeployment = async (req, res) => {
             ...(finalStatus === 'failed' ? { errorMessage: failureReason } : {})
          });
 
+         if (finalStatus === 'success' && frontendUrl) {
+            captureDeploymentScreenshot(deployment._id, frontendUrl).catch(console.error);
+         }
+
        } catch (err) {
          console.error("Full stack deploy error:", err);
          await appendLog('error', 'system', `Full deployment failed: ${err.message}`);
@@ -922,14 +934,25 @@ export const triggerFullDeployment = async (req, res) => {
 export const getDeployment = async (req, res) => {
   try {
     const { deploymentId } = req.params;
-    const deployment = await Deployment.findById(deploymentId);
+    const deployment = await Deployment.findById(deploymentId).populate('projectId', 'repoName repoFullName');
     
     if (!deployment) return res.status(404).json({ error: "Deployment not found" });
     if (deployment.userId.toString() !== req.user.userId.toString()) {
       return res.status(403).json({ error: "Access denied" });
     }
 
-    res.json(deployment);
+    const deploymentObj = deployment.toObject();
+    
+    // Check if this is the latest successful deployment for this project and type
+    const latestDeploy = await Deployment.findOne({
+        projectId: deployment.projectId._id,
+        type: deployment.type,
+        status: { $in: ['success', 'completed'] }
+    }).sort({ createdAt: -1 });
+    
+    deploymentObj.isLatest = latestDeploy && latestDeploy._id.toString() === deployment._id.toString();
+
+    res.json(deploymentObj);
   } catch (error) {
     console.error("Get deployment error:", error);
     res.status(500).json({ error: "Failed to fetch deployment" });
@@ -938,7 +961,7 @@ export const getDeployment = async (req, res) => {
 
 export const getUserDeployments = async (req, res) => {
   try {
-    const { type, projectId, environment, branch, status, days } = req.query;
+    const { type, projectId, environment, branch, status, days, startDate, endDate, author } = req.query;
     let query = { userId: req.user.userId };
 
     if (type) query.type = type;
@@ -956,12 +979,30 @@ export const getUserDeployments = async (req, res) => {
       query['source.branch'] = branch;
     }
 
-    if (status && status !== 'all') {
-      if (status === 'ready') query.status = 'success';
-      else query.status = status;
+    if (author && author !== 'all') {
+      query.$or = [
+        { 'source.repoOwner': { $regex: new RegExp(`^${author}$`, 'i') } },
+        { 'source.repoFullName': { $regex: new RegExp(`^${author}/`, 'i') } },
+      ];
     }
 
-    if (days && days !== 'all') {
+    if (status && status !== 'all') {
+      const statusesArray = status.split(',');
+      const mappedStatuses = statusesArray.flatMap(s => {
+        if (s === 'ready') return ['success', 'completed'];
+        if (s === 'building') return ['running'];
+        if (s === 'error') return ['failed'];
+        return [s];
+      });
+      query.status = { $in: mappedStatuses };
+    }
+
+    if (startDate && endDate) {
+      query.createdAt = { 
+        $gte: new Date(startDate), 
+        $lte: new Date(endDate) 
+      };
+    } else if (days && days !== 'all') {
       const d = parseInt(days, 10);
       if (!isNaN(d)) {
         query.createdAt = { $gte: new Date(Date.now() - d * 24 * 60 * 60 * 1000) };
@@ -1349,5 +1390,141 @@ export const retryDeployment = async (req, res) => {
   } catch (error) {
     console.error("Retry deployment error:", error);
     res.status(500).json({ error: "Failed to retry deployment" });
+  }
+};
+
+export const deleteDeployment = async (req, res) => {
+  try {
+    const { deploymentId } = req.params;
+    const deployment = await Deployment.findById(deploymentId);
+    
+    if (!deployment) return res.status(404).json({ error: "Deployment not found" });
+    if (deployment.userId.toString() !== req.user.userId.toString()) return res.status(403).json({ error: "Access denied" });
+
+    // Cancel / Delete from Vercel if applicable
+    if (deployment.platform === 'vercel' && deployment.providerDeploymentId) {
+      try {
+        const { getVercelToken, deleteVercelDeployment } = await import('../services/providers/vercel.service.js');
+        const token = await getVercelToken(req.user.userId);
+        if (token) {
+          await deleteVercelDeployment(token, deployment.providerDeploymentId);
+        }
+      } catch (err) {
+        console.error("Vercel delete error:", err.message);
+      }
+    }
+
+    await Deployment.findByIdAndDelete(deploymentId);
+    res.json({ success: true, message: "Deployment deleted successfully" });
+  } catch (error) {
+    console.error("Delete deployment error:", error);
+    res.status(500).json({ error: "Failed to delete deployment" });
+  }
+};
+
+export const rollbackDeployment = async (req, res) => {
+  try {
+    const { deploymentId } = req.params;
+    const oldDeployment = await Deployment.findById(deploymentId).populate('projectId');
+    
+    if (!oldDeployment) return res.status(404).json({ error: "Deployment not found" });
+    if (oldDeployment.userId.toString() !== req.user.userId.toString()) return res.status(403).json({ error: "Access denied" });
+    
+    if (oldDeployment.platform === 'vercel') {
+      if (!oldDeployment.providerDeploymentId) {
+        return res.status(400).json({ error: "Cannot rollback: the Vercel deployment ID is missing from our records for this deployment." });
+      }
+
+      try {
+        const { getVercelToken, rollbackVercelDeployment, promoteVercelDeployment, getVercelProject, assignVercelAlias } = await import('../services/providers/vercel.service.js');
+        const token = await getVercelToken(req.user.userId);
+        const vercelProjectId = oldDeployment.projectId?.configuration?.vercelProjectId;
+        
+        if (token && vercelProjectId) {
+          let rollbackRes;
+          let isPromote = false;
+          let isAlias = false;
+          
+          try {
+             rollbackRes = await rollbackVercelDeployment(token, vercelProjectId, oldDeployment.providerDeploymentId);
+          } catch (vercelErr) {
+             console.log("Vercel Rollback API failed:", vercelErr.message);
+             try {
+                 console.log("Attempting PROMOTE API fallback...");
+                 // Send empty object as payload just in case Vercel requires it
+                 rollbackRes = await promoteVercelDeployment(token, vercelProjectId, oldDeployment.providerDeploymentId);
+                 isPromote = true;
+             } catch (promoteErr) {
+                 console.log("Vercel Promote API failed:", promoteErr.message);
+                 console.log("Attempting ALIAS assignment fallback...");
+                 
+                 // If both Rollback and Promote fail, manually assign the production aliases to this deployment
+                 const projectData = await getVercelProject(token, vercelProjectId);
+                 if (projectData && projectData.targets && projectData.targets.production && projectData.targets.production.alias) {
+                    const aliases = projectData.targets.production.alias;
+                    let successCount = 0;
+                    for (const alias of aliases) {
+                       try {
+                           await assignVercelAlias(token, oldDeployment.providerDeploymentId, alias);
+                           successCount++;
+                       } catch (aliasErr) {
+                           if (aliasErr.message && aliasErr.message.includes('already associated with this deployment')) {
+                               console.log(`Alias ${alias} is already associated with this deployment. Skipping.`);
+                               successCount++;
+                           } else {
+                               throw aliasErr;
+                           }
+                       }
+                    }
+                    if (successCount === 0) {
+                        throw new Error("Failed to assign any production aliases to this deployment.");
+                    }
+                    rollbackRes = { url: aliases[0] };
+                    isAlias = true;
+                 } else {
+                    throw new Error("Could not fallback to Aliasing because no production domains were found on Vercel.");
+                 }
+             }
+          }
+          
+          let actionText = "Rolled back";
+          if (isPromote) actionText = "Promoted preview";
+          if (isAlias) actionText = "Aliased domain";
+
+          const newDeployment = await Deployment.create({
+            userId: req.user.userId,
+            projectId: oldDeployment.projectId._id,
+            type: oldDeployment.type,
+            serviceName: oldDeployment.serviceName,
+            platform: oldDeployment.platform,
+            status: 'success',
+            source: oldDeployment.source,
+            providerDeploymentId: rollbackRes.id || oldDeployment.providerDeploymentId,
+            providerUrl: rollbackRes.url || oldDeployment.providerUrl,
+            deploymentUrl: oldDeployment.deploymentUrl,
+            finalSummary: {
+               ...oldDeployment.finalSummary,
+               message: `Instantly ${actionText} to Production`,
+               screenshotUrl: oldDeployment.finalSummary?.screenshotUrl
+            },
+            logs: [{
+               level: "info", step: "rollback", message: `${actionText} to ${oldDeployment.providerDeploymentId}`, timestamp: new Date()
+            }]
+          });
+
+          return res.json({ success: true, deploymentId: newDeployment._id });
+        } else {
+           return res.status(400).json({ error: "Vercel configuration missing" });
+        }
+      } catch (err) {
+        console.error("Vercel rollback error:", err.message);
+        return res.status(500).json({ error: `Vercel API failed to rollback: ${err.message}` });
+      }
+    } else {
+       return res.status(400).json({ error: "Instant rollback is only supported for Vercel at this time" });
+    }
+  } catch (error) {
+    console.error("Rollback deployment error:", error);
+    res.status(500).json({ error: "Failed to rollback deployment" });
   }
 };

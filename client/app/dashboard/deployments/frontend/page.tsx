@@ -1,30 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
-import { Loader2, Calendar, Users, Monitor, GitBranch, Activity, Search, ChevronDown, GitCommit, ArrowUp, ArrowUpCircle } from "lucide-react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { Loader2, Calendar, Users, Monitor, GitBranch, Activity, Search, ChevronDown, GitCommit, ArrowUp, ArrowUpCircle, MoreHorizontal } from "lucide-react";
 import { ProjectAvatar } from "@/components/dashboard/ProjectAvatar";
-
-function FilterSelect({ icon: Icon, value, onChange, options, placeholder }: any) {
-  return (
-    <div className="relative group">
-      <div className="flex items-center gap-2 h-9 px-3 bg-black border border-zinc-800 rounded-md text-[13px] font-medium text-zinc-300 hover:border-zinc-700 hover:text-white transition-colors cursor-pointer">
-        {Icon && <Icon className="h-3.5 w-3.5 text-zinc-500 group-hover:text-zinc-400" />}
-        <select 
-          value={value} 
-          onChange={e => onChange(e.target.value)}
-          className="bg-transparent outline-none appearance-none cursor-pointer pr-4"
-        >
-          <option value="all">{placeholder}</option>
-          {options.map((opt: any) => (
-            <option key={opt.value} value={opt.value} className="bg-black text-white">{opt.label}</option>
-          ))}
-        </select>
-        <ChevronDown className="h-3.5 w-3.5 text-zinc-500 absolute right-2 pointer-events-none" />
-      </div>
-    </div>
-  );
-}
+import { DeploymentFilterBar } from "@/components/dashboard/DeploymentFilters";
 
 // Vercel-style tooltip showing "Since [date]" on hover
 function EnvTagWithTooltip({ isProd, isLatestProd, createdAt, supersededAt }: {
@@ -182,16 +162,55 @@ function TimeAgoWithTooltip({ dateString }: { dateString: string }) {
 
 function FrontendDeploymentsContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const projectId = searchParams?.get('projectId') || 'all';
+  const initialBranch = searchParams?.get('branch') || 'all';
+  const repoFullName = searchParams?.get('repoFullName') || '';
+  const projectName = searchParams?.get('projectName') || '';
 
   const [deployments, setDeployments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Filters
   const [dateRange, setDateRange] = useState('all');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  
   const [environment, setEnvironment] = useState('all');
-  const [branch, setBranch] = useState('all');
-  const [status, setStatus] = useState('all');
+  const [branch, setBranch] = useState(initialBranch);
+  const [author, setAuthor] = useState('all');
+  const [status, setStatus] = useState<string[]>(['all']);
+
+  const [authorsList, setAuthorsList] = useState<{value: string, label: string}[]>([]);
+  const [branchesList, setBranchesList] = useState<{value: string, label: string}[]>([]);
+
+  useEffect(() => {
+    if (deployments.length > 0) {
+      setAuthorsList(prev => {
+        const newAuthors = new Set(prev.map(p => p.value));
+        deployments.forEach(d => {
+          const owner = d.source?.repoOwner || d.projectId?.repoFullName?.split('/')[0];
+          if (owner) newAuthors.add(owner);
+        });
+        return Array.from(newAuthors).map(a => ({ value: a, label: a }));
+      });
+      setBranchesList(prev => {
+        const newBranches = new Set(prev.map(p => p.value));
+        deployments.forEach(d => d.source?.branch && newBranches.add(d.source.branch));
+        return Array.from(newBranches).map(b => ({ value: b, label: b }));
+      });
+    }
+  }, [deployments]);
+
+  const clearFilters = () => {
+    setDateRange('all');
+    setCustomStart('');
+    setCustomEnd('');
+    setEnvironment('all');
+    setBranch('all');
+    setAuthor('all');
+    setStatus(['all']);
+  };
 
   const fetchDeployments = useCallback(async () => {
     setLoading(true);
@@ -199,10 +218,21 @@ function FrontendDeploymentsContent() {
       const params = new URLSearchParams();
       params.append('type', 'frontend');
       if (projectId && projectId !== 'all') params.append('projectId', projectId);
-      if (dateRange && dateRange !== 'all') params.append('days', dateRange);
+      
+      if (dateRange === 'custom' && customStart && customEnd) {
+         params.append('startDate', customStart);
+         params.append('endDate', customEnd);
+      } else if (dateRange && dateRange !== 'all') {
+         params.append('days', dateRange);
+      }
+      
       if (environment && environment !== 'all') params.append('environment', environment);
       if (branch && branch !== 'all') params.append('branch', branch);
-      if (status && status !== 'all') params.append('status', status);
+      if (author && author !== 'all') params.append('author', author);
+      
+      if (!status.includes('all') && status.length > 0) {
+         params.append('status', status.join(','));
+      }
 
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/deployments?${params.toString()}`, { credentials: "include" });
       if (res.ok) {
@@ -213,7 +243,7 @@ function FrontendDeploymentsContent() {
     } finally {
       setLoading(false);
     }
-  }, [projectId, dateRange, environment, branch, status]);
+  }, [projectId, dateRange, customStart, customEnd, environment, branch, author, status]);
 
   useEffect(() => {
     fetchDeployments();
@@ -221,66 +251,49 @@ function FrontendDeploymentsContent() {
 
   return (
     <div className="w-full flex flex-col min-h-full">
-      <div className="p-8 w-full flex-1">
+      {/* Filter Toolbar - flush at top, edge-to-edge like Vercel */}
+      <div className="w-full">
+        <div className="max-w-[1440px] w-full mx-auto px-8">
+          <DeploymentFilterBar 
+            dateRange={dateRange} setDateRange={setDateRange}
+            customStart={customStart} setCustomStart={setCustomStart}
+            customEnd={customEnd} setCustomEnd={setCustomEnd}
+            environment={environment} setEnvironment={setEnvironment}
+            branch={branch} setBranch={setBranch}
+            author={author} setAuthor={setAuthor}
+            status={status} setStatus={setStatus}
+            authorsList={authorsList} branchesList={branchesList}
+            onClear={clearFilters}
+          />
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="px-8 pt-0 pb-8 w-full flex-1">
         <div className="max-w-[1440px] w-full mx-auto">
-          
-          {/* Filter Toolbar */}
-          <div className="flex flex-wrap items-center gap-3 mb-6">
-            <FilterSelect 
-              icon={Calendar} 
-              value={dateRange} 
-              onChange={setDateRange} 
-              placeholder="Select Date Range"
-              options={[
-                { value: '1', label: 'Last 24 Hours' },
-                { value: '7', label: 'Last 7 Days' },
-                { value: '30', label: 'Last 30 Days' }
-              ]}
-            />
-            
-            <FilterSelect 
-              icon={Users} 
-              value={'all'} 
-              onChange={() => {}} 
-              placeholder="All Authors..."
-              options={[]}
-            />
-
-            <FilterSelect 
-              icon={Monitor} 
-              value={environment} 
-              onChange={setEnvironment} 
-              placeholder="All Environments"
-              options={[
-                { value: 'production', label: 'Production' },
-                { value: 'preview', label: 'Preview' }
-              ]}
-            />
-
-            <FilterSelect 
-              icon={GitBranch} 
-              value={branch} 
-              onChange={setBranch} 
-              placeholder="All Branches"
-              options={[
-                { value: 'main', label: 'main' },
-                { value: 'master', label: 'master' },
-                { value: 'dev', label: 'dev' }
-              ]}
-            />
-
-            <FilterSelect 
-              icon={Activity} 
-              value={status} 
-              onChange={setStatus} 
-              placeholder="Status"
-              options={[
-                { value: 'ready', label: 'Ready' },
-                { value: 'failed', label: 'Failed' },
-                { value: 'running', label: 'Building' }
-              ]}
-            />
-          </div>
+          {branch !== 'all' && repoFullName && (
+            <div className="mb-6 bg-[#0a0a0a] border border-zinc-800 rounded-lg p-5 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="h-10 w-10 flex items-center justify-center bg-zinc-900 border border-zinc-800 rounded-full">
+                  <GitBranch className="h-5 w-5 text-zinc-400" />
+                </div>
+                <div>
+                  <h2 className="text-white font-semibold text-[15px] flex items-center gap-2">
+                    {projectName} <span className="h-4 w-4 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] text-zinc-400 font-bold ml-1 cursor-help" title="Branch Details">i</span>
+                  </h2>
+                  <p className="text-zinc-500 text-[13px] mt-0.5">Branch link for <span className="text-zinc-300 font-mono">{branch}</span></p>
+                </div>
+              </div>
+              <a 
+                href={`https://github.com/${repoFullName}/tree/${branch}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-4 py-2 bg-transparent hover:bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white transition-colors rounded-md text-[13px] font-medium"
+              >
+                <GitBranch className="h-4 w-4" /> View Branch
+              </a>
+            </div>
+          )}
 
           {/* Deployment Table */}
           <div className="w-full">
@@ -335,10 +348,14 @@ function FrontendDeploymentsContent() {
                     return (
                       <div 
                         key={dep._id} 
-                        className="flex items-center gap-8 px-6 py-[14px] hover:bg-zinc-900/40 transition-colors cursor-pointer min-w-0 border-b border-zinc-800/60 last:border-b-0"
+                        className="flex items-center gap-4 pl-4 pr-2 py-[14px] hover:bg-zinc-800/20 transition-colors min-w-0 border-b border-zinc-800/60 last:border-b-0"
                       >
                         {/* 1. Commit Message */}
-                        <span className="font-medium text-white text-[15px] truncate min-w-0 flex-1" style={{maxWidth: '360px'}}>
+                        <span 
+                          onClick={() => router.push(`/dashboard/deployments/${dep._id}`)}
+                          className="font-medium text-white text-[15px] truncate min-w-0 flex-1 cursor-pointer pr-4" 
+                          style={{maxWidth: '600px'}}
+                        >
                           {dep.source?.commitMessage 
                             ? dep.source.commitMessage 
                             : dep.source?.commitSha 
@@ -372,7 +389,10 @@ function FrontendDeploymentsContent() {
                         />
 
                         {/* 4. Project icon + name */}
-                        <div className="flex items-center gap-2 shrink-0 w-[180px] min-w-0">
+                        <div 
+                          onClick={() => router.push(`/dashboard/projects/${dep.projectId?._id}`)}
+                          className="flex items-center gap-2 shrink-0 w-[180px] min-w-0 cursor-pointer group/project"
+                        >
                           <div className="h-5 w-5 shrink-0 flex items-center justify-center overflow-hidden rounded-[4px] border border-zinc-800">
                             <ProjectAvatar project={dep.projectId || { repoName: 'unknown' }} />
                           </div>
@@ -401,7 +421,7 @@ function FrontendDeploymentsContent() {
                           <span>{dep.source?.branch || 'main'}</span>
                         </div>
 
-                        {/* 7. Time ago + GitHub avatar */}
+                        {/* 7. Time ago + GitHub avatar + Action Dots */}
                         <div className="flex items-center gap-3 shrink-0 ml-auto text-zinc-400 text-[14px] whitespace-nowrap">
                           <TimeAgoWithTooltip dateString={dep.createdAt} />
                           <img
@@ -410,6 +430,12 @@ function FrontendDeploymentsContent() {
                             className="h-6 w-6 rounded-full border border-zinc-700 shrink-0 object-cover"
                             onError={(e: any) => { e.currentTarget.style.display = 'none'; }}
                           />
+                          <button 
+                            className="flex items-center justify-center h-8 w-8 rounded hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-white"
+                            onClick={(e) => { e.stopPropagation(); }}
+                          >
+                            <MoreHorizontal className="h-[18px] w-[18px]" />
+                          </button>
                         </div>
                       </div>
                     );

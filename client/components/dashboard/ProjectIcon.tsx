@@ -2,14 +2,16 @@
 
 import React from "react";
 
-export const ProjectIcon = ({ name }: { name: string }) => {
+export const ProjectIcon = ({ name = "Unknown" }: { name?: string }) => {
   let gradient = "from-blue-600 to-cyan-400";
   let emoji = "🌟";
   
-  if (name.toLowerCase().includes('currency')) {
+  const safeName = name || "Unknown";
+  
+  if (safeName.toLowerCase().includes('currency')) {
     gradient = "from-purple-600 to-orange-400";
     emoji = "⚡";
-  } else if (name.toLowerCase().includes('rating')) {
+  } else if (safeName.toLowerCase().includes('rating')) {
     gradient = "from-blue-600 to-cyan-400";
     emoji = "🌟";
   } else {
@@ -23,8 +25,8 @@ export const ProjectIcon = ({ name }: { name: string }) => {
     ];
     const emojis = ["🌟", "⚡", "🚀", "🔥", "💎", "🎯", "🎨", "🧩", "🔮", "✨"];
     let hash = 0;
-    for (let i = 0; i < name.length; i++) {
-      hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    for (let i = 0; i < safeName.length; i++) {
+      hash = safeName.charCodeAt(i) + ((hash << 5) - hash);
     }
     gradient = gradients[Math.abs(hash) % gradients.length];
     emoji = emojis[Math.abs(hash) % emojis.length];

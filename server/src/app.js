@@ -1,6 +1,8 @@
 import express from "express"
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { oauthRouter, apiAuthRouter } from "./routes/auth.routes.js";
 import githubRoutes from "./routes/github.routes.js";
 import projectRoutes from "./routes/project.routes.js";
@@ -20,6 +22,10 @@ app.use(cors({
 app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+app.use('/screenshots', express.static(path.join(__dirname, '../public/screenshots')));
 
 // Mount routes
 app.use("/auth", oauthRouter);

@@ -129,12 +129,28 @@ export const getVercelDeployments = async (token, projectId) => {
   return vercelAPI(token, 'GET', `/v6/deployments?projectId=${projectId}&limit=1`);
 };
 
+export const deleteVercelDeployment = async (token, deploymentId) => {
+  return vercelAPI(token, 'DELETE', `/v13/deployments/${deploymentId}`);
+};
+
+export const rollbackVercelDeployment = async (token, projectId, deploymentId) => {
+  return vercelAPI(token, 'POST', `/v1/projects/${projectId}/rollback/${deploymentId}`);
+};
+
+export const promoteVercelDeployment = async (token, projectId, deploymentId) => {
+  return vercelAPI(token, 'POST', `/v10/projects/${projectId}/promote/${deploymentId}`);
+};
+
 export const getVercelProjects = async (token) => {
   return vercelAPI(token, 'GET', '/v9/projects');
 };
 
 export const getVercelProject = async (token, projectId) => {
   return vercelAPI(token, 'GET', `/v9/projects/${projectId}`);
+};
+
+export const assignVercelAlias = async (token, deploymentId, alias) => {
+  return vercelAPI(token, 'POST', `/v2/deployments/${deploymentId}/aliases`, { alias });
 };
 
 export const getVercelDeploymentEvents = async (token, deploymentId) => {

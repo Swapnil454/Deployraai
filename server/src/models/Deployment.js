@@ -87,7 +87,8 @@ const DeploymentSchema = new mongoose.Schema({
     durationMs: { type: Number },
     failedStep: { type: String },
     failureReason: { type: String },
-    suggestedFix: { type: String }
+    suggestedFix: { type: String },
+    screenshotUrl: { type: String }
   },
 
   errorMessage: { type: String },

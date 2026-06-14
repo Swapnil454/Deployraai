@@ -7,7 +7,9 @@ import {
   syncDeployment,
   explainDeploymentError,
   retryDeployment,
-  getUserDeployments
+  getUserDeployments,
+  deleteDeployment,
+  rollbackDeployment
 } from "../controllers/deployment.controller.js";
 import { applyConfigFix } from "../controllers/configFix.controller.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
@@ -25,6 +27,8 @@ router.get("/:deploymentId", getDeployment);
 router.post("/:deploymentId/sync", syncDeployment);
 router.post("/:deploymentId/explain-error", explainDeploymentError);
 router.post("/:deploymentId/retry", retryDeployment);
+router.post("/:deploymentId/rollback", rollbackDeployment);
+router.delete("/:deploymentId", deleteDeployment);
 router.post("/:deploymentId/apply-config-fix", applyConfigFix);
 
 // Auto-Fix PR route
