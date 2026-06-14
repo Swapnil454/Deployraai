@@ -3,6 +3,7 @@ import Deployment from "../models/Deployment.js";
 import Project from "../models/Project.js";
 import ConnectedAccount from "../models/ConnectedAccount.js";
 import { decryptSecret, encryptSecret } from "../utils/encryption.js";
+import User from "../models/User.js";
 import {
   getRailwayToken,
   getRailwayMe,
@@ -160,7 +161,8 @@ export const triggerFrontendDeployment = async (req, res) => {
     res.status(202).json({ success: true, deploymentId: deployment._id, message: "Deployment started" });
     executeFrontendDeployment(deployment, project, []);
   } catch (error) {
-    res.status(500).json({ error: "Failed to trigger deployment" });
+    console.error(`Trigger frontend deployment error for project ${req.params?.projectId}:`, error);
+    res.status(500).json({ error: "Failed to trigger deployment", details: error.message });
   }
 };
 
@@ -197,7 +199,8 @@ export const triggerBackendDeployment = async (req, res) => {
     res.status(202).json({ success: true, deploymentId: deployment._id, message: "Deployment started" });
     executeBackendDeployment(deployment, project, []);
   } catch (error) {
-    res.status(500).json({ error: "Failed to trigger deployment" });
+    console.error(`Trigger backend deployment error for project ${req.params?.projectId}:`, error);
+    res.status(500).json({ error: "Failed to trigger deployment", details: error.message });
   }
 };
 
@@ -242,7 +245,8 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
         let providerServiceId = project.configuration.vercelProjectId;
         let deploymentUrl;
         let dashboardUrl;
-        let projectName = `deploy-ai-${projectId.toString().slice(-6)}`;
+        const safeRepoName = (project.repoName || 'app').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+        let projectName = `${safeRepoName}-deployra`;
 
         try {
           if (providerServiceId) {
@@ -454,7 +458,8 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
   const projectId = project._id;
   const userId = project.userId;
   const platform = project.configuration.backendPlatform;
-  const projectName = `deploy-ai-${projectId.toString().slice(-6)}`;
+  const safeRepoName = (project.repoName || 'app').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  const projectName = `${safeRepoName}-deployra`;
 
       const appendLog = async (level, step, message, metadata={}) => {
         await Deployment.findByIdAndUpdate(deployment._id, {
@@ -928,6 +933,117 @@ export const getDeployment = async (req, res) => {
   } catch (error) {
     console.error("Get deployment error:", error);
     res.status(500).json({ error: "Failed to fetch deployment" });
+  }
+};
+
+export const getUserDeployments = async (req, res) => {
+  try {
+    const { type, projectId, environment, branch, status, days } = req.query;
+    let query = { userId: req.user.userId };
+
+    if (type) query.type = type;
+    if (projectId && projectId !== 'all') query.projectId = projectId;
+    
+    if (environment && environment !== 'all') {
+       if (environment.toLowerCase() === 'production') {
+         query['source.branch'] = 'main';
+       } else if (environment.toLowerCase() === 'preview') {
+         query['source.branch'] = { $ne: 'main' };
+       }
+    }
+
+    if (branch && branch !== 'all') {
+      query['source.branch'] = branch;
+    }
+
+    if (status && status !== 'all') {
+      if (status === 'ready') query.status = 'success';
+      else query.status = status;
+    }
+
+    if (days && days !== 'all') {
+      const d = parseInt(days, 10);
+      if (!isNaN(d)) {
+        query.createdAt = { $gte: new Date(Date.now() - d * 24 * 60 * 60 * 1000) };
+      }
+    }
+
+    const deployments = await Deployment.find(query)
+      .populate('projectId', 'repoName repoFullName')
+      .sort({ createdAt: -1 });
+
+    // Get the user's GitHub token once for enrichment
+    let githubToken = null;
+    try {
+      const connectedAccount = await ConnectedAccount.findOne({ userId: req.user.userId, provider: 'github', status: 'connected' });
+      if (connectedAccount?.accessTokenEncrypted) {
+        githubToken = decryptSecret(connectedAccount.accessTokenEncrypted);
+      } else {
+        const user = await User.findById(req.user.userId);
+        if (user?.githubAccessTokenEncrypted) {
+          githubToken = decryptSecret(user.githubAccessTokenEncrypted);
+        }
+      }
+    } catch (tokenErr) {
+      console.warn('Could not get GitHub token for commit enrichment:', tokenErr.message);
+    }
+
+    // Enrich deployments with real commit messages from GitHub
+    const enriched = await Promise.all(deployments.map(async (dep) => {
+      const obj = dep.toObject();
+
+      // Skip if we already have the commit message stored
+      if (obj.source?.commitMessage) return obj;
+
+      const repoFullName = obj.source?.repoFullName || obj.projectId?.repoFullName;
+      if (!repoFullName || !githubToken) return obj;
+
+      try {
+        let sha = obj.source?.commitSha;
+        let commitMessage = null;
+
+        if (sha) {
+          // We have a SHA — look up that specific commit
+          const ghRes = await fetch(`https://api.github.com/repos/${repoFullName}/commits/${sha}`, {
+            headers: { Authorization: `Bearer ${githubToken}`, Accept: 'application/vnd.github.v3+json' }
+          });
+          if (ghRes.ok) {
+            const data = await ghRes.json();
+            commitMessage = data.commit?.message?.split('\n')[0] || null;
+          }
+        } else {
+          // No SHA stored — fetch the latest commit from the deployment's branch
+          const branch = obj.source?.branch || 'main';
+          const ghRes = await fetch(`https://api.github.com/repos/${repoFullName}/commits/${branch}`, {
+            headers: { Authorization: `Bearer ${githubToken}`, Accept: 'application/vnd.github.v3+json' }
+          });
+          if (ghRes.ok) {
+            const data = await ghRes.json();
+            sha = data.sha || null;
+            commitMessage = data.commit?.message?.split('\n')[0] || null;
+          }
+        }
+
+        if (commitMessage) {
+          obj.source.commitMessage = commitMessage;
+          if (sha) obj.source.commitSha = sha;
+          // Persist so we don't hit GitHub again on future requests
+          await Deployment.findByIdAndUpdate(dep._id, {
+            'source.commitMessage': commitMessage,
+            ...(sha && { 'source.commitSha': sha })
+          });
+        }
+      } catch (ghErr) {
+        console.warn(`Could not fetch commit for ${repoFullName}:`, ghErr.message);
+      }
+
+      return obj;
+    }));
+
+    res.json(enriched);
+  } catch (error) {
+    console.error("Get user deployments error:", error);
+    res.status(500).json({ error: "Failed to fetch deployments" });
   }
 };
 

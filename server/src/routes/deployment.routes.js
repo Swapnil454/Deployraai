@@ -6,7 +6,8 @@ import {
   getDeployment,
   syncDeployment,
   explainDeploymentError,
-  retryDeployment
+  retryDeployment,
+  getUserDeployments
 } from "../controllers/deployment.controller.js";
 import { applyConfigFix } from "../controllers/configFix.controller.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
@@ -19,6 +20,7 @@ router.post("/:projectId/frontend", triggerFrontendDeployment);
 router.post("/:projectId/backend", triggerBackendDeployment);
 router.post("/:projectId/full", triggerFullDeployment);
 
+router.get("/", getUserDeployments);
 router.get("/:deploymentId", getDeployment);
 router.post("/:deploymentId/sync", syncDeployment);
 router.post("/:deploymentId/explain-error", explainDeploymentError);

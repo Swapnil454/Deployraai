@@ -23,6 +23,7 @@ const DeploymentSchema = new mongoose.Schema({
     repoFullName: { type: String },
     branch: { type: String },
     commitSha: { type: String, default: null },
+    commitMessage: { type: String, default: null },
     rootDirectory: { type: String, default: '/' }
   },
 

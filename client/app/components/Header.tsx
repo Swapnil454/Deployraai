@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { Bot, LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 
 export default function Header() {
   const [user, setUser] = useState<any>(null);
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -38,6 +39,10 @@ export default function Header() {
       console.error("Logout failed", error);
     }
   };
+
+  if (pathname.startsWith("/dashboard")) {
+    return null;
+  }
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-zinc-800 bg-black/50 backdrop-blur-md">

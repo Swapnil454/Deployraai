@@ -177,7 +177,25 @@ export const createProject = async (req, res) => {
 
 export const getProjects = async (req, res) => {
   try {
-    const projects = await Project.find({ userId: req.user.userId }).sort({ createdAt: -1 });
+    const { search, sortBy, filterBy } = req.query;
+    let query = { userId: req.user.userId };
+    
+    if (search) {
+      query.repoName = { $regex: search, $options: 'i' };
+    }
+    
+    if (filterBy === 'Microfrontend') {
+      query['analysis.isMonorepo'] = true;
+    } else if (filterBy === 'Repository') {
+      query['analysis.isMonorepo'] = false;
+    }
+
+    let sort = { updatedAt: -1, createdAt: -1 };
+    if (sortBy === 'Name') {
+      sort = { repoName: 1 };
+    }
+
+    const projects = await Project.find(query).sort(sort);
     res.json(projects);
   } catch (error) {
     console.error("Get Projects Error:", error.message);
