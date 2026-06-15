@@ -407,28 +407,14 @@ function BackendDeploymentsContent() {
             ) : (
               <div className="flex flex-col border border-zinc-800 rounded-xl overflow-visible bg-[#0a0a0a]">
                 {(() => {
-                  const latestProdSet = new Set<string>();
-                  const projectLatestProdTime: Record<string, string> = {};
-
                   return deployments.map((dep: any) => {
                     const isProd = dep.source?.branch === "main" || dep.source?.branch === "master";
                     const isSuccess = dep.status === "success" || dep.status === "completed";
                     const isRunning = dep.status === "running";
                     const owner = dep.source?.repoOwner || dep.projectId?.repoFullName?.split("/")[0] || "github";
 
-                    let isLatestProd = false;
-                    let supersededAt: string | undefined;
-
-                    if (isProd) {
-                      const projId = dep.projectId?._id || "unknown";
-                      if (!latestProdSet.has(projId)) {
-                        isLatestProd = true;
-                        latestProdSet.add(projId);
-                      } else {
-                        supersededAt = projectLatestProdTime[projId];
-                      }
-                      projectLatestProdTime[projId] = dep.createdAt;
-                    }
+                    const isLatestProd = dep.isLatestBackend || false;
+                    const supersededAt = dep.supersededAt;
 
                     const durationSec = dep.durationMs
                       ? Math.round(dep.durationMs / 1000)
@@ -454,7 +440,7 @@ function BackendDeploymentsContent() {
                         </span>
 
                         {/* 2. Status */}
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center gap-2 shrink-0 w-[110px]">
                           {isSuccess ? (
                             <div className="h-2.5 w-2.5 rounded-full bg-[#55c786]" />
                           ) : isRunning ? (
@@ -469,13 +455,15 @@ function BackendDeploymentsContent() {
                         </div>
 
                         {/* 3. Env tag */}
-                        <EnvTag
-                          isProd={isProd}
-                          isLatestProd={isLatestProd}
-                          createdAt={dep.createdAt}
-                          supersededAt={supersededAt}
-                          url={backendUrl}
-                        />
+                        <div className="w-[130px] shrink-0 flex items-center">
+                          <EnvTag
+                            isProd={isProd}
+                            isLatestProd={isLatestProd}
+                            createdAt={dep.createdAt}
+                            supersededAt={supersededAt}
+                            url={backendUrl}
+                          />
+                        </div>
 
                         {/* 4. Platform badge */}
                         <PlatformBadge platform={dep.platform} />

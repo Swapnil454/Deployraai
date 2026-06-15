@@ -104,7 +104,7 @@ const DeploymentSchema = new mongoose.Schema({
     suggestedFixes: [{ type: String }],
     severity: { type: String, enum: ['low', 'medium', 'high'] },
     canAutoFix: { type: Boolean, default: false },
-    fixType: { type: String, enum: ['missing_health_route', 'cors_origin', 'build_error', 'unknown'] },
+    fixType: { type: String, enum: ['missing_health_route', 'cors_origin', 'build_error', 'port_binding_error', 'unknown'] },
     fixPlan: {
       targetFiles: [{ type: String }],
       changes: [{ type: String }]

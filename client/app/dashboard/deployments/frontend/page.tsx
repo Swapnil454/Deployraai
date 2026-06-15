@@ -403,29 +403,14 @@ function FrontendDeploymentsContent() {
             ) : (
               <div className="flex flex-col border border-zinc-800 rounded-xl overflow-visible bg-[#0a0a0a]">
                 {(() => {
-                  const latestProdSet = new Set();
-                  const projectLatestProdTime: Record<string, string> = {};
                   return deployments.map((dep: any) => {
                     const isProd = dep.source?.branch === 'main' || dep.source?.branch === 'master';
-
                     const isSuccess = dep.status === 'success' || dep.status === 'completed';
                     const isRunning = dep.status === 'running';
                     const owner = dep.source?.repoOwner || dep.projectId?.repoFullName?.split('/')[0] || 'github';
                     
-                    let isLatestProd = false;
-                    let supersededAt: string | undefined;
-                    
-                    if (isProd) {
-                      const projId = dep.projectId?._id || 'unknown';
-                      if (!latestProdSet.has(projId)) {
-                        isLatestProd = true;
-                        latestProdSet.add(projId);
-                      } else {
-                        supersededAt = projectLatestProdTime[projId];
-                      }
-                      // Track the end time of the *next* oldest production deployment
-                      projectLatestProdTime[projId] = dep.createdAt;
-                    }
+                    const isLatestProd = dep.isLatestFrontend || false;
+                    const supersededAt = dep.supersededAt;
 
                     // Calculate real duration in seconds
                     const durationSec = dep.durationMs
@@ -453,7 +438,7 @@ function FrontendDeploymentsContent() {
                         </span>
 
                         {/* 2. Status dot + text + duration */}
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center gap-2 shrink-0 w-[110px]">
                           {isSuccess ? (
                             <div className="h-2.5 w-2.5 rounded-full bg-[#55c786]"></div>
                           ) : isRunning ? (
@@ -470,13 +455,15 @@ function FrontendDeploymentsContent() {
                         </div>
 
                         {/* 3. Environment tag with tooltip */}
-                        <EnvTagWithTooltip
-                          isProd={isProd}
-                          isLatestProd={isLatestProd}
-                          createdAt={dep.createdAt}
-                          supersededAt={supersededAt}
-                          url={dep.finalSummary?.frontendUrl || dep.deploymentUrl || dep.providerUrl || '#'}
-                        />
+                        <div className="w-[130px] shrink-0 flex items-center">
+                          <EnvTagWithTooltip
+                            isProd={isProd}
+                            isLatestProd={isLatestProd}
+                            createdAt={dep.createdAt}
+                            supersededAt={supersededAt}
+                            url={dep.finalSummary?.frontendUrl || dep.deploymentUrl || dep.providerUrl || '#'}
+                          />
+                        </div>
 
                         {/* 4. Project icon + name */}
                         <div className="flex items-center gap-2 shrink-0 w-[180px] min-w-0 group/project">

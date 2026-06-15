@@ -511,7 +511,8 @@ export default function DeploymentDetailsPage() {
             <div className="flex items-center gap-2">
               <button 
                 onClick={handleShare}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-800 hover:bg-zinc-900 text-[13px] font-medium text-zinc-300 transition-colors"
+                disabled={!isSuccess}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-800 text-[13px] font-medium transition-colors ${!isSuccess ? 'text-zinc-600 cursor-not-allowed opacity-60' : 'hover:bg-zinc-900 text-zinc-300'}`}
               >
                 {copied ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Share className="h-4 w-4" />} 
                 {copied ? 'Copied' : 'Share'}
@@ -523,17 +524,19 @@ export default function DeploymentDetailsPage() {
 
               <div className="relative flex rounded-md border border-zinc-800 divide-x divide-zinc-800 overflow-visible">
                 <button 
+                  disabled={!isSuccess}
                   onClick={() => {
                     const url = getVisitUrl();
                     if (url !== '#') window.open(url.startsWith('http') ? url : `https://${url}`, '_blank');
                   }}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-zinc-200 text-black text-[13px] font-medium transition-colors rounded-l-[5px]"
+                  className={`flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium transition-colors rounded-l-[5px] ${!isSuccess ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-60' : 'bg-white hover:bg-zinc-200 text-black'}`}
                 >
                   Visit
                 </button>
                 <button 
+                  disabled={!isSuccess}
                   onClick={() => setOpenQR(!openQR)}
-                  className="flex items-center px-2 py-1.5 bg-white hover:bg-zinc-200 text-black transition-colors rounded-r-[5px]"
+                  className={`flex items-center px-2 py-1.5 transition-colors rounded-r-[5px] ${!isSuccess ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-60' : 'bg-white hover:bg-zinc-200 text-black'}`}
                 >
                   <ChevronDown className="h-4 w-4" />
                 </button>
@@ -607,11 +610,12 @@ export default function DeploymentDetailsPage() {
                     </button>
 
                     <button 
+                      disabled={!isSuccess}
                       onClick={() => {
                         handleCopyUrl();
                         setOpenMore(false);
                       }}
-                      className="w-full px-4 py-2 text-left text-[13px] text-zinc-300 hover:bg-zinc-800 transition-colors"
+                      className={`w-full px-4 py-2 text-left text-[13px] transition-colors ${!isSuccess ? 'text-zinc-600 cursor-not-allowed' : 'text-zinc-300 hover:bg-zinc-800'}`}
                     >
                       Copy URL
                     </button>
@@ -662,11 +666,12 @@ export default function DeploymentDetailsPage() {
                   />
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                     <button 
+                      disabled={!isSuccess}
                       onClick={() => {
                         const url = getVisitUrl();
                         if (url !== '#') window.open(url.startsWith('http') ? url : `https://${url}`, '_blank');
                       }}
-                      className="bg-white text-black px-4 py-2 rounded-md font-medium text-sm flex items-center gap-2"
+                      className={`px-4 py-2 rounded-md font-medium text-sm flex items-center gap-2 ${!isSuccess ? 'bg-zinc-600/80 text-zinc-400 cursor-not-allowed' : 'bg-white text-black'}`}
                     >
                       Visit Site <ExternalLink className="h-4 w-4" />
                     </button>
@@ -739,6 +744,8 @@ export default function DeploymentDetailsPage() {
                     )}
                     <span className="text-zinc-200 font-medium capitalize">{deployment.status === 'success' ? 'Ready' : deployment.status}</span>
                     {deployment.isLatest && <span className="text-zinc-500 ml-1 text-[13px]">Latest</span>}
+                    {!deployment.isLatest && deployment.isLatestFrontend && <span className="text-zinc-500 ml-1 text-[13px]">Latest Frontend</span>}
+                    {!deployment.isLatest && deployment.isLatestBackend && <span className="text-zinc-500 ml-1 text-[13px]">Latest Backend</span>}
                   </div>
                 </div>
 
@@ -762,6 +769,12 @@ export default function DeploymentDetailsPage() {
                     </span>
                     {isProd && deployment.isLatest && (
                       <span className="bg-[#1f3a5f] text-blue-400 text-[10px] font-semibold px-2 py-0.5 rounded-full">CURRENT</span>
+                    )}
+                    {isProd && !deployment.isLatest && deployment.isLatestFrontend && (
+                      <span className="bg-[#1f3a5f] text-blue-400 text-[10px] font-semibold px-2 py-0.5 rounded-full">CURRENT FRONTEND</span>
+                    )}
+                    {isProd && !deployment.isLatest && deployment.isLatestBackend && (
+                      <span className="bg-[#1f3a5f] text-blue-400 text-[10px] font-semibold px-2 py-0.5 rounded-full">CURRENT BACKEND</span>
                     )}
                   </div>
                 </div>
@@ -1039,7 +1052,7 @@ export default function DeploymentDetailsPage() {
                           disabled={creatingFix}
                           className="flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50 transition-colors shadow-lg shadow-emerald-500/20"
                         >
-                          {creatingFix ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</> : <>🚀 Create Fix PR</>}
+                          {creatingFix ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</> : <>Create Fix PR</>}
                         </button>
                       )}
                       {(aiAnalysis.userAction === 'retry' || !aiAnalysis.userAction) && !aiAnalysis.canAutoFix && aiAnalysis.failureCategory !== 'platform_internal_bug' && (

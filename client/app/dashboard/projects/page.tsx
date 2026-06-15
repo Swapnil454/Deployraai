@@ -2,8 +2,92 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, LayoutGrid, List, Search, GitBranch, CheckCircle2, MoreHorizontal, Plus } from "lucide-react";
+import { Loader2, LayoutGrid, List, Search, GitBranch, CheckCircle2, MoreHorizontal, Plus, Check, CheckCheck } from "lucide-react";
 import { ProjectAvatar } from "@/components/dashboard/ProjectAvatar";
+
+const ProductionChecklistStatus = ({ project }: { project: any }) => {
+  let hasFrontend = project.configuration?.frontendPlatform && project.configuration.frontendPlatform !== 'none';
+  let hasBackend = project.configuration?.backendPlatform && project.configuration.backendPlatform !== 'none';
+  
+  if (!project.configuration || (!hasFrontend && !hasBackend)) {
+    hasFrontend = true;
+    hasBackend = true;
+  }
+  
+  const totalComponents = (hasFrontend ? 1 : 0) + (hasBackend ? 1 : 0);
+
+  const frontendMonitor = project.monitors?.find((m: any) => m.type === 'frontend');
+  const backendMonitor = project.monitors?.find((m: any) => m.type === 'backend');
+
+  const isDeployed = project.status === 'deployed' || ['success', 'completed'].includes(project.latestDeployment?.status);
+  const isMonitorOk = (monitor: any) => !monitor || monitor.status === 'online' || monitor.status === 'unknown';
+
+  const frontendActive = hasFrontend && isDeployed && isMonitorOk(frontendMonitor);
+  const backendActive = hasBackend && isDeployed && isMonitorOk(backendMonitor);
+
+  const activeComponents = (frontendActive ? 1 : 0) + (backendActive ? 1 : 0);
+  
+  const circumference = 62.8318;
+  const gap = 8;
+  const segmentLength = (circumference - gap * 2) / 2;
+  const offsetStart = gap / 2; 
+
+  return (
+    <div className="relative h-6 w-6 rounded-full flex items-center justify-center group/checklist cursor-help" title="Production Checklist">
+      <svg className="absolute inset-0 h-6 w-6 -rotate-[60deg] transform" viewBox="0 0 24 24">
+        {totalComponents === 2 ? (
+          <circle cx="12" cy="12" r="10" stroke="#334155" strokeWidth="2.5" fill="none" strokeDasharray={`${segmentLength} ${gap}`} strokeDashoffset={-offsetStart} strokeLinecap="round" />
+        ) : (
+          <circle cx="12" cy="12" r="10" stroke="#334155" strokeWidth="2.5" fill="none" />
+        )}
+      </svg>
+      
+      {totalComponents === 2 ? (
+        <svg className="absolute inset-0 h-6 w-6 -rotate-[60deg] transform transition-all duration-500" viewBox="0 0 24 24">
+          <circle 
+            cx="12" cy="12" r="10" 
+            stroke={frontendActive ? "#3b82f6" : "transparent"} 
+            strokeWidth="2.5" 
+            fill="none" 
+            strokeDasharray={`${segmentLength} ${circumference - segmentLength}`} 
+            strokeDashoffset={-offsetStart}
+            strokeLinecap="round"
+          />
+          <circle 
+            cx="12" cy="12" r="10" 
+            stroke={backendActive ? "#3b82f6" : "transparent"} 
+            strokeWidth="2.5" 
+            fill="none" 
+            strokeDasharray={`${segmentLength} ${circumference - segmentLength}`} 
+            strokeDashoffset={-(offsetStart + segmentLength + gap)}
+            strokeLinecap="round"
+          />
+        </svg>
+      ) : (
+        <svg className="absolute inset-0 h-6 w-6 -rotate-[60deg] transform transition-all duration-500" viewBox="0 0 24 24">
+          <circle 
+            cx="12" cy="12" r="10" 
+            stroke={activeComponents === 1 ? "#3b82f6" : "transparent"} 
+            strokeWidth="2.5" 
+            fill="none" 
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+
+      <div className="z-10 flex items-center justify-center">
+        {totalComponents === 2 ? (
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+            <path d="M18 6 7 17l-5-5" stroke={frontendActive ? "#3b82f6" : "#94a3b8"} />
+            <path d="m22 10-7.5 7.5L13 16" stroke={backendActive ? "#3b82f6" : "#94a3b8"} />
+          </svg>
+        ) : (
+          <Check className="h-3.5 w-3.5" color={activeComponents === 1 ? "#3b82f6" : "#94a3b8"} strokeWidth={2.5} />
+        )}
+      </div>
+    </div>
+  );
+};
 
 export default function ProjectsPage() {
   const router = useRouter();
@@ -125,11 +209,9 @@ export default function ProjectsPage() {
                           </div>
                           
                           <div className="flex items-center gap-2">
-                            {project.status === 'deployed' ? (
-                              <div className="h-6 w-6 rounded-full border border-zinc-700 flex items-center justify-center bg-black" title="Deployed successfully">
-                                <CheckCircle2 className="h-3 w-3 text-zinc-300" />
-                              </div>
-                            ) : project.status === 'deploying' ? (
+                            {(project.status === 'deployed' || ['success', 'completed'].includes(project.latestDeployment?.status)) ? (
+                              <ProductionChecklistStatus project={project} />
+                            ) : (project.status === 'deploying' || ['queued', 'running'].includes(project.latestDeployment?.status)) ? (
                               <div className="h-6 w-6 rounded-full border border-zinc-700 flex items-center justify-center bg-black" title="Deploying...">
                                 <Loader2 className="h-3 w-3 text-zinc-400 animate-spin" />
                               </div>
@@ -156,7 +238,20 @@ export default function ProjectsPage() {
                           </a>
                           
                           <div className="flex flex-col gap-1 mt-3">
-                            <span className="truncate text-sm font-medium text-zinc-200">Merge pull request #1</span>
+                            {project.latestDeployment?.source?.commitMessage ? (
+                              <a 
+                                href={`https://github.com/${project.repoFullName}/commit/${project.latestDeployment.source.commitSha}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="truncate text-sm font-medium text-zinc-200 hover:text-indigo-400 hover:underline transition-colors"
+                                onClick={(e) => e.stopPropagation()}
+                                title={project.latestDeployment.source.commitMessage}
+                              >
+                                {project.latestDeployment.source.commitMessage}
+                              </a>
+                            ) : (
+                              <span className="truncate text-sm font-medium text-zinc-500 italic">No deployments yet</span>
+                            )}
                             <div className="flex items-center gap-1.5 text-[13px] font-medium text-zinc-400">
                               <span>{Math.max(1, Math.floor((Date.now() - new Date(project.updatedAt).getTime()) / (1000 * 60 * 60 * 24)))}d ago</span>
                               <span>on</span>
@@ -185,7 +280,20 @@ export default function ProjectsPage() {
                       </div>
 
                       <div className="flex flex-col gap-0.5 w-[35%] min-w-0 hidden md:flex">
-                        <span className="truncate text-[13px] font-medium text-zinc-200">Merge pull request #1</span>
+                        {project.latestDeployment?.source?.commitMessage ? (
+                          <a 
+                            href={`https://github.com/${project.repoFullName}/commit/${project.latestDeployment.source.commitSha}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="truncate text-[13px] font-medium text-zinc-200 hover:text-indigo-400 hover:underline transition-colors"
+                            onClick={(e) => e.stopPropagation()}
+                            title={project.latestDeployment.source.commitMessage}
+                          >
+                            {project.latestDeployment.source.commitMessage}
+                          </a>
+                        ) : (
+                          <span className="truncate text-[13px] font-medium text-zinc-500 italic">No deployments yet</span>
+                        )}
                         <div className="flex items-center gap-1.5 text-[12px] font-medium text-zinc-500">
                           <span>{Math.max(1, Math.floor((Date.now() - new Date(project.updatedAt).getTime()) / (1000 * 60 * 60 * 24)))}d ago</span>
                           <span>on</span>
@@ -208,11 +316,9 @@ export default function ProjectsPage() {
                         </a>
                         
                         <div className="flex items-center gap-3">
-                          {project.status === 'deployed' ? (
-                            <div className="h-6 w-6 rounded-full border border-zinc-700 flex items-center justify-center bg-black" title="Deployed successfully">
-                              <CheckCircle2 className="h-3 w-3 text-zinc-300" />
-                            </div>
-                          ) : project.status === 'deploying' ? (
+                          {(project.status === 'deployed' || ['success', 'completed'].includes(project.latestDeployment?.status)) ? (
+                            <ProductionChecklistStatus project={project} />
+                          ) : (project.status === 'deploying' || ['queued', 'running'].includes(project.latestDeployment?.status)) ? (
                             <div className="h-6 w-6 rounded-full border border-zinc-700 flex items-center justify-center bg-black" title="Deploying...">
                               <Loader2 className="h-3 w-3 text-zinc-400 animate-spin" />
                             </div>

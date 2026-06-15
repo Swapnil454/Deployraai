@@ -1085,14 +1085,43 @@ export const getDeployment = async (req, res) => {
 
     const deploymentObj = deployment.toObject();
     
-    // Check if this is the latest successful deployment for this project and type
-    const latestDeploy = await Deployment.findOne({
-        projectId: deployment.projectId._id,
-        type: deployment.type,
-        status: { $in: ['success', 'completed'] }
-    }).sort({ createdAt: -1 });
+    // Find the absolute latest successful deployments by type for this project
+    const latestTypes = await Deployment.aggregate([
+        { $match: { projectId: deployment.projectId._id, 'source.branch': { $in: ['main', 'master'] }, status: { $in: ['success', 'completed'] } } },
+        { $sort: { createdAt: -1 } },
+        { $group: { _id: "$type", latestDate: { $first: "$createdAt" } } }
+    ]);
+    const latestMap = {};
+    for (const lt of latestTypes) latestMap[lt._id] = lt.latestDate;
     
-    deploymentObj.isLatest = latestDeploy && latestDeploy._id.toString() === deployment._id.toString();
+    const latestFull = latestMap['full'] || new Date(0);
+    const latestFront = latestMap['frontend'] || new Date(0);
+    const latestBack = latestMap['backend'] || new Date(0);
+
+    const absoluteLatestFrontend = latestFull > latestFront ? latestFull : latestFront;
+    const absoluteLatestBackend = latestFull > latestBack ? latestFull : latestBack;
+
+    deploymentObj.isLatestFrontend = false;
+    deploymentObj.isLatestBackend = false;
+
+    if (deployment.status === 'success' || deployment.status === 'completed') {
+        if (deployment.type === 'full') {
+            if (deployment.createdAt >= absoluteLatestFrontend) deploymentObj.isLatestFrontend = true;
+            if (deployment.createdAt >= absoluteLatestBackend) deploymentObj.isLatestBackend = true;
+        } else if (deployment.type === 'frontend') {
+            if (deployment.createdAt >= absoluteLatestFrontend) deploymentObj.isLatestFrontend = true;
+        } else if (deployment.type === 'backend') {
+            if (deployment.createdAt >= absoluteLatestBackend) deploymentObj.isLatestBackend = true;
+        }
+    }
+
+    if (deployment.type === 'full') {
+        deploymentObj.isLatest = deploymentObj.isLatestFrontend && deploymentObj.isLatestBackend;
+    } else if (deployment.type === 'frontend') {
+        deploymentObj.isLatest = deploymentObj.isLatestFrontend;
+    } else if (deployment.type === 'backend') {
+        deploymentObj.isLatest = deploymentObj.isLatestBackend;
+    }
 
     // Fetch custom domains assigned to this project
     const DomainSetup = (await import('../models/DomainSetup.js')).default;
@@ -1121,7 +1150,14 @@ export const getUserDeployments = async (req, res) => {
     
     let query = { userId: req.user.userId };
 
-    if (type) query.type = type;
+    if (type === 'frontend') {
+       query.type = { $in: ['frontend', 'full'] };
+    } else if (type === 'backend') {
+       query.type = { $in: ['backend', 'full'] };
+    } else if (type) {
+       query.type = type;
+    }
+
     if (projectId && projectId !== 'all') query.projectId = projectId;
     
     if (environment && environment !== 'all') {
@@ -1252,13 +1288,97 @@ export const getUserDeployments = async (req, res) => {
       return obj;
     }));
 
+    // Find the latest production deployments by type for each project to calculate isLatestProd accurately
+    const projectIds = [...new Set(enriched.map(d => d.projectId?._id?.toString()).filter(Boolean))];
+    const latestByType = await Deployment.aggregate([
+      { 
+        $match: { 
+          projectId: { $in: projectIds.map(id => new mongoose.Types.ObjectId(id)) }, 
+          'source.branch': { $in: ['main', 'master'] }, 
+          status: { $in: ['success', 'completed'] } 
+        } 
+      },
+      { $sort: { createdAt: -1 } },
+      { 
+        $group: { 
+          _id: { projectId: "$projectId", type: "$type" }, 
+          latestDate: { $first: "$createdAt" },
+          latestId: { $first: "$_id" }
+        } 
+      }
+    ]);
+
+    const latestMap = {};
+    for (const item of latestByType) {
+      const pId = item._id.projectId.toString();
+      const type = item._id.type;
+      if (!latestMap[pId]) latestMap[pId] = {};
+      latestMap[pId][type] = { date: item.latestDate, id: item.latestId.toString() };
+    }
+
+    const finalDeployments = enriched.map(dep => {
+      const pId = dep.projectId?._id?.toString();
+      const isProd = dep.source?.branch === 'main' || dep.source?.branch === 'master';
+      const isSuccess = dep.status === 'success' || dep.status === 'completed';
+      
+      dep.isLatestProd = false;
+      dep.isLatestFrontend = false;
+      dep.isLatestBackend = false;
+      dep.supersededAt = null;
+
+      if (isProd && isSuccess && pId && latestMap[pId]) {
+         const lm = latestMap[pId];
+         const latestFull = lm['full']?.date || new Date(0);
+         const latestFront = lm['frontend']?.date || new Date(0);
+         const latestBack = lm['backend']?.date || new Date(0);
+
+         const absoluteLatestFrontend = latestFull > latestFront ? latestFull : latestFront;
+         const absoluteLatestBackend = latestFull > latestBack ? latestFull : latestBack;
+
+         if (dep.type === 'full') {
+             if (dep.createdAt >= absoluteLatestFrontend) dep.isLatestFrontend = true;
+             if (dep.createdAt >= absoluteLatestBackend) dep.isLatestBackend = true;
+         } else if (dep.type === 'frontend') {
+             if (dep.createdAt >= absoluteLatestFrontend) dep.isLatestFrontend = true;
+         } else if (dep.type === 'backend') {
+             if (dep.createdAt >= absoluteLatestBackend) dep.isLatestBackend = true;
+         }
+
+         if (dep.type === 'full') {
+             dep.isLatestProd = dep.isLatestFrontend && dep.isLatestBackend;
+         } else if (dep.type === 'frontend') {
+             dep.isLatestProd = dep.isLatestFrontend;
+         } else if (dep.type === 'backend') {
+             dep.isLatestProd = dep.isLatestBackend;
+         }
+
+         // Calculate supersededAt
+         if (!dep.isLatestProd) {
+             if (dep.type === 'full') {
+                 if (!dep.isLatestFrontend && !dep.isLatestBackend) {
+                     dep.supersededAt = absoluteLatestFrontend > absoluteLatestBackend ? absoluteLatestFrontend : absoluteLatestBackend;
+                 } else if (!dep.isLatestFrontend) {
+                     dep.supersededAt = absoluteLatestFrontend;
+                 } else if (!dep.isLatestBackend) {
+                     dep.supersededAt = absoluteLatestBackend;
+                 }
+             } else if (dep.type === 'frontend') {
+                 dep.supersededAt = absoluteLatestFrontend;
+             } else if (dep.type === 'backend') {
+                 dep.supersededAt = absoluteLatestBackend;
+             }
+         }
+      }
+      return dep;
+    });
+
     if (limit > 0) {
       res.setHeader('X-Has-More', hasMore ? 'true' : 'false');
       // Expose header so the frontend can read it if CORS is enabled
       res.setHeader('Access-Control-Expose-Headers', 'X-Has-More');
     }
 
-    res.json(enriched);
+    res.json(finalDeployments);
   } catch (error) {
     console.error("Get user deployments error:", error);
     res.status(500).json({ error: "Failed to fetch deployments" });
@@ -1491,16 +1611,16 @@ Response MUST match this exact JSON schema:
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
     const generateWithRetry = async (promptText) => {
-      const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"];
+      const fallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
       for (const modelName of fallbackModels) {
         const currentModel = genAI.getGenerativeModel({ model: modelName });
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 2; i++) {
           try {
             return await currentModel.generateContent(promptText);
           } catch (err) {
             if (err.status === 503 || err.status === 429) {
-              console.log(`[AI Analysis] API error ${err.status} with ${modelName}, retrying in ${(i + 1) * 3} seconds...`);
-              await new Promise(res => setTimeout(res, (i + 1) * 3000));
+              console.log(`[AI Analysis] API error ${err.status} with ${modelName}, retrying in ${(i + 1) * 2} seconds...`);
+              await new Promise(res => setTimeout(res, (i + 1) * 2000));
             } else {
               throw err;
             }
