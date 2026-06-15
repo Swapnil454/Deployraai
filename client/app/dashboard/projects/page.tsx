@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, LayoutGrid, List, Search, GitBranch, CheckCircle2, MoreHorizontal, Plus, Check, CheckCheck } from "lucide-react";
 import { ProjectAvatar } from "@/components/dashboard/ProjectAvatar";
@@ -97,9 +97,31 @@ export default function ProjectsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
+  const lastUpdated = useRef(Date.now());
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
-    return () => clearTimeout(timer);
+    const now = Date.now();
+    const delay = 300;     // Debounce wait time
+    const maxWait = 1000;  // Throttle limit (maximum wait time before forcing a search)
+
+    if (now - lastUpdated.current >= maxWait) {
+      // Throttle condition met: Force update if maxWait elapsed
+      setDebouncedSearch(searchQuery);
+      lastUpdated.current = now;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    } else {
+      // Standard debounce
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        setDebouncedSearch(searchQuery);
+        lastUpdated.current = Date.now();
+      }, delay);
+    }
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, [searchQuery]);
 
   const fetchProjects = useCallback(async () => {
