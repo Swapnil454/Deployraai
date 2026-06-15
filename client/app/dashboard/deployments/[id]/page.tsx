@@ -472,7 +472,7 @@ export default function DeploymentDetailsPage() {
                     <div className="w-1.5 h-1.5 rounded-full bg-zinc-700"></div>
                   </div>
                   <img 
-                    src={`${process.env.NEXT_PUBLIC_API_URL}${deployment.finalSummary.screenshotUrl}`} 
+                    src={deployment.finalSummary.screenshotUrl.startsWith('http') ? deployment.finalSummary.screenshotUrl : `${process.env.NEXT_PUBLIC_API_URL}${deployment.finalSummary.screenshotUrl}`} 
                     alt="Application Preview" 
                     className="w-full h-full object-cover object-top pt-4"
                   />
@@ -576,7 +576,9 @@ export default function DeploymentDetailsPage() {
                       <ArrowUpCircle className="h-4 w-4 text-zinc-400" />
                       {isProd ? 'Production' : 'Preview'}
                     </span>
-                    <span className="bg-[#1f3a5f] text-blue-400 text-[10px] font-semibold px-2 py-0.5 rounded-full">CURRENT</span>
+                    {isProd && deployment.isLatest && (
+                      <span className="bg-[#1f3a5f] text-blue-400 text-[10px] font-semibold px-2 py-0.5 rounded-full">CURRENT</span>
+                    )}
                   </div>
                 </div>
 

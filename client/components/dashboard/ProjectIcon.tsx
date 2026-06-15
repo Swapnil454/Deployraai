@@ -33,7 +33,7 @@ export const ProjectIcon = ({ name = "Unknown" }: { name?: string }) => {
   }
   
   return (
-    <div className={`h-full w-full flex items-center justify-center bg-gradient-to-tr ${gradient}`}>
+    <div className={`h-full w-full flex items-center justify-center bg-transparent`}>
       <span className="text-xl" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>{emoji}</span>
     </div>
   );

@@ -962,6 +962,10 @@ export const getDeployment = async (req, res) => {
 export const getUserDeployments = async (req, res) => {
   try {
     const { type, projectId, environment, branch, status, days, startDate, endDate, author } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 0; // 0 means no limit if not specified to maintain backward compatibility, or we can default to 20 if passed. Wait, if I default to 20, it breaks other pages that expect all deployments.
+    // Actually, I'll only apply pagination if limit is provided.
+    
     let query = { userId: req.user.userId };
 
     if (type) query.type = type;
@@ -1009,9 +1013,23 @@ export const getUserDeployments = async (req, res) => {
       }
     }
 
-    const deployments = await Deployment.find(query)
+    let queryChain = Deployment.find(query)
       .populate('projectId', 'repoName repoFullName')
       .sort({ createdAt: -1 });
+
+    if (limit > 0) {
+      const skip = (page - 1) * limit;
+      queryChain = queryChain.skip(skip).limit(limit + 1);
+    }
+
+    const deploymentsRaw = await queryChain;
+    
+    let hasMore = false;
+    let deployments = deploymentsRaw;
+    if (limit > 0 && deploymentsRaw.length > limit) {
+      hasMore = true;
+      deployments = deploymentsRaw.slice(0, limit);
+    }
 
     // Get the user's GitHub token once for enrichment
     let githubToken = null;
@@ -1080,6 +1098,12 @@ export const getUserDeployments = async (req, res) => {
 
       return obj;
     }));
+
+    if (limit > 0) {
+      res.setHeader('X-Has-More', hasMore ? 'true' : 'false');
+      // Expose header so the frontend can read it if CORS is enabled
+      res.setHeader('Access-Control-Expose-Headers', 'X-Has-More');
+    }
 
     res.json(enriched);
   } catch (error) {

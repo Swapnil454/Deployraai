@@ -5,6 +5,7 @@ import { ProjectIcon } from "./ProjectIcon";
 
 export const ProjectAvatar = ({ project }: { project: any }) => {
   const [imgErrorCount, setImgErrorCount] = useState(0);
+  const [loaded, setLoaded] = useState(false);
   
   if (!project) return <ProjectIcon name="Unknown" />;
 
@@ -32,11 +33,15 @@ export const ProjectAvatar = ({ project }: { project: any }) => {
   const url = `https://raw.githubusercontent.com/${repo}/${branch}/${root}public/${currentFile}`;
 
   return (
-    <img 
-      src={url} 
-      alt="Project Icon" 
-      className="h-full w-full object-contain"
-      onError={() => setImgErrorCount(prev => prev + 1)}
-    />
+    <>
+      {!loaded && <ProjectIcon name={repoName} />}
+      <img 
+        src={url} 
+        alt="Project Icon" 
+        className={`h-full w-full object-contain ${loaded ? 'block' : 'hidden'}`}
+        onLoad={() => setLoaded(true)}
+        onError={() => setImgErrorCount(prev => prev + 1)}
+      />
+    </>
   );
 };

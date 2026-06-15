@@ -1,17 +1,18 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, Suspense } from "react";
+import React, { useState, useEffect, useCallback, Suspense, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Loader2, Calendar, Users, Monitor, GitBranch, Activity, Search, ChevronDown, GitCommit, ArrowUp, ArrowUpCircle, MoreHorizontal } from "lucide-react";
+import { Loader2, Calendar, Users, Monitor, RefreshCw, GitBranch, Activity, ExternalLink, Search, ChevronDown, GitCommit, ArrowUp, ArrowUpCircle, MoreHorizontal, RotateCcw, CheckCircle2 } from "lucide-react";
 import { ProjectAvatar } from "@/components/dashboard/ProjectAvatar";
 import { DeploymentFilterBar } from "@/components/dashboard/DeploymentFilters";
 
 // Vercel-style tooltip showing "Since [date]" on hover
-function EnvTagWithTooltip({ isProd, isLatestProd, createdAt, supersededAt }: {
+function EnvTagWithTooltip({ isProd, isLatestProd, createdAt, supersededAt, url }: {
   isProd: boolean;
   isLatestProd: boolean;
   createdAt?: string;
   supersededAt?: string;
+  url?: string;
 }) {
   const [hovered, setHovered] = useState(false);
 
@@ -25,27 +26,33 @@ function EnvTagWithTooltip({ isProd, isLatestProd, createdAt, supersededAt }: {
 
   return (
     <div
-      className="relative shrink-0"
+      className={`relative shrink-0 ${url && url !== '#' ? 'cursor-pointer' : 'cursor-default'}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={(e) => {
+        if (url && url !== '#') {
+          e.stopPropagation();
+          window.open(url.startsWith('http') ? url : `https://${url}`, '_blank');
+        }
+      }}
     >
       {/* Tag */}
       {isProd ? (
         isLatestProd ? (
-          <div className="flex items-center gap-1.5 px-3 py-1 bg-[#0070F3]/20 text-[#3291FF] rounded-full font-medium text-[13px] cursor-default select-none border border-transparent">
+          <div className="flex items-center gap-1.5 px-3 py-1 bg-[#0070F3]/20 hover:bg-[#0070F3]/30 transition-colors text-[#3291FF] rounded-full font-medium text-[13px] select-none border border-transparent">
             <div className="h-[15px] w-[15px] rounded-full bg-[#0070F3] flex items-center justify-center">
               <ArrowUp className="h-[11px] w-[11px] text-white" strokeWidth={3} />
             </div>
             Production
           </div>
         ) : (
-          <div className="flex items-center gap-1.5 px-3 py-1 border border-zinc-700 bg-transparent text-zinc-100 rounded-full font-medium text-[13px] cursor-default select-none">
+          <div className="flex items-center gap-1.5 px-3 py-1 border border-zinc-700 hover:border-zinc-500 transition-colors bg-transparent text-zinc-100 rounded-full font-medium text-[13px] select-none">
             <ArrowUpCircle className="h-[16px] w-[16px] text-zinc-400" strokeWidth={2} />
             Production
           </div>
         )
       ) : (
-        <div className="flex items-center gap-1.5 px-3 py-1 border border-zinc-700 bg-transparent text-zinc-100 rounded-full font-medium text-[13px] cursor-default select-none">
+        <div className="flex items-center gap-1.5 px-3 py-1 border border-zinc-700 hover:border-zinc-500 transition-colors bg-transparent text-zinc-100 rounded-full font-medium text-[13px] select-none">
           <ArrowUpCircle className="h-[16px] w-[16px] text-zinc-400" strokeWidth={2} />
           Preview
         </div>
@@ -202,6 +209,58 @@ function FrontendDeploymentsContent() {
     }
   }, [deployments]);
 
+  const [openActionId, setOpenActionId] = useState<string | null>(null);
+  const [showToast, setShowToast] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const prevFiltersRef = useRef('');
+
+  useEffect(() => {
+    if (!openActionId) return;
+    const handleGlobalClick = () => setOpenActionId(null);
+    const timer = setTimeout(() => {
+      document.addEventListener('click', handleGlobalClick);
+    }, 10);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', handleGlobalClick);
+    };
+  }, [openActionId]);
+
+  const handleRedeploy = async (deploymentId: string) => {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/deployments/${deploymentId}/retry`, {
+        method: "POST",
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (res.ok && data.deploymentId) {
+        router.push(`/dashboard/deployments/${data.deploymentId}`);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleInstantRollback = async (deploymentId: string) => {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/deployments/${deploymentId}/rollback`, {
+        method: "POST",
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (res.ok && data.deploymentId) {
+        router.push(`/dashboard/deployments/${data.deploymentId}`);
+      } else {
+        alert(data.error || "Failed to instantly rollback deployment");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error triggering rollback");
+    }
+  };
+
   const clearFilters = () => {
     setDateRange('all');
     setCustomStart('');
@@ -212,11 +271,15 @@ function FrontendDeploymentsContent() {
     setStatus(['all']);
   };
 
-  const fetchDeployments = useCallback(async () => {
-    setLoading(true);
+  const fetchDeployments = useCallback(async (currentPage: number, isLoadMore: boolean = false) => {
+    if (isLoadMore) setLoadingMore(true);
+    else setLoading(true);
+    
     try {
       const params = new URLSearchParams();
       params.append('type', 'frontend');
+      params.append('page', currentPage.toString());
+      params.append('limit', '20');
       if (projectId && projectId !== 'all') params.append('projectId', projectId);
       
       if (dateRange === 'custom' && customStart && customEnd) {
@@ -236,18 +299,44 @@ function FrontendDeploymentsContent() {
 
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/deployments?${params.toString()}`, { credentials: "include" });
       if (res.ok) {
-        setDeployments(await res.json());
+        const hasMoreHeader = res.headers.get('X-Has-More');
+        setHasMore(hasMoreHeader === 'true');
+        const data = await res.json();
+        
+        if (isLoadMore) {
+          setDeployments(prev => {
+            const existingIds = new Set(prev.map(d => d._id));
+            const newItems = data.filter((d: any) => !existingIds.has(d._id));
+            return [...prev, ...newItems];
+          });
+        } else {
+          setDeployments(data);
+        }
       }
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }, [projectId, dateRange, customStart, customEnd, environment, branch, author, status]);
 
   useEffect(() => {
-    fetchDeployments();
-  }, [fetchDeployments]);
+    const currentFilters = JSON.stringify({ projectId, dateRange, customStart, customEnd, environment, branch, author, status });
+    let targetPage = page;
+    let isLoadMore = false;
+    
+    if (prevFiltersRef.current !== currentFilters) {
+      setPage(1);
+      targetPage = 1;
+      isLoadMore = false;
+      prevFiltersRef.current = currentFilters;
+    } else {
+      isLoadMore = page > 1;
+    }
+    
+    fetchDeployments(targetPage, isLoadMore);
+  }, [fetchDeployments, page]);
 
   return (
     <div className="w-full flex flex-col min-h-full">
@@ -348,12 +437,12 @@ function FrontendDeploymentsContent() {
                     return (
                       <div 
                         key={dep._id} 
-                        className="flex items-center gap-4 pl-4 pr-2 py-[14px] hover:bg-zinc-800/20 transition-colors min-w-0 border-b border-zinc-800/60 last:border-b-0"
+                        onClick={() => router.push(`/dashboard/deployments/${dep._id}`)}
+                        className="flex items-center gap-4 pl-4 pr-2 py-[14px] hover:bg-zinc-800/20 transition-colors min-w-0 border-b border-zinc-800/60 last:border-b-0 cursor-pointer"
                       >
                         {/* 1. Commit Message */}
                         <span 
-                          onClick={() => router.push(`/dashboard/deployments/${dep._id}`)}
-                          className="font-medium text-white text-[15px] truncate min-w-0 flex-1 cursor-pointer pr-4" 
+                          className="font-medium text-white text-[15px] truncate min-w-0 flex-1 pr-4" 
                           style={{maxWidth: '600px'}}
                         >
                           {dep.source?.commitMessage 
@@ -386,14 +475,12 @@ function FrontendDeploymentsContent() {
                           isLatestProd={isLatestProd}
                           createdAt={dep.createdAt}
                           supersededAt={supersededAt}
+                          url={dep.finalSummary?.frontendUrl || dep.deploymentUrl || dep.providerUrl || '#'}
                         />
 
                         {/* 4. Project icon + name */}
-                        <div 
-                          onClick={() => router.push(`/dashboard/projects/${dep.projectId?._id}`)}
-                          className="flex items-center gap-2 shrink-0 w-[180px] min-w-0 cursor-pointer group/project"
-                        >
-                          <div className="h-5 w-5 shrink-0 flex items-center justify-center overflow-hidden rounded-[4px] border border-zinc-800">
+                        <div className="flex items-center gap-2 shrink-0 w-[180px] min-w-0 group/project">
+                          <div className="h-5 w-5 shrink-0 flex items-center justify-center overflow-hidden">
                             <ProjectAvatar project={dep.projectId || { repoName: 'unknown' }} />
                           </div>
                           <span className="text-zinc-200 font-medium truncate text-[15px]">{dep.projectId?.repoName || 'unknown'}</span>
@@ -418,7 +505,17 @@ function FrontendDeploymentsContent() {
                         {/* 6. Branch */}
                         <div className="flex items-center gap-1.5 text-zinc-400 font-mono text-[14px] shrink-0">
                           <GitBranch className="h-4 w-4 text-zinc-500" />
-                          <span>{dep.source?.branch || 'main'}</span>
+                          <a
+                            href={dep.projectId?.repoFullName && (dep.source?.branch || 'main')
+                              ? `https://github.com/${dep.projectId.repoFullName}/tree/${dep.source?.branch || 'main'}`
+                              : '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:underline hover:text-white transition-colors"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {dep.source?.branch || 'main'}
+                          </a>
                         </div>
 
                         {/* 7. Time ago + GitHub avatar + Action Dots */}
@@ -430,12 +527,92 @@ function FrontendDeploymentsContent() {
                             className="h-6 w-6 rounded-full border border-zinc-700 shrink-0 object-cover"
                             onError={(e: any) => { e.currentTarget.style.display = 'none'; }}
                           />
-                          <button 
-                            className="flex items-center justify-center h-8 w-8 rounded hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-white"
-                            onClick={(e) => { e.stopPropagation(); }}
-                          >
-                            <MoreHorizontal className="h-[18px] w-[18px]" />
-                          </button>
+                          <div className="relative">
+                            <button 
+                              className="flex items-center justify-center h-8 w-8 rounded hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-white"
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                e.nativeEvent.stopPropagation();
+                                setOpenActionId(openActionId === dep._id ? null : dep._id);
+                              }}
+                            >
+                              <MoreHorizontal className="h-[18px] w-[18px]" />
+                            </button>
+
+                            {openActionId === dep._id && (
+                              <div 
+                                className="absolute right-0 top-full mt-1 w-[220px] bg-[#0a0a0a] border border-zinc-800 rounded-lg shadow-2xl py-1.5 z-50 text-[13px] font-medium"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <button 
+                                  onClick={() => { setOpenActionId(null); handleInstantRollback(dep._id); }}
+                                  disabled={!(isSuccess && isProd && !isLatestProd)}
+                                  className={`w-full flex items-center justify-between px-3 py-1.5 transition-colors ${!(isSuccess && isProd && !isLatestProd) ? 'text-zinc-600 cursor-not-allowed' : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'}`}
+                                >
+                                  Instant Rollback <RotateCcw className="h-3.5 w-3.5" />
+                                </button>
+                                <button 
+                                  onClick={() => { setOpenActionId(null); alert('Promote functionality coming soon'); }}
+                                  disabled={!(isSuccess && !isProd)}
+                                  className={`w-full flex items-center justify-between px-3 py-1.5 transition-colors ${!(isSuccess && !isProd) ? 'text-zinc-600 cursor-not-allowed' : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'}`}
+                                >
+                                  Promote <ArrowUpCircle className="h-3.5 w-3.5" />
+                                </button>
+                                <div className="h-px bg-zinc-800 my-1 w-full" />
+                                <button 
+                                  onClick={() => { setOpenActionId(null); handleRedeploy(dep._id); }}
+                                  className="w-full flex items-center px-3 py-1.5 text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  Redeploy
+                                </button>
+                                <button 
+                                  onClick={() => { setOpenActionId(null); router.push(`/dashboard/deployments/${dep._id}`); }}
+                                  className="w-full flex items-center px-3 py-1.5 text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  Inspect Deployment
+                                </button>
+                                <a 
+                                  href={dep.projectId?.repoFullName && (dep.source?.branch || 'main') ? `https://github.com/${dep.projectId.repoFullName}/tree/${dep.source?.branch || 'main'}` : '#'}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={() => setOpenActionId(null)}
+                                  className="w-full flex items-center px-3 py-1.5 text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  View Source
+                                </a>
+                                <button 
+                                  onClick={() => {
+                                    setOpenActionId(null);
+                                    const url = dep.finalSummary?.frontendUrl || dep.deploymentUrl || dep.providerUrl || '';
+                                    if (url) {
+                                      navigator.clipboard.writeText(url.startsWith('http') ? url : `https://${url}`);
+                                      setShowToast(true);
+                                      setTimeout(() => setShowToast(false), 3000);
+                                    }
+                                  }}
+                                  className="w-full flex items-center px-3 py-1.5 text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  Copy URL
+                                </button>
+                                <button 
+                                  onClick={() => { setOpenActionId(null); router.push('/dashboard/domains'); }}
+                                  className="w-full flex items-center px-3 py-1.5 text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  Assign Domain
+                                </button>
+                                <button 
+                                  onClick={() => {
+                                    setOpenActionId(null);
+                                    const url = dep.finalSummary?.frontendUrl || dep.deploymentUrl || dep.providerUrl || '#';
+                                    if (url !== '#') window.open(url.startsWith('http') ? url : `https://${url}`, '_blank');
+                                  }}
+                                  className="w-full flex items-center justify-between px-3 py-1.5 text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                                >
+                                  Visit <ExternalLink className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -445,8 +622,29 @@ function FrontendDeploymentsContent() {
             )}
           </div>
 
+          {hasMore && (
+            <div className="mt-4">
+              <button 
+                onClick={() => setPage(p => p + 1)}
+                disabled={loadingMore}
+                className="w-full py-2.5 bg-[#0a0a0a] hover:bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-lg transition-colors text-[13px] font-medium flex justify-center items-center gap-2"
+              >
+                {loadingMore && <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />}
+                Load More
+              </button>
+            </div>
+          )}
+
         </div>
       </div>
+
+      {/* Toast Notification */}
+      {showToast && (
+        <div className="fixed bottom-6 right-6 bg-[#0a0a0a] border border-zinc-800 text-white px-4 py-3 rounded-lg shadow-2xl flex items-center gap-3 z-50 animate-in fade-in slide-in-from-bottom-5">
+          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+          <span className="text-[13px] font-medium">Link copied to clipboard</span>
+        </div>
+      )}
     </div>
   );
 }

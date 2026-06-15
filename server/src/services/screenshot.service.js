@@ -1,14 +1,15 @@
 import puppeteer from 'puppeteer';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import fs from 'fs';
+import { v2 as cloudinary } from 'cloudinary';
 import Deployment from '../models/Deployment.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export const captureDeploymentScreenshot = async (deploymentId, url) => {
     try {
+        cloudinary.config({
+            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+            api_key: process.env.CLOUDINARY_API_KEY,
+            api_secret: process.env.CLOUDINARY_API_SECRET
+        });
+
         if (!url || !url.startsWith('http')) {
             console.error(`[ScreenshotService] Invalid URL provided: ${url}`);
             return null;
@@ -16,13 +17,13 @@ export const captureDeploymentScreenshot = async (deploymentId, url) => {
 
         console.log(`[ScreenshotService] Capturing screenshot for ${deploymentId} at ${url}`);
         
-        const screenshotDir = path.join(__dirname, '../../public/screenshots');
-        if (!fs.existsSync(screenshotDir)) {
-            fs.mkdirSync(screenshotDir, { recursive: true });
+        const deployment = await Deployment.findById(deploymentId);
+        if (!deployment) {
+            console.error(`[ScreenshotService] Deployment not found: ${deploymentId}`);
+            return null;
         }
-
-        const fileName = `${deploymentId}.png`;
-        const filePath = path.join(screenshotDir, fileName);
+        
+        const userId = deployment.userId.toString();
 
         // Vercel apps sometimes take a few extra seconds to boot on first request
         // We'll give it a slight artificial delay before even attempting, or just rely on networkidle0
@@ -40,10 +41,27 @@ export const captureDeploymentScreenshot = async (deploymentId, url) => {
         // Additional 2 seconds wait for any final JS animations or hydration
         await new Promise(resolve => setTimeout(resolve, 2000));
 
-        await page.screenshot({ path: filePath });
+        const screenshotBuffer = await page.screenshot({ encoding: 'binary' });
         await browser.close();
 
-        const screenshotUrl = `/screenshots/${fileName}`;
+        // Upload directly to Cloudinary via stream
+        const uploadResult = await new Promise((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+                {
+                    folder: `AI_Agents/screenshots/users/${userId}`,
+                    public_id: deploymentId.toString(),
+                    format: 'png',
+                    overwrite: true
+                },
+                (error, result) => {
+                    if (error) return reject(error);
+                    resolve(result);
+                }
+            );
+            uploadStream.end(screenshotBuffer);
+        });
+
+        const screenshotUrl = uploadResult.secure_url;
         await Deployment.findByIdAndUpdate(deploymentId, {
             'finalSummary.screenshotUrl': screenshotUrl
         });
