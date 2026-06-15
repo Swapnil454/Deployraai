@@ -12,10 +12,20 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "axios": "^1.17.0",
+    "cloudinary": "^2.10.0",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "firebase-admin": "^14.0.0",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.7.0",
-    "nodemon": "^3.1.14"
+    "node-cron": "^4.2.1",
+    "nodemon": "^3.1.14",
+    "puppeteer": "^25.1.0",
+    "resend": "^6.12.4",
+    "uuid": "^14.0.0"
   }
 }
