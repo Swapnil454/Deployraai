@@ -45,7 +45,7 @@ export const Sidebar = ({ user }: { user: any }) => {
   };
 
   return (
-    <aside className="w-64 border-r border-zinc-800 bg-black flex flex-col pt-6 pb-6 hidden md:flex shrink-0 h-[calc(100vh-64px)] sticky top-16 z-30">
+    <aside className="w-64 border-r border-zinc-800 bg-black flex flex-col pt-6 pb-6 hidden md:flex shrink-0 h-screen sticky top-0 z-30">
       <div className="px-4 mb-8">
         <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-900 cursor-pointer transition-colors">
           {user?.avatar ? (
