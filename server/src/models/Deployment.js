@@ -23,6 +23,7 @@ const DeploymentSchema = new mongoose.Schema({
     repoFullName: { type: String },
     branch: { type: String },
     commitSha: { type: String, default: null },
+    commitMessage: { type: String, default: null },
     rootDirectory: { type: String, default: '/' }
   },
 
@@ -86,7 +87,8 @@ const DeploymentSchema = new mongoose.Schema({
     durationMs: { type: Number },
     failedStep: { type: String },
     failureReason: { type: String },
-    suggestedFix: { type: String }
+    suggestedFix: { type: String },
+    screenshotUrl: { type: String }
   },
 
   errorMessage: { type: String },
@@ -102,7 +104,7 @@ const DeploymentSchema = new mongoose.Schema({
     suggestedFixes: [{ type: String }],
     severity: { type: String, enum: ['low', 'medium', 'high'] },
     canAutoFix: { type: Boolean, default: false },
-    fixType: { type: String, enum: ['missing_health_route', 'cors_origin', 'build_error', 'unknown'] },
+    fixType: { type: String, enum: ['missing_health_route', 'cors_origin', 'build_error', 'port_binding_error', 'unknown'] },
     fixPlan: {
       targetFiles: [{ type: String }],
       changes: [{ type: String }]

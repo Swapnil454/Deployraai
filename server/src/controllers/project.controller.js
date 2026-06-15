@@ -177,7 +177,43 @@ export const createProject = async (req, res) => {
 
 export const getProjects = async (req, res) => {
   try {
-    const projects = await Project.find({ userId: req.user.userId }).sort({ createdAt: -1 });
+    const { search, sortBy, filterBy } = req.query;
+    let query = { userId: req.user.userId };
+    
+    if (search) {
+      query.repoName = { $regex: search, $options: 'i' };
+    }
+    
+    if (filterBy === 'Microfrontend') {
+      query['analysis.isMonorepo'] = true;
+    } else if (filterBy === 'Repository') {
+      query['analysis.isMonorepo'] = false;
+    }
+
+    let sort = { updatedAt: -1, createdAt: -1 };
+    if (sortBy === 'Name') {
+      sort = { repoName: 1 };
+    }
+
+    const projects = await Project.find(query).sort(sort).lean();
+
+    const Deployment = (await import('../models/Deployment.js')).default;
+    const Monitor = (await import('../models/Monitor.js')).default;
+    
+    for (let project of projects) {
+      const latestDeployment = await Deployment.findOne({ 
+        projectId: project._id,
+        "source.commitMessage": { $exists: true, $ne: null }
+      }).sort({ createdAt: -1 }).lean();
+      
+      if (latestDeployment) {
+        project.latestDeployment = latestDeployment;
+      }
+
+      const monitors = await Monitor.find({ projectId: project._id }).lean();
+      project.monitors = monitors;
+    }
+
     res.json(projects);
   } catch (error) {
     console.error("Get Projects Error:", error.message);

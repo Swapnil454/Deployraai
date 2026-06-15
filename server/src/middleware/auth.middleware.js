@@ -10,7 +10,7 @@ export const requireAuth = (req, res, next) => {
   }
 
   try {
-    const jwtSecret = process.env.JWT_SECRET || 'fallback_secret_do_not_use_in_prod';
+    const jwtSecret = process.env.JWT_SECRET;
     const decoded = jwt.verify(token, jwtSecret);
     req.user = decoded; // { userId, role, iat, exp }
     next();

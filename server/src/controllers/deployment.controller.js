@@ -3,6 +3,8 @@ import Deployment from "../models/Deployment.js";
 import Project from "../models/Project.js";
 import ConnectedAccount from "../models/ConnectedAccount.js";
 import { decryptSecret, encryptSecret } from "../utils/encryption.js";
+import User from "../models/User.js";
+import { captureDeploymentScreenshot } from "../services/screenshot.service.js";
 import {
   getRailwayToken,
   getRailwayMe,
@@ -19,6 +21,7 @@ import {
   getRenderOwner,
   createRenderWebService,
   getRenderDeploys,
+  getRenderDeployStatus,
   updateRenderEnvVars,
   triggerRenderDeploy,
   getRenderServices,
@@ -158,9 +161,60 @@ export const triggerFrontendDeployment = async (req, res) => {
     });
 
     res.status(202).json({ success: true, deploymentId: deployment._id, message: "Deployment started" });
-    executeFrontendDeployment(deployment, project, []);
+
+    // Auto-inject the known backend URL into frontend env vars
+    (async () => {
+      const injected = [];
+      // 1. Find the latest successful backend deployment for this project to get its URL
+      const latestBackend = await Deployment.findOne({
+        projectId,
+        type: 'backend',
+        status: { $in: ['success', 'completed'] }
+      }).sort({ createdAt: -1 });
+
+      const backendUrl = latestBackend?.finalSummary?.backendUrl || latestBackend?.deploymentUrl || latestBackend?.providerUrl;
+      if (backendUrl) {
+        // Find the right env key
+        const possibleKeys = ['VITE_API_URL', 'REACT_APP_API_URL', 'NEXT_PUBLIC_API_URL', 'API_URL'];
+        let frontendApiUrlKey = 'NEXT_PUBLIC_API_URL';
+        if (project.configuration.envVariables?.frontend) {
+          const existingKey = project.configuration.envVariables.frontend.find(e => possibleKeys.includes(e.key));
+          if (existingKey) frontendApiUrlKey = existingKey.key;
+        }
+        injected.push({ key: frontendApiUrlKey, value: backendUrl });
+      }
+
+      const frontendRes = await executeFrontendDeployment(deployment, project, injected);
+      
+      const frontendUrl = frontendRes?.url;
+      if (frontendUrl) {
+         let backendCorsKey = 'CORS_ORIGIN';
+         if (project.configuration.envVariables?.backend) {
+            const possibleBackendKeys = ['CLIENT_URL', 'FRONTEND_URL', 'ORIGIN', 'CORS_ORIGIN'];
+            const existingBackendKey = project.configuration.envVariables.backend.find(e => possibleBackendKeys.includes(e.key));
+            if (existingBackendKey) backendCorsKey = existingBackendKey.key;
+         }
+
+         let dbUpdated = false;
+         if (!project.configuration.envVariables.backend) project.configuration.envVariables.backend = [];
+         
+         const bKey = project.configuration.envVariables.backend.find(e => e.key === backendCorsKey);
+         if (bKey) {
+             bKey.valueEncrypted = encryptSecret(frontendUrl);
+             dbUpdated = true;
+         } else {
+             project.configuration.envVariables.backend.push({ key: backendCorsKey, valueEncrypted: encryptSecret(frontendUrl), isSecret: false });
+             dbUpdated = true;
+         }
+         
+         if (dbUpdated) {
+             await project.save();
+         }
+      }
+    })();
   } catch (error) {
-    res.status(500).json({ error: "Failed to trigger deployment" });
+    console.error(`Trigger frontend deployment error for project ${req.params?.projectId}:`, error);
+    res.status(500).json({ error: "Failed to trigger deployment", details: error.message });
   }
 };
 
@@ -195,9 +249,59 @@ export const triggerBackendDeployment = async (req, res) => {
     });
 
     res.status(202).json({ success: true, deploymentId: deployment._id, message: "Deployment started" });
-    executeBackendDeployment(deployment, project, []);
+
+    // Auto-inject the known frontend URL into backend env vars as CORS_ORIGIN
+    (async () => {
+      const injected = [];
+      // Find the latest successful frontend deployment for this project
+      const latestFrontend = await Deployment.findOne({
+        projectId,
+        type: 'frontend',
+        status: { $in: ['success', 'completed'] }
+      }).sort({ createdAt: -1 });
+
+      const frontendUrl = latestFrontend?.finalSummary?.frontendUrl || latestFrontend?.deploymentUrl;
+      if (frontendUrl) {
+        const possibleKeys = ['CLIENT_URL', 'FRONTEND_URL', 'ORIGIN', 'CORS_ORIGIN'];
+        let corsKey = 'CORS_ORIGIN';
+        if (project.configuration.envVariables?.backend) {
+          const existingKey = project.configuration.envVariables.backend.find(e => possibleKeys.includes(e.key));
+          if (existingKey) corsKey = existingKey.key;
+        }
+        injected.push({ key: corsKey, value: frontendUrl });
+      }
+
+      const backendRes = await executeBackendDeployment(deployment, project, injected);
+      
+      const backendUrl = backendRes?.url;
+      if (backendUrl) {
+         let frontendApiUrlKey = 'NEXT_PUBLIC_API_URL';
+         if (project.configuration.envVariables?.frontend) {
+            const possibleFrontendKeys = ['VITE_API_URL', 'REACT_APP_API_URL', 'NEXT_PUBLIC_API_URL', 'API_URL'];
+            const existingFrontendKey = project.configuration.envVariables.frontend.find(e => possibleFrontendKeys.includes(e.key));
+            if (existingFrontendKey) frontendApiUrlKey = existingFrontendKey.key;
+         }
+
+         let dbUpdated = false;
+         if (!project.configuration.envVariables.frontend) project.configuration.envVariables.frontend = [];
+         
+         const fKey = project.configuration.envVariables.frontend.find(e => e.key === frontendApiUrlKey);
+         if (fKey) {
+             fKey.valueEncrypted = encryptSecret(backendUrl);
+             dbUpdated = true;
+         } else {
+             project.configuration.envVariables.frontend.push({ key: frontendApiUrlKey, valueEncrypted: encryptSecret(backendUrl), isSecret: false });
+             dbUpdated = true;
+         }
+         
+         if (dbUpdated) {
+             await project.save();
+         }
+      }
+    })();
   } catch (error) {
-    res.status(500).json({ error: "Failed to trigger deployment" });
+    console.error(`Trigger backend deployment error for project ${req.params?.projectId}:`, error);
+    res.status(500).json({ error: "Failed to trigger deployment", details: error.message });
   }
 };
 
@@ -242,7 +346,8 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
         let providerServiceId = project.configuration.vercelProjectId;
         let deploymentUrl;
         let dashboardUrl;
-        let projectName = `deploy-ai-${projectId.toString().slice(-6)}`;
+        const safeRepoName = (project.repoName || 'app').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+        let projectName = `${safeRepoName}-deployra`;
 
         try {
           if (providerServiceId) {
@@ -381,7 +486,8 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
                     await Deployment.findByIdAndUpdate(deployment._id, { 
                       deploymentUrl, 
                       providerUrl: deploymentUrl,
-                      providerDashboardUrl: currentDashUrl
+                      providerDashboardUrl: currentDashUrl,
+                      providerDeploymentId: latest.uid || latest.id
                     });
                   }
                   break;
@@ -421,8 +527,14 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
             await Deployment.findByIdAndUpdate(deployment._id, {
               status: finalStatus,
               errorMessage: finalErrorMessage,
-              completedAt: new Date()
+              completedAt: new Date(),
+              'finalSummary.frontendUrl': deploymentUrl,
+              'finalSummary.status': finalStatus
             });
+            
+            if (finalStatus === 'completed' && deploymentUrl) {
+               captureDeploymentScreenshot(deployment._id, deploymentUrl).catch(console.error);
+            }
           }
           return { url: deploymentUrl, dashboardUrl };
 
@@ -454,7 +566,8 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
   const projectId = project._id;
   const userId = project.userId;
   const platform = project.configuration.backendPlatform;
-  const projectName = `deploy-ai-${projectId.toString().slice(-6)}`;
+  const safeRepoName = (project.repoName || 'app').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  const projectName = `${safeRepoName}-deployra`;
 
       const appendLog = async (level, step, message, metadata={}) => {
         await Deployment.findByIdAndUpdate(deployment._id, {
@@ -563,6 +676,15 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
              providerUrl: `https://railway.app/project/${providerProjectId}`,
              providerDashboardUrl: `https://railway.app/project/${providerProjectId}`
           });
+
+          // Railway doesn't have a simple poll API; mark as completed immediately after trigger
+          // (Railway will actually build asynchronously on their side, which is expected)
+          if (deployment.type !== 'full') {
+            await Deployment.findByIdAndUpdate(deployment._id, {
+              status: 'completed',
+              completedAt: new Date()
+            });
+          }
           
           return { url: null, dashboardUrl: `https://railway.app/project/${providerProjectId}` };
         } else if (platform === 'render') {
@@ -605,37 +727,56 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
              project.configuration.renderServiceId = providerServiceId;
              await project.save();
              await appendLog('success', 'project_create', 'Render Service created successfully');
-             
-             if (renderSvc.service?.url) {
-                return { url: renderSvc.service.url, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
-             }
           } else {
              await appendLog('info', 'env_setup', 'Updating Render environment variables...');
              await updateRenderEnvVars(token, providerServiceId, envVarsArray);
              await appendLog('success', 'env_setup', 'Backend variables updated');
+          }
              
              await appendLog('info', 'deploy_trigger', 'Triggering Render deployment');
-             await triggerRenderDeploy(token, providerServiceId);
-             await appendLog('success', 'deploy_trigger', 'Render deployment started');
+          const deployTriggerRes = await triggerRenderDeploy(token, providerServiceId);
+          // deployTriggerRes is the new deploy object; extract its ID to poll status
+          const newDeployId = deployTriggerRes?.deploy?.id || deployTriggerRes?.id;
+          await appendLog('success', 'deploy_trigger', 'Render deployment started');
+          
+          // Poll Render deploy status until live, failed, or timeout (10 min)
+          let finalRenderStatus = 'unknown';
+          let pollRenderUrl = null;
+          if (newDeployId) {
+            await appendLog('info', 'deploy_trigger', 'Waiting for Render to finish building (polling every 15s, max 10 min)...');
+            const maxAttempts = 40; // 40 × 15s = 10 min
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+              await new Promise(r => setTimeout(r, 15000));
+              try {
+                const deployStatus = await getRenderDeployStatus(token, providerServiceId, newDeployId);
+                // Render deploy statuses: created, build_in_progress, update_in_progress, live, deactivated, build_failed, update_failed, canceled
+                const st = deployStatus?.deploy?.status || deployStatus?.status;
+                await appendLog('info', 'deploy_trigger', `Render deploy status: ${st} (attempt ${attempt + 1}/${maxAttempts})`);
+                if (st === 'live') {
+                  finalRenderStatus = 'live';
+                  break;
+                } else if (st === 'build_failed' || st === 'update_failed' || st === 'canceled' || st === 'deactivated') {
+                  finalRenderStatus = st;
+                  break;
+                }
+              } catch (pollErr) {
+                await appendLog('warning', 'deploy_trigger', `Render status poll error: ${pollErr.message}`);
+              }
+            }
+          } else {
+            // No deploy ID from trigger — Render auto-deploy may have started; wait and check service
+            await appendLog('warning', 'deploy_trigger', 'No deploy ID returned from trigger. Waiting 30s before checking service...');
+            await new Promise(r => setTimeout(r, 30000));
+            finalRenderStatus = 'live'; // Assume it started if no error was thrown
           }
           
-          let renderUrl = null;
+          // Re-fetch service to get current URL
           try {
             const svcDetails = await getRenderService(token, providerServiceId);
-            let rawUrl = null;
-            if (svcDetails && svcDetails.serviceDetails && svcDetails.serviceDetails.url) {
-               rawUrl = svcDetails.serviceDetails.url;
-            } else if (svcDetails && svcDetails.service && svcDetails.service.url) {
-               rawUrl = svcDetails.service.url;
-            } else if (svcDetails && svcDetails.url) {
-               rawUrl = svcDetails.url;
-            }
-            
-            if (rawUrl) {
-               renderUrl = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
-            }
+            const rawUrl = svcDetails?.serviceDetails?.url || svcDetails?.service?.url || svcDetails?.url;
+            if (rawUrl) pollRenderUrl = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
           } catch(e) {
-            console.warn("Failed to fetch render service details to get URL:", e.message);
+            console.warn('Failed to fetch Render service URL after polling:', e.message);
           }
 
           await Deployment.findByIdAndUpdate(deployment._id, {
@@ -643,11 +784,25 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
              providerUrl: `https://dashboard.render.com/web/${providerServiceId}`,
              providerDashboardUrl: `https://dashboard.render.com/web/${providerServiceId}`
           });
+
+          const isRenderSuccess = finalRenderStatus === 'live' || finalRenderStatus === 'unknown';
+          // Only mark final status for standalone (non-full) deployments
+          if (deployment.type !== 'full') {
+            const renderFinalStatus = isRenderSuccess ? 'completed' : 'failed';
+            const renderErrorMsg = isRenderSuccess ? null : `Render build ${finalRenderStatus}. Check Render dashboard for logs.`;
+            await Deployment.findByIdAndUpdate(deployment._id, {
+              status: renderFinalStatus,
+              errorMessage: renderErrorMsg,
+              completedAt: new Date(),
+              ...(pollRenderUrl ? { deploymentUrl: pollRenderUrl, 'finalSummary.backendUrl': pollRenderUrl } : {})
+            });
+            if (!isRenderSuccess) throw new Error(renderErrorMsg);
+          }
           
-          return { url: renderUrl, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
+          return { url: pollRenderUrl, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
         }
       } catch (err) {
-        console.error("Background deploy error:", err);
+        console.error('Background deploy error:', err);
         if (deployment.type !== 'full') {
           await Deployment.findByIdAndUpdate(deployment._id, {
             status: 'failed',
@@ -898,6 +1053,10 @@ export const triggerFullDeployment = async (req, res) => {
             ...(finalStatus === 'failed' ? { errorMessage: failureReason } : {})
          });
 
+         if (finalStatus === 'success' && frontendUrl) {
+            captureDeploymentScreenshot(deployment._id, frontendUrl).catch(console.error);
+         }
+
        } catch (err) {
          console.error("Full stack deploy error:", err);
          await appendLog('error', 'system', `Full deployment failed: ${err.message}`);
@@ -917,17 +1076,312 @@ export const triggerFullDeployment = async (req, res) => {
 export const getDeployment = async (req, res) => {
   try {
     const { deploymentId } = req.params;
-    const deployment = await Deployment.findById(deploymentId);
+    const deployment = await Deployment.findById(deploymentId).populate('projectId', 'repoName repoFullName');
     
     if (!deployment) return res.status(404).json({ error: "Deployment not found" });
     if (deployment.userId.toString() !== req.user.userId.toString()) {
       return res.status(403).json({ error: "Access denied" });
     }
 
-    res.json(deployment);
+    const deploymentObj = deployment.toObject();
+    
+    // Find the absolute latest successful deployments by type for this project
+    const latestTypes = await Deployment.aggregate([
+        { $match: { projectId: deployment.projectId._id, 'source.branch': { $in: ['main', 'master'] }, status: { $in: ['success', 'completed'] } } },
+        { $sort: { createdAt: -1 } },
+        { $group: { _id: "$type", latestDate: { $first: "$createdAt" } } }
+    ]);
+    const latestMap = {};
+    for (const lt of latestTypes) latestMap[lt._id] = lt.latestDate;
+    
+    const latestFull = latestMap['full'] || new Date(0);
+    const latestFront = latestMap['frontend'] || new Date(0);
+    const latestBack = latestMap['backend'] || new Date(0);
+
+    const absoluteLatestFrontend = latestFull > latestFront ? latestFull : latestFront;
+    const absoluteLatestBackend = latestFull > latestBack ? latestFull : latestBack;
+
+    deploymentObj.isLatestFrontend = false;
+    deploymentObj.isLatestBackend = false;
+
+    if (deployment.status === 'success' || deployment.status === 'completed') {
+        if (deployment.type === 'full') {
+            if (deployment.createdAt >= absoluteLatestFrontend) deploymentObj.isLatestFrontend = true;
+            if (deployment.createdAt >= absoluteLatestBackend) deploymentObj.isLatestBackend = true;
+        } else if (deployment.type === 'frontend') {
+            if (deployment.createdAt >= absoluteLatestFrontend) deploymentObj.isLatestFrontend = true;
+        } else if (deployment.type === 'backend') {
+            if (deployment.createdAt >= absoluteLatestBackend) deploymentObj.isLatestBackend = true;
+        }
+    }
+
+    if (deployment.type === 'full') {
+        deploymentObj.isLatest = deploymentObj.isLatestFrontend && deploymentObj.isLatestBackend;
+    } else if (deployment.type === 'frontend') {
+        deploymentObj.isLatest = deploymentObj.isLatestFrontend;
+    } else if (deployment.type === 'backend') {
+        deploymentObj.isLatest = deploymentObj.isLatestBackend;
+    }
+
+    // Fetch custom domains assigned to this project
+    const DomainSetup = (await import('../models/DomainSetup.js')).default;
+    const domainSetups = await DomainSetup.find({ projectId: deployment.projectId._id, status: { $in: ['active', 'partially_active', 'pending_dns', 'verifying'] } });
+    
+    deploymentObj.customDomains = [];
+    domainSetups.forEach(ds => {
+       if (ds.frontendDomain) deploymentObj.customDomains.push({ type: 'frontend', url: `https://${ds.frontendDomain}`, status: ds.frontendVerification });
+       if (ds.wwwDomain) deploymentObj.customDomains.push({ type: 'www', url: `https://${ds.wwwDomain}`, status: ds.frontendVerification });
+       if (ds.backendDomain) deploymentObj.customDomains.push({ type: 'backend', url: `https://${ds.backendDomain}`, status: ds.backendVerification });
+    });
+
+    res.json(deploymentObj);
   } catch (error) {
     console.error("Get deployment error:", error);
     res.status(500).json({ error: "Failed to fetch deployment" });
+  }
+};
+
+export const getUserDeployments = async (req, res) => {
+  try {
+    const { type, projectId, environment, branch, status, days, startDate, endDate, author } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 0; // 0 means no limit if not specified to maintain backward compatibility, or we can default to 20 if passed. Wait, if I default to 20, it breaks other pages that expect all deployments.
+    // Actually, I'll only apply pagination if limit is provided.
+    
+    let query = { userId: req.user.userId };
+
+    if (type === 'frontend') {
+       query.type = { $in: ['frontend', 'full'] };
+    } else if (type === 'backend') {
+       query.type = { $in: ['backend', 'full'] };
+    } else if (type) {
+       query.type = type;
+    }
+
+    if (projectId && projectId !== 'all') query.projectId = projectId;
+    
+    if (environment && environment !== 'all') {
+       if (environment.toLowerCase() === 'production') {
+         query['source.branch'] = 'main';
+       } else if (environment.toLowerCase() === 'preview') {
+         query['source.branch'] = { $ne: 'main' };
+       }
+    }
+
+    if (branch && branch !== 'all') {
+      query['source.branch'] = branch;
+    }
+
+    if (author && author !== 'all') {
+      query.$or = [
+        { 'source.repoOwner': { $regex: new RegExp(`^${author}$`, 'i') } },
+        { 'source.repoFullName': { $regex: new RegExp(`^${author}/`, 'i') } },
+      ];
+    }
+
+    if (status && status !== 'all') {
+      const statusesArray = status.split(',');
+      const mappedStatuses = statusesArray.flatMap(s => {
+        if (s === 'ready') return ['success', 'completed'];
+        if (s === 'building') return ['running'];
+        if (s === 'error') return ['failed'];
+        return [s];
+      });
+      query.status = { $in: mappedStatuses };
+    }
+
+    if (startDate && endDate) {
+      query.createdAt = { 
+        $gte: new Date(startDate), 
+        $lte: new Date(endDate) 
+      };
+    } else if (days && days !== 'all') {
+      const d = parseInt(days, 10);
+      if (!isNaN(d)) {
+        query.createdAt = { $gte: new Date(Date.now() - d * 24 * 60 * 60 * 1000) };
+      }
+    }
+
+    let queryChain = Deployment.find(query)
+      .populate('projectId', 'repoName repoFullName')
+      .sort({ createdAt: -1 });
+
+    if (limit > 0) {
+      const skip = (page - 1) * limit;
+      queryChain = queryChain.skip(skip).limit(limit + 1);
+    }
+
+    const deploymentsRaw = await queryChain;
+    
+    let hasMore = false;
+    let deployments = deploymentsRaw;
+    if (limit > 0 && deploymentsRaw.length > limit) {
+      hasMore = true;
+      deployments = deploymentsRaw.slice(0, limit);
+    }
+
+    // Get the user's GitHub token once for enrichment
+    let githubToken = null;
+    try {
+      const connectedAccount = await ConnectedAccount.findOne({ userId: req.user.userId, provider: 'github', status: 'connected' });
+      if (connectedAccount?.accessTokenEncrypted) {
+        githubToken = decryptSecret(connectedAccount.accessTokenEncrypted);
+      } else {
+        const user = await User.findById(req.user.userId);
+        if (user?.githubAccessTokenEncrypted) {
+          githubToken = decryptSecret(user.githubAccessTokenEncrypted);
+        }
+      }
+    } catch (tokenErr) {
+      console.warn('Could not get GitHub token for commit enrichment:', tokenErr.message);
+    }
+
+    // Enrich deployments with real commit messages from GitHub
+    const enriched = await Promise.all(deployments.map(async (dep) => {
+      const obj = dep.toObject();
+
+      // Skip if we already have the commit message stored
+      if (obj.source?.commitMessage) return obj;
+
+      const repoFullName = obj.source?.repoFullName || obj.projectId?.repoFullName;
+      if (!repoFullName || !githubToken) return obj;
+
+      try {
+        let sha = obj.source?.commitSha;
+        let commitMessage = null;
+
+        if (sha) {
+          // We have a SHA — look up that specific commit
+          const ghRes = await fetch(`https://api.github.com/repos/${repoFullName}/commits/${sha}`, {
+            headers: { Authorization: `Bearer ${githubToken}`, Accept: 'application/vnd.github.v3+json' }
+          });
+          if (ghRes.ok) {
+            const data = await ghRes.json();
+            commitMessage = data.commit?.message?.split('\n')[0] || null;
+          }
+        } else {
+          // No SHA stored — fetch the latest commit from the deployment's branch
+          const branch = obj.source?.branch || 'main';
+          const ghRes = await fetch(`https://api.github.com/repos/${repoFullName}/commits/${branch}`, {
+            headers: { Authorization: `Bearer ${githubToken}`, Accept: 'application/vnd.github.v3+json' }
+          });
+          if (ghRes.ok) {
+            const data = await ghRes.json();
+            sha = data.sha || null;
+            commitMessage = data.commit?.message?.split('\n')[0] || null;
+          }
+        }
+
+        if (commitMessage) {
+          obj.source.commitMessage = commitMessage;
+          if (sha) obj.source.commitSha = sha;
+          // Persist so we don't hit GitHub again on future requests
+          await Deployment.findByIdAndUpdate(dep._id, {
+            'source.commitMessage': commitMessage,
+            ...(sha && { 'source.commitSha': sha })
+          });
+        }
+      } catch (ghErr) {
+        console.warn(`Could not fetch commit for ${repoFullName}:`, ghErr.message);
+      }
+
+      return obj;
+    }));
+
+    // Find the latest production deployments by type for each project to calculate isLatestProd accurately
+    const projectIds = [...new Set(enriched.map(d => d.projectId?._id?.toString()).filter(Boolean))];
+    const latestByType = await Deployment.aggregate([
+      { 
+        $match: { 
+          projectId: { $in: projectIds.map(id => new mongoose.Types.ObjectId(id)) }, 
+          'source.branch': { $in: ['main', 'master'] }, 
+          status: { $in: ['success', 'completed'] } 
+        } 
+      },
+      { $sort: { createdAt: -1 } },
+      { 
+        $group: { 
+          _id: { projectId: "$projectId", type: "$type" }, 
+          latestDate: { $first: "$createdAt" },
+          latestId: { $first: "$_id" }
+        } 
+      }
+    ]);
+
+    const latestMap = {};
+    for (const item of latestByType) {
+      const pId = item._id.projectId.toString();
+      const type = item._id.type;
+      if (!latestMap[pId]) latestMap[pId] = {};
+      latestMap[pId][type] = { date: item.latestDate, id: item.latestId.toString() };
+    }
+
+    const finalDeployments = enriched.map(dep => {
+      const pId = dep.projectId?._id?.toString();
+      const isProd = dep.source?.branch === 'main' || dep.source?.branch === 'master';
+      const isSuccess = dep.status === 'success' || dep.status === 'completed';
+      
+      dep.isLatestProd = false;
+      dep.isLatestFrontend = false;
+      dep.isLatestBackend = false;
+      dep.supersededAt = null;
+
+      if (isProd && isSuccess && pId && latestMap[pId]) {
+         const lm = latestMap[pId];
+         const latestFull = lm['full']?.date || new Date(0);
+         const latestFront = lm['frontend']?.date || new Date(0);
+         const latestBack = lm['backend']?.date || new Date(0);
+
+         const absoluteLatestFrontend = latestFull > latestFront ? latestFull : latestFront;
+         const absoluteLatestBackend = latestFull > latestBack ? latestFull : latestBack;
+
+         if (dep.type === 'full') {
+             if (dep.createdAt >= absoluteLatestFrontend) dep.isLatestFrontend = true;
+             if (dep.createdAt >= absoluteLatestBackend) dep.isLatestBackend = true;
+         } else if (dep.type === 'frontend') {
+             if (dep.createdAt >= absoluteLatestFrontend) dep.isLatestFrontend = true;
+         } else if (dep.type === 'backend') {
+             if (dep.createdAt >= absoluteLatestBackend) dep.isLatestBackend = true;
+         }
+
+         if (dep.type === 'full') {
+             dep.isLatestProd = dep.isLatestFrontend && dep.isLatestBackend;
+         } else if (dep.type === 'frontend') {
+             dep.isLatestProd = dep.isLatestFrontend;
+         } else if (dep.type === 'backend') {
+             dep.isLatestProd = dep.isLatestBackend;
+         }
+
+         // Calculate supersededAt
+         if (!dep.isLatestProd) {
+             if (dep.type === 'full') {
+                 if (!dep.isLatestFrontend && !dep.isLatestBackend) {
+                     dep.supersededAt = absoluteLatestFrontend > absoluteLatestBackend ? absoluteLatestFrontend : absoluteLatestBackend;
+                 } else if (!dep.isLatestFrontend) {
+                     dep.supersededAt = absoluteLatestFrontend;
+                 } else if (!dep.isLatestBackend) {
+                     dep.supersededAt = absoluteLatestBackend;
+                 }
+             } else if (dep.type === 'frontend') {
+                 dep.supersededAt = absoluteLatestFrontend;
+             } else if (dep.type === 'backend') {
+                 dep.supersededAt = absoluteLatestBackend;
+             }
+         }
+      }
+      return dep;
+    });
+
+    if (limit > 0) {
+      res.setHeader('X-Has-More', hasMore ? 'true' : 'false');
+      // Expose header so the frontend can read it if CORS is enabled
+      res.setHeader('Access-Control-Expose-Headers', 'X-Has-More');
+    }
+
+    res.json(finalDeployments);
+  } catch (error) {
+    console.error("Get user deployments error:", error);
+    res.status(500).json({ error: "Failed to fetch deployments" });
   }
 };
 
@@ -1157,16 +1611,16 @@ Response MUST match this exact JSON schema:
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
     const generateWithRetry = async (promptText) => {
-      const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"];
+      const fallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
       for (const modelName of fallbackModels) {
         const currentModel = genAI.getGenerativeModel({ model: modelName });
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 2; i++) {
           try {
             return await currentModel.generateContent(promptText);
           } catch (err) {
             if (err.status === 503 || err.status === 429) {
-              console.log(`[AI Analysis] API error ${err.status} with ${modelName}, retrying in ${(i + 1) * 3} seconds...`);
-              await new Promise(res => setTimeout(res, (i + 1) * 3000));
+              console.log(`[AI Analysis] API error ${err.status} with ${modelName}, retrying in ${(i + 1) * 2} seconds...`);
+              await new Promise(res => setTimeout(res, (i + 1) * 2000));
             } else {
               throw err;
             }
@@ -1233,5 +1687,141 @@ export const retryDeployment = async (req, res) => {
   } catch (error) {
     console.error("Retry deployment error:", error);
     res.status(500).json({ error: "Failed to retry deployment" });
+  }
+};
+
+export const deleteDeployment = async (req, res) => {
+  try {
+    const { deploymentId } = req.params;
+    const deployment = await Deployment.findById(deploymentId);
+    
+    if (!deployment) return res.status(404).json({ error: "Deployment not found" });
+    if (deployment.userId.toString() !== req.user.userId.toString()) return res.status(403).json({ error: "Access denied" });
+
+    // Cancel / Delete from Vercel if applicable
+    if (deployment.platform === 'vercel' && deployment.providerDeploymentId) {
+      try {
+        const { getVercelToken, deleteVercelDeployment } = await import('../services/providers/vercel.service.js');
+        const token = await getVercelToken(req.user.userId);
+        if (token) {
+          await deleteVercelDeployment(token, deployment.providerDeploymentId);
+        }
+      } catch (err) {
+        console.error("Vercel delete error:", err.message);
+      }
+    }
+
+    await Deployment.findByIdAndDelete(deploymentId);
+    res.json({ success: true, message: "Deployment deleted successfully" });
+  } catch (error) {
+    console.error("Delete deployment error:", error);
+    res.status(500).json({ error: "Failed to delete deployment" });
+  }
+};
+
+export const rollbackDeployment = async (req, res) => {
+  try {
+    const { deploymentId } = req.params;
+    const oldDeployment = await Deployment.findById(deploymentId).populate('projectId');
+    
+    if (!oldDeployment) return res.status(404).json({ error: "Deployment not found" });
+    if (oldDeployment.userId.toString() !== req.user.userId.toString()) return res.status(403).json({ error: "Access denied" });
+    
+    if (oldDeployment.platform === 'vercel') {
+      if (!oldDeployment.providerDeploymentId) {
+        return res.status(400).json({ error: "Cannot rollback: the Vercel deployment ID is missing from our records for this deployment." });
+      }
+
+      try {
+        const { getVercelToken, rollbackVercelDeployment, promoteVercelDeployment, getVercelProject, assignVercelAlias } = await import('../services/providers/vercel.service.js');
+        const token = await getVercelToken(req.user.userId);
+        const vercelProjectId = oldDeployment.projectId?.configuration?.vercelProjectId;
+        
+        if (token && vercelProjectId) {
+          let rollbackRes;
+          let isPromote = false;
+          let isAlias = false;
+          
+          try {
+             rollbackRes = await rollbackVercelDeployment(token, vercelProjectId, oldDeployment.providerDeploymentId);
+          } catch (vercelErr) {
+             console.log("Vercel Rollback API failed:", vercelErr.message);
+             try {
+                 console.log("Attempting PROMOTE API fallback...");
+                 // Send empty object as payload just in case Vercel requires it
+                 rollbackRes = await promoteVercelDeployment(token, vercelProjectId, oldDeployment.providerDeploymentId);
+                 isPromote = true;
+             } catch (promoteErr) {
+                 console.log("Vercel Promote API failed:", promoteErr.message);
+                 console.log("Attempting ALIAS assignment fallback...");
+                 
+                 // If both Rollback and Promote fail, manually assign the production aliases to this deployment
+                 const projectData = await getVercelProject(token, vercelProjectId);
+                 if (projectData && projectData.targets && projectData.targets.production && projectData.targets.production.alias) {
+                    const aliases = projectData.targets.production.alias;
+                    let successCount = 0;
+                    for (const alias of aliases) {
+                       try {
+                           await assignVercelAlias(token, oldDeployment.providerDeploymentId, alias);
+                           successCount++;
+                       } catch (aliasErr) {
+                           if (aliasErr.message && aliasErr.message.includes('already associated with this deployment')) {
+                               console.log(`Alias ${alias} is already associated with this deployment. Skipping.`);
+                               successCount++;
+                           } else {
+                               throw aliasErr;
+                           }
+                       }
+                    }
+                    if (successCount === 0) {
+                        throw new Error("Failed to assign any production aliases to this deployment.");
+                    }
+                    rollbackRes = { url: aliases[0] };
+                    isAlias = true;
+                 } else {
+                    throw new Error("Could not fallback to Aliasing because no production domains were found on Vercel.");
+                 }
+             }
+          }
+          
+          let actionText = "Rolled back";
+          if (isPromote) actionText = "Promoted preview";
+          if (isAlias) actionText = "Aliased domain";
+
+          const newDeployment = await Deployment.create({
+            userId: req.user.userId,
+            projectId: oldDeployment.projectId._id,
+            type: oldDeployment.type,
+            serviceName: oldDeployment.serviceName,
+            platform: oldDeployment.platform,
+            status: 'success',
+            source: oldDeployment.source,
+            providerDeploymentId: rollbackRes.id || oldDeployment.providerDeploymentId,
+            providerUrl: rollbackRes.url || oldDeployment.providerUrl,
+            deploymentUrl: oldDeployment.deploymentUrl,
+            finalSummary: {
+               ...oldDeployment.finalSummary,
+               message: `Instantly ${actionText} to Production`,
+               screenshotUrl: oldDeployment.finalSummary?.screenshotUrl
+            },
+            logs: [{
+               level: "info", step: "rollback", message: `${actionText} to ${oldDeployment.providerDeploymentId}`, timestamp: new Date()
+            }]
+          });
+
+          return res.json({ success: true, deploymentId: newDeployment._id });
+        } else {
+           return res.status(400).json({ error: "Vercel configuration missing" });
+        }
+      } catch (err) {
+        console.error("Vercel rollback error:", err.message);
+        return res.status(500).json({ error: `Vercel API failed to rollback: ${err.message}` });
+      }
+    } else {
+       return res.status(400).json({ error: "Instant rollback is only supported for Vercel at this time" });
+    }
+  } catch (error) {
+    console.error("Rollback deployment error:", error);
+    res.status(500).json({ error: "Failed to rollback deployment" });
   }
 };

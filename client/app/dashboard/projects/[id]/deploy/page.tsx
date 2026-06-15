@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Link2, Loader2, ExternalLink } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Link2, Loader2, ExternalLink, Copy, Check } from "lucide-react";
 
 export default function DeployPage() {
   const router = useRouter();
@@ -18,6 +18,13 @@ export default function DeployPage() {
   const [apiKey, setApiKey] = useState("");
   const [savingKey, setSavingKey] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [copiedRecord, setCopiedRecord] = useState<string | null>(null);
+
+  const handleCopyRecord = (value: string, key: string) => {
+    navigator.clipboard.writeText(value);
+    setCopiedRecord(key);
+    setTimeout(() => setCopiedRecord(null), 2000);
+  };
 
   const [activeDeploymentId, setActiveDeploymentId] = useState<string | null>(null);
   const [deploymentLogs, setDeploymentLogs] = useState<any>(null);
@@ -111,10 +118,10 @@ export default function DeployPage() {
           if (res.ok) {
             const data = await res.json();
             setDeploymentLogs(data);
-            if (data.status === 'success' || data.status === 'failed') {
+            if (data.status === 'success' || data.status === 'completed' || data.status === 'failed') {
                clearInterval(interval);
                fetchDeploymentsHistory();
-               if (data.status === 'success') {
+               if (data.status === 'success' || data.status === 'completed') {
                  fetchMonitors();
                }
             }
@@ -730,42 +737,87 @@ export default function DeployPage() {
               <div className="space-y-6">
                 {domainSetups.map(domain => (
                   <div key={domain._id} className="rounded-lg border border-zinc-800 bg-black/40 p-4">
+                    {/* Degraded warning banner */}
+                    {domain.status === 'degraded' && (
+                      <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+                        <span className="mt-0.5 text-amber-400 text-base">⚠️</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-amber-400">Domain Degraded — DNS Records Missing</p>
+                          <p className="text-xs text-amber-300/80 mt-1">
+                            Your DNS records appear to have been removed. Re-add all the records in the table below to your DNS provider, then click <strong>Verify Again</strong>.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex justify-between items-start mb-4">
                       <div>
                         <h3 className="text-md font-medium text-white">{domain.rootDomain}</h3>
-                        <p className="text-xs text-zinc-500 mt-1">Status: <span className="uppercase text-indigo-400">{domain.status}</span></p>
+                        <p className="text-xs text-zinc-500 mt-1">
+                          Status:{' '}
+                          <span className={`uppercase font-medium ${
+                            domain.status === 'active' ? 'text-emerald-400' :
+                            domain.status === 'degraded' ? 'text-amber-400' :
+                            domain.status === 'failed' ? 'text-red-400' :
+                            'text-indigo-400'
+                          }`}>{domain.status}</span>
+                        </p>
+                        {domain.degradedAt && domain.status === 'degraded' && (
+                          <p className="text-xs text-zinc-600 mt-0.5">Degraded since {new Date(domain.degradedAt).toLocaleString()}</p>
+                        )}
+                        {domain.lastVerifiedAt && (
+                          <p className="text-xs text-zinc-600 mt-0.5">Last checked: {new Date(domain.lastVerifiedAt).toLocaleString()}</p>
+                        )}
                       </div>
                       <div className="flex gap-2">
                         <button 
                           onClick={() => handleVerifyDomain(domain._id)}
                           disabled={verifyingDomain === domain._id}
-                          className="rounded bg-zinc-800 px-3 py-1 text-xs font-medium text-white hover:bg-zinc-700 disabled:opacity-50 flex items-center gap-2"
+                          className={`rounded px-3 py-1 text-xs font-medium disabled:opacity-50 flex items-center gap-2 ${
+                            domain.status === 'degraded'
+                              ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30'
+                              : 'bg-zinc-800 text-white hover:bg-zinc-700'
+                          }`}
                         >
                           {verifyingDomain === domain._id && <Loader2 className="h-3 w-3 animate-spin" />}
-                          Verify DNS
+                          {domain.status === 'degraded' ? 'Verify Again' : 'Verify DNS'}
                         </button>
-                        {domain.status !== 'active' && (
-                          <button 
-                            onClick={() => handleDeleteDomain(domain._id)}
-                            className="rounded border border-red-500/20 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400 hover:bg-red-500/20 flex items-center gap-2"
-                          >
-                            Delete
-                          </button>
-                        )}
+                        <button 
+                          onClick={() => handleDeleteDomain(domain._id)}
+                          className="rounded border border-red-500/20 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400 hover:bg-red-500/20 flex items-center gap-2"
+                        >
+                          Delete
+                        </button>
                       </div>
                     </div>
                     
                     <div className="grid md:grid-cols-2 gap-4 mb-4">
-                      <div className="p-3 bg-zinc-900 rounded border border-zinc-800">
-                        <p className="text-xs text-zinc-500 mb-1">Frontend (Vercel)</p>
+                      <div className={`p-3 rounded border ${
+                        domain.frontendVerification === 'verified' && domain.status !== 'degraded'
+                          ? 'bg-emerald-500/5 border-emerald-500/20'
+                          : domain.status === 'degraded' ? 'bg-amber-500/5 border-amber-500/20'
+                          : 'bg-zinc-900 border-zinc-800'
+                      }`}>
+                        <p className="text-xs text-zinc-500 mb-1">Frontend ({domain.frontendProvider || 'Vercel'})</p>
                         <p className="text-sm text-white">https://{domain.frontendDomain}</p>
                         <p className="text-sm text-white mt-1">https://{domain.wwwDomain}</p>
-                        <p className="text-xs text-zinc-500 mt-2">Verification: {domain.frontendVerification}</p>
+                        <p className={`text-xs mt-2 ${
+                          domain.frontendVerification === 'verified' && domain.status !== 'degraded' ? 'text-emerald-400' :
+                          domain.status === 'degraded' ? 'text-amber-400' : 'text-zinc-500'
+                        }`}>
+                          {domain.status === 'degraded' ? '⚠ DNS missing' : `Verification: ${domain.frontendVerification}`}
+                        </p>
                       </div>
-                      <div className="p-3 bg-zinc-900 rounded border border-zinc-800">
+                      <div className={`p-3 rounded border ${
+                        domain.backendVerification === 'verified'
+                          ? 'bg-emerald-500/5 border-emerald-500/20'
+                          : 'bg-zinc-900 border-zinc-800'
+                      }`}>
                         <p className="text-xs text-zinc-500 mb-1">Backend ({domain.backendProvider})</p>
                         <p className="text-sm text-white">https://{domain.backendDomain}</p>
-                        <p className="text-xs text-zinc-500 mt-2">Verification: {domain.backendVerification}</p>
+                        <p className={`text-xs mt-2 ${
+                          domain.backendVerification === 'verified' ? 'text-emerald-400' : 'text-zinc-500'
+                        }`}>Verification: {domain.backendVerification}</p>
                         {domain.backendVerification === 'manual_setup_required' && (
                           <p className="text-xs text-amber-400 mt-1">Manual setup required in {domain.backendProvider} dashboard.</p>
                         )}
@@ -774,7 +826,9 @@ export default function DeployPage() {
                     
                     {domain.dnsRecords && domain.dnsRecords.length > 0 && (
                       <div>
-                        <p className="text-sm font-medium text-zinc-400 mb-2">DNS Records to Add:</p>
+                        <p className="text-sm font-medium text-zinc-400 mb-2">
+                          {domain.status === 'degraded' ? '⚠ DNS Records to Restore:' : 'DNS Records to Add:'}
+                        </p>
                         <div className="overflow-x-auto rounded border border-zinc-800">
                           <table className="w-full text-left text-sm text-zinc-400">
                             <thead className="bg-zinc-900 text-xs uppercase text-zinc-500">
@@ -786,21 +840,44 @@ export default function DeployPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-zinc-800 bg-black/40">
-                              {domain.dnsRecords.map((rec: any, i: number) => (
-                                <tr key={i}>
-                                  <td className="px-4 py-2 font-mono">{rec.type}</td>
-                                  <td className="px-4 py-2 font-mono">{rec.name}</td>
-                                  <td className="px-4 py-2 font-mono text-indigo-300">{rec.value}</td>
-                                  <td className="px-4 py-2 capitalize">{rec.purpose}</td>
-                                </tr>
-                              ))}
+                              {domain.dnsRecords.map((rec: any, i: number) => {
+                                const rowKey = `${domain._id}-${i}`;
+                                const isCopied = copiedRecord === rowKey;
+                                return (
+                                  <tr key={i} className="group">
+                                    <td className="px-4 py-2.5 font-mono">
+                                      <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-xs">{rec.type}</span>
+                                    </td>
+                                    <td className="px-4 py-2.5 font-mono text-zinc-300">{rec.name}</td>
+                                    <td className="px-4 py-2.5 font-mono text-indigo-300">
+                                      <div className="flex items-center gap-2">
+                                        <span className="break-all">{rec.value}</span>
+                                        <button
+                                          onClick={() => handleCopyRecord(rec.value, rowKey)}
+                                          className={`shrink-0 rounded p-1 transition-colors ${
+                                            isCopied
+                                              ? 'text-emerald-400 bg-emerald-500/10'
+                                              : 'text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 opacity-0 group-hover:opacity-100'
+                                          }`}
+                                          title={isCopied ? 'Copied!' : 'Copy value'}
+                                        >
+                                          {isCopied
+                                            ? <Check className="h-3.5 w-3.5" />
+                                            : <Copy className="h-3.5 w-3.5" />}
+                                        </button>
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-2.5 capitalize text-zinc-500 text-xs">{rec.purpose?.replace('_', ' ')}</td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>
                       </div>
                     )}
 
-                    {domain.status !== 'active' && (
+                    {(['pending_dns', 'verifying', 'partially_active', 'degraded', 'failed', 'draft', 'provider_added'].includes(domain.status)) && (
                       <div className="mt-4 pt-4 border-t border-zinc-800">
                         <div className="flex items-center justify-between mb-3">
                           <h4 className="text-sm font-medium text-white">Cloudflare DNS Automation</h4>
