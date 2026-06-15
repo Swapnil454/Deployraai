@@ -56,6 +56,21 @@ app.post("/api/test", (req, res) => {
     res.json({ message: "Test endpoint working", body: req.body });
 });
 
+// Proxy health check — avoids CORS when the widget pings a backend /health endpoint
+app.get("/api/proxy-health", async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ error: "url query param required" });
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 7000);
+        const upstream = await fetch(decodeURIComponent(url), { signal: controller.signal });
+        clearTimeout(timeout);
+        res.status(upstream.ok ? 200 : 503).json({ ok: upstream.ok, status: upstream.status });
+    } catch (err) {
+        res.status(503).json({ ok: false, error: err.message });
+    }
+});
+
 export default app;
 // trigger nodemon restart
 

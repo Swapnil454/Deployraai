@@ -21,6 +21,7 @@ import {
   getRenderOwner,
   createRenderWebService,
   getRenderDeploys,
+  getRenderDeployStatus,
   updateRenderEnvVars,
   triggerRenderDeploy,
   getRenderServices,
@@ -160,7 +161,57 @@ export const triggerFrontendDeployment = async (req, res) => {
     });
 
     res.status(202).json({ success: true, deploymentId: deployment._id, message: "Deployment started" });
-    executeFrontendDeployment(deployment, project, []);
+
+    // Auto-inject the known backend URL into frontend env vars
+    (async () => {
+      const injected = [];
+      // 1. Find the latest successful backend deployment for this project to get its URL
+      const latestBackend = await Deployment.findOne({
+        projectId,
+        type: 'backend',
+        status: { $in: ['success', 'completed'] }
+      }).sort({ createdAt: -1 });
+
+      const backendUrl = latestBackend?.finalSummary?.backendUrl || latestBackend?.deploymentUrl || latestBackend?.providerUrl;
+      if (backendUrl) {
+        // Find the right env key
+        const possibleKeys = ['VITE_API_URL', 'REACT_APP_API_URL', 'NEXT_PUBLIC_API_URL', 'API_URL'];
+        let frontendApiUrlKey = 'NEXT_PUBLIC_API_URL';
+        if (project.configuration.envVariables?.frontend) {
+          const existingKey = project.configuration.envVariables.frontend.find(e => possibleKeys.includes(e.key));
+          if (existingKey) frontendApiUrlKey = existingKey.key;
+        }
+        injected.push({ key: frontendApiUrlKey, value: backendUrl });
+      }
+
+      const frontendRes = await executeFrontendDeployment(deployment, project, injected);
+      
+      const frontendUrl = frontendRes?.url;
+      if (frontendUrl) {
+         let backendCorsKey = 'CORS_ORIGIN';
+         if (project.configuration.envVariables?.backend) {
+            const possibleBackendKeys = ['CLIENT_URL', 'FRONTEND_URL', 'ORIGIN', 'CORS_ORIGIN'];
+            const existingBackendKey = project.configuration.envVariables.backend.find(e => possibleBackendKeys.includes(e.key));
+            if (existingBackendKey) backendCorsKey = existingBackendKey.key;
+         }
+
+         let dbUpdated = false;
+         if (!project.configuration.envVariables.backend) project.configuration.envVariables.backend = [];
+         
+         const bKey = project.configuration.envVariables.backend.find(e => e.key === backendCorsKey);
+         if (bKey) {
+             bKey.valueEncrypted = encryptSecret(frontendUrl);
+             dbUpdated = true;
+         } else {
+             project.configuration.envVariables.backend.push({ key: backendCorsKey, valueEncrypted: encryptSecret(frontendUrl), isSecret: false });
+             dbUpdated = true;
+         }
+         
+         if (dbUpdated) {
+             await project.save();
+         }
+      }
+    })();
   } catch (error) {
     console.error(`Trigger frontend deployment error for project ${req.params?.projectId}:`, error);
     res.status(500).json({ error: "Failed to trigger deployment", details: error.message });
@@ -198,7 +249,56 @@ export const triggerBackendDeployment = async (req, res) => {
     });
 
     res.status(202).json({ success: true, deploymentId: deployment._id, message: "Deployment started" });
-    executeBackendDeployment(deployment, project, []);
+
+    // Auto-inject the known frontend URL into backend env vars as CORS_ORIGIN
+    (async () => {
+      const injected = [];
+      // Find the latest successful frontend deployment for this project
+      const latestFrontend = await Deployment.findOne({
+        projectId,
+        type: 'frontend',
+        status: { $in: ['success', 'completed'] }
+      }).sort({ createdAt: -1 });
+
+      const frontendUrl = latestFrontend?.finalSummary?.frontendUrl || latestFrontend?.deploymentUrl;
+      if (frontendUrl) {
+        const possibleKeys = ['CLIENT_URL', 'FRONTEND_URL', 'ORIGIN', 'CORS_ORIGIN'];
+        let corsKey = 'CORS_ORIGIN';
+        if (project.configuration.envVariables?.backend) {
+          const existingKey = project.configuration.envVariables.backend.find(e => possibleKeys.includes(e.key));
+          if (existingKey) corsKey = existingKey.key;
+        }
+        injected.push({ key: corsKey, value: frontendUrl });
+      }
+
+      const backendRes = await executeBackendDeployment(deployment, project, injected);
+      
+      const backendUrl = backendRes?.url;
+      if (backendUrl) {
+         let frontendApiUrlKey = 'NEXT_PUBLIC_API_URL';
+         if (project.configuration.envVariables?.frontend) {
+            const possibleFrontendKeys = ['VITE_API_URL', 'REACT_APP_API_URL', 'NEXT_PUBLIC_API_URL', 'API_URL'];
+            const existingFrontendKey = project.configuration.envVariables.frontend.find(e => possibleFrontendKeys.includes(e.key));
+            if (existingFrontendKey) frontendApiUrlKey = existingFrontendKey.key;
+         }
+
+         let dbUpdated = false;
+         if (!project.configuration.envVariables.frontend) project.configuration.envVariables.frontend = [];
+         
+         const fKey = project.configuration.envVariables.frontend.find(e => e.key === frontendApiUrlKey);
+         if (fKey) {
+             fKey.valueEncrypted = encryptSecret(backendUrl);
+             dbUpdated = true;
+         } else {
+             project.configuration.envVariables.frontend.push({ key: frontendApiUrlKey, valueEncrypted: encryptSecret(backendUrl), isSecret: false });
+             dbUpdated = true;
+         }
+         
+         if (dbUpdated) {
+             await project.save();
+         }
+      }
+    })();
   } catch (error) {
     console.error(`Trigger backend deployment error for project ${req.params?.projectId}:`, error);
     res.status(500).json({ error: "Failed to trigger deployment", details: error.message });
@@ -576,6 +676,15 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
              providerUrl: `https://railway.app/project/${providerProjectId}`,
              providerDashboardUrl: `https://railway.app/project/${providerProjectId}`
           });
+
+          // Railway doesn't have a simple poll API; mark as completed immediately after trigger
+          // (Railway will actually build asynchronously on their side, which is expected)
+          if (deployment.type !== 'full') {
+            await Deployment.findByIdAndUpdate(deployment._id, {
+              status: 'completed',
+              completedAt: new Date()
+            });
+          }
           
           return { url: null, dashboardUrl: `https://railway.app/project/${providerProjectId}` };
         } else if (platform === 'render') {
@@ -618,37 +727,56 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
              project.configuration.renderServiceId = providerServiceId;
              await project.save();
              await appendLog('success', 'project_create', 'Render Service created successfully');
-             
-             if (renderSvc.service?.url) {
-                return { url: renderSvc.service.url, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
-             }
           } else {
              await appendLog('info', 'env_setup', 'Updating Render environment variables...');
              await updateRenderEnvVars(token, providerServiceId, envVarsArray);
              await appendLog('success', 'env_setup', 'Backend variables updated');
+          }
              
              await appendLog('info', 'deploy_trigger', 'Triggering Render deployment');
-             await triggerRenderDeploy(token, providerServiceId);
-             await appendLog('success', 'deploy_trigger', 'Render deployment started');
+          const deployTriggerRes = await triggerRenderDeploy(token, providerServiceId);
+          // deployTriggerRes is the new deploy object; extract its ID to poll status
+          const newDeployId = deployTriggerRes?.deploy?.id || deployTriggerRes?.id;
+          await appendLog('success', 'deploy_trigger', 'Render deployment started');
+          
+          // Poll Render deploy status until live, failed, or timeout (10 min)
+          let finalRenderStatus = 'unknown';
+          let pollRenderUrl = null;
+          if (newDeployId) {
+            await appendLog('info', 'deploy_trigger', 'Waiting for Render to finish building (polling every 15s, max 10 min)...');
+            const maxAttempts = 40; // 40 × 15s = 10 min
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+              await new Promise(r => setTimeout(r, 15000));
+              try {
+                const deployStatus = await getRenderDeployStatus(token, providerServiceId, newDeployId);
+                // Render deploy statuses: created, build_in_progress, update_in_progress, live, deactivated, build_failed, update_failed, canceled
+                const st = deployStatus?.deploy?.status || deployStatus?.status;
+                await appendLog('info', 'deploy_trigger', `Render deploy status: ${st} (attempt ${attempt + 1}/${maxAttempts})`);
+                if (st === 'live') {
+                  finalRenderStatus = 'live';
+                  break;
+                } else if (st === 'build_failed' || st === 'update_failed' || st === 'canceled' || st === 'deactivated') {
+                  finalRenderStatus = st;
+                  break;
+                }
+              } catch (pollErr) {
+                await appendLog('warning', 'deploy_trigger', `Render status poll error: ${pollErr.message}`);
+              }
+            }
+          } else {
+            // No deploy ID from trigger — Render auto-deploy may have started; wait and check service
+            await appendLog('warning', 'deploy_trigger', 'No deploy ID returned from trigger. Waiting 30s before checking service...');
+            await new Promise(r => setTimeout(r, 30000));
+            finalRenderStatus = 'live'; // Assume it started if no error was thrown
           }
           
-          let renderUrl = null;
+          // Re-fetch service to get current URL
           try {
             const svcDetails = await getRenderService(token, providerServiceId);
-            let rawUrl = null;
-            if (svcDetails && svcDetails.serviceDetails && svcDetails.serviceDetails.url) {
-               rawUrl = svcDetails.serviceDetails.url;
-            } else if (svcDetails && svcDetails.service && svcDetails.service.url) {
-               rawUrl = svcDetails.service.url;
-            } else if (svcDetails && svcDetails.url) {
-               rawUrl = svcDetails.url;
-            }
-            
-            if (rawUrl) {
-               renderUrl = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
-            }
+            const rawUrl = svcDetails?.serviceDetails?.url || svcDetails?.service?.url || svcDetails?.url;
+            if (rawUrl) pollRenderUrl = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
           } catch(e) {
-            console.warn("Failed to fetch render service details to get URL:", e.message);
+            console.warn('Failed to fetch Render service URL after polling:', e.message);
           }
 
           await Deployment.findByIdAndUpdate(deployment._id, {
@@ -656,11 +784,25 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
              providerUrl: `https://dashboard.render.com/web/${providerServiceId}`,
              providerDashboardUrl: `https://dashboard.render.com/web/${providerServiceId}`
           });
+
+          const isRenderSuccess = finalRenderStatus === 'live' || finalRenderStatus === 'unknown';
+          // Only mark final status for standalone (non-full) deployments
+          if (deployment.type !== 'full') {
+            const renderFinalStatus = isRenderSuccess ? 'completed' : 'failed';
+            const renderErrorMsg = isRenderSuccess ? null : `Render build ${finalRenderStatus}. Check Render dashboard for logs.`;
+            await Deployment.findByIdAndUpdate(deployment._id, {
+              status: renderFinalStatus,
+              errorMessage: renderErrorMsg,
+              completedAt: new Date(),
+              ...(pollRenderUrl ? { deploymentUrl: pollRenderUrl, 'finalSummary.backendUrl': pollRenderUrl } : {})
+            });
+            if (!isRenderSuccess) throw new Error(renderErrorMsg);
+          }
           
-          return { url: renderUrl, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
+          return { url: pollRenderUrl, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
         }
       } catch (err) {
-        console.error("Background deploy error:", err);
+        console.error('Background deploy error:', err);
         if (deployment.type !== 'full') {
           await Deployment.findByIdAndUpdate(deployment._id, {
             status: 'failed',
@@ -951,6 +1093,17 @@ export const getDeployment = async (req, res) => {
     }).sort({ createdAt: -1 });
     
     deploymentObj.isLatest = latestDeploy && latestDeploy._id.toString() === deployment._id.toString();
+
+    // Fetch custom domains assigned to this project
+    const DomainSetup = (await import('../models/DomainSetup.js')).default;
+    const domainSetups = await DomainSetup.find({ projectId: deployment.projectId._id, status: { $in: ['active', 'partially_active', 'pending_dns', 'verifying'] } });
+    
+    deploymentObj.customDomains = [];
+    domainSetups.forEach(ds => {
+       if (ds.frontendDomain) deploymentObj.customDomains.push({ type: 'frontend', url: `https://${ds.frontendDomain}`, status: ds.frontendVerification });
+       if (ds.wwwDomain) deploymentObj.customDomains.push({ type: 'www', url: `https://${ds.wwwDomain}`, status: ds.frontendVerification });
+       if (ds.backendDomain) deploymentObj.customDomains.push({ type: 'backend', url: `https://${ds.backendDomain}`, status: ds.backendVerification });
+    });
 
     res.json(deploymentObj);
   } catch (error) {

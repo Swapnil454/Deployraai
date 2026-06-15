@@ -111,10 +111,10 @@ export default function DeployPage() {
           if (res.ok) {
             const data = await res.json();
             setDeploymentLogs(data);
-            if (data.status === 'success' || data.status === 'failed') {
+            if (data.status === 'success' || data.status === 'completed' || data.status === 'failed') {
                clearInterval(interval);
                fetchDeploymentsHistory();
-               if (data.status === 'success') {
+               if (data.status === 'success' || data.status === 'completed') {
                  fetchMonitors();
                }
             }

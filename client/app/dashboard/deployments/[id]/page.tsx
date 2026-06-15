@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { 
   ArrowLeft, ExternalLink, Loader2, RefreshCw, Bot, AlertTriangle, 
@@ -15,6 +15,167 @@ const TreeLine = ({ isLast }: { isLast?: boolean }) => (
     <path d={isLast ? "M0 0V12C0 14.2091 1.79086 16 4 16H16" : "M0 0V24M0 12C0 14.2091 1.79086 16 4 16H16"} stroke="currentColor" strokeWidth="1.5" />
   </svg>
 );
+
+// Live monitor widget shown instead of screenshot for backend deployments
+function LiveMonitorWidget({ deployment, primaryDomain }: { deployment: any, primaryDomain?: string }) {
+  const [healthStatus, setHealthStatus] = useState<'checking' | 'up' | 'down' | 'unknown'>('checking');
+  const [responseTime, setResponseTime] = useState<number | null>(null);
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [pingHistory, setPingHistory] = useState<{ ok: boolean; time: number }[]>([]);
+  const [checkCount, setCheckCount] = useState(0);
+
+  const backendUrl = primaryDomain || deployment.finalSummary?.backendUrl || deployment.deploymentUrl || deployment.providerUrl || '';
+  const isDeploymentSuccess = deployment.status === 'success' || deployment.status === 'completed';
+  const platform = deployment.platform;
+
+  const checkHealth = async () => {
+    if (!backendUrl || !isDeploymentSuccess) {
+      setHealthStatus('unknown');
+      return;
+    }
+    const start = Date.now();
+    try {
+      // Proxy through our own API to avoid CORS; fall back to a basic fetch
+      const healthUrl = backendUrl.startsWith('http') ? backendUrl : `https://${backendUrl}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/proxy-health?url=${encodeURIComponent(healthUrl + '/health')}`, {
+        credentials: 'include',
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      const elapsed = Date.now() - start;
+      const ok = res.ok;
+      setHealthStatus(ok ? 'up' : 'down');
+      setResponseTime(elapsed);
+      setLastChecked(new Date());
+      setPingHistory(prev => [...prev.slice(-11), { ok, time: elapsed }]);
+    } catch {
+      const elapsed = Date.now() - start;
+      setHealthStatus('down');
+      setResponseTime(null);
+      setLastChecked(new Date());
+      setPingHistory(prev => [...prev.slice(-11), { ok: false, time: elapsed }]);
+    }
+    setCheckCount(c => c + 1);
+  };
+
+  useEffect(() => {
+    if (!isDeploymentSuccess) { setHealthStatus('unknown'); return; }
+    checkHealth();
+    const interval = setInterval(checkHealth, 30000);
+    return () => clearInterval(interval);
+  }, [backendUrl, isDeploymentSuccess]);
+
+  const platformColor = platform === 'railway' ? 'text-violet-400' : platform === 'render' ? 'text-emerald-400' : 'text-zinc-400';
+  const platformLabel = platform === 'railway' ? 'Railway' : platform === 'render' ? 'Render' : platform || 'Backend';
+
+  const statusColor = healthStatus === 'up' ? 'bg-emerald-500' : healthStatus === 'down' ? 'bg-red-500' : healthStatus === 'checking' ? 'bg-yellow-500 animate-pulse' : 'bg-zinc-600';
+  const statusText = healthStatus === 'up' ? 'Operational' : healthStatus === 'down' ? 'Down' : healthStatus === 'checking' ? 'Checking…' : 'Unknown';
+
+  const avgResponseTime = pingHistory.length > 0
+    ? Math.round(pingHistory.reduce((s, p) => s + p.time, 0) / pingHistory.length)
+    : null;
+  const uptimePct = pingHistory.length > 0
+    ? Math.round((pingHistory.filter(p => p.ok).length / pingHistory.length) * 100)
+    : null;
+
+  return (
+    <div className="w-full aspect-[16/10] rounded-lg border border-zinc-800 bg-[#0d0d0d] overflow-hidden flex flex-col">
+      {/* Header bar */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800 bg-[#111]">
+        <div className="flex items-center gap-2">
+          <div className={`h-2 w-2 rounded-full ${statusColor}`} />
+          <span className="text-[13px] font-semibold text-white">Live Monitor</span>
+          <span className={`text-[11px] font-medium ${platformColor}`}>{platformLabel}</span>
+        </div>
+        <button
+          onClick={checkHealth}
+          className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+        >
+          <RefreshCw className="h-3 w-3" /> Refresh
+        </button>
+      </div>
+
+      {/* Status row */}
+      <div className="px-4 py-3 border-b border-zinc-800/60">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className={`h-3 w-3 rounded-full ${statusColor}`} />
+            <span className={`text-[15px] font-semibold ${healthStatus === 'up' ? 'text-emerald-400' : healthStatus === 'down' ? 'text-red-400' : 'text-zinc-400'}`}>
+              {statusText}
+            </span>
+          </div>
+          {responseTime !== null && (
+            <span className="text-[13px] text-zinc-500 font-mono">{responseTime}ms</span>
+          )}
+        </div>
+        {lastChecked && (
+          <p className="text-[11px] text-zinc-600 mt-1">
+            Last checked: {lastChecked.toLocaleTimeString()}
+          </p>
+        )}
+      </div>
+
+      {/* Stats grid */}
+      <div className="grid grid-cols-3 divide-x divide-zinc-800/60 border-b border-zinc-800/60">
+        <div className="px-3 py-2.5 text-center">
+          <div className="text-[11px] text-zinc-500 mb-0.5">Avg Response</div>
+          <div className="text-[14px] font-mono text-zinc-200">{avgResponseTime !== null ? `${avgResponseTime}ms` : '—'}</div>
+        </div>
+        <div className="px-3 py-2.5 text-center">
+          <div className="text-[11px] text-zinc-500 mb-0.5">Uptime</div>
+          <div className={`text-[14px] font-mono ${uptimePct === 100 ? 'text-emerald-400' : uptimePct !== null && uptimePct < 90 ? 'text-red-400' : 'text-zinc-200'}`}>
+            {uptimePct !== null ? `${uptimePct}%` : '—'}
+          </div>
+        </div>
+        <div className="px-3 py-2.5 text-center">
+          <div className="text-[11px] text-zinc-500 mb-0.5">Checks</div>
+          <div className="text-[14px] font-mono text-zinc-200">{checkCount}</div>
+        </div>
+      </div>
+
+      {/* Ping history sparkline */}
+      <div className="flex-1 px-4 py-3 flex flex-col justify-between">
+        <div className="text-[11px] text-zinc-600 mb-2">Response history (last 12 pings)</div>
+        <div className="flex items-end gap-1 h-10">
+          {pingHistory.length === 0 ? (
+            Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="flex-1 h-2 rounded-sm bg-zinc-800" />
+            ))
+          ) : (
+            pingHistory.map((p, i) => {
+              const maxTime = Math.max(...pingHistory.map(x => x.time), 1);
+              const heightPct = Math.max(10, Math.round((p.time / maxTime) * 100));
+              return (
+                <div
+                  key={i}
+                  className={`flex-1 rounded-sm transition-all ${p.ok ? 'bg-emerald-500/70' : 'bg-red-500/70'}`}
+                  style={{ height: `${heightPct}%` }}
+                  title={`${p.ok ? 'OK' : 'Error'} — ${p.time}ms`}
+                />
+              );
+            })
+          )}
+        </div>
+
+        {/* Backend URL */}
+        {backendUrl && (
+          <a
+            href={backendUrl.startsWith('http') ? backendUrl : `https://${backendUrl}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors truncate"
+          >
+            <ExternalLink className="h-3 w-3 shrink-0" />
+            <span className="truncate">{backendUrl.replace('https://', '').replace('http://', '')}</span>
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 export default function DeploymentDetailsPage() {
   const router = useRouter();
@@ -45,9 +206,30 @@ export default function DeploymentDetailsPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const allDomainsToShow = useMemo(() => {
+    if (!deployment) return [];
+    const applicableCustomDomains = (deployment.customDomains || []).filter((d: any) => {
+      if (deployment.type === 'backend') return d.type === 'backend';
+      if (deployment.type === 'frontend') return d.type === 'frontend' || d.type === 'www';
+      return true;
+    });
+
+    const allDomains = new Set<string>();
+    applicableCustomDomains.forEach((d: any) => allDomains.add(d.url));
+    if (deployment.finalSummary?.frontendUrl) allDomains.add(deployment.finalSummary.frontendUrl);
+    if (deployment.deploymentUrl) allDomains.add(deployment.deploymentUrl);
+    if (deployment.providerUrl) allDomains.add(deployment.providerUrl);
+
+    return Array.from(allDomains).filter((url: string) => 
+      url && !url.includes('dashboard.render.com') && 
+      !url.includes('railway.app/project/') && 
+      !url.includes('vercel.com/')
+    );
+  }, [deployment]);
+
   const getVisitUrl = () => {
-    if (!deployment) return '#';
-    return deployment.providerUrl || deployment.customDomain || deployment.deploymentUrl || deployment.finalSummary?.frontendUrl || '#';
+    if (allDomainsToShow.length > 0) return allDomainsToShow[0];
+    return '#';
   };
 
   const handleShare = async () => {
@@ -462,9 +644,11 @@ export default function DeploymentDetailsPage() {
           </div>
           
           <div className="flex flex-col lg:flex-row p-6 gap-8">
-            {/* Left Image Placeholder / Screenshot */}
+            {/* Left Panel: Screenshot for frontend, Live Monitor for backend */}
             <div className="w-full lg:w-[45%] xl:w-[40%] flex-shrink-0">
-              {deployment.finalSummary?.screenshotUrl ? (
+              {deployment.type === 'backend' ? (
+                <LiveMonitorWidget deployment={deployment} primaryDomain={allDomainsToShow[0]} />
+              ) : deployment.finalSummary?.screenshotUrl ? (
                 <div className="w-full aspect-[16/10] relative rounded-lg border border-zinc-800 overflow-hidden group">
                   <div className="absolute top-0 left-0 w-full h-4 bg-[#111] flex items-center px-2 gap-1 z-10 border-b border-zinc-800">
                     <div className="w-1.5 h-1.5 rounded-full bg-zinc-700"></div>
@@ -588,37 +772,33 @@ export default function DeploymentDetailsPage() {
               <div className="mb-6">
                 <div className="text-[13px] text-zinc-500 mb-2">Domains</div>
                 <div className="text-[14px] ml-1">
-                  {deployment.finalSummary?.frontendUrl || deployment.deploymentUrl || deployment.providerUrl ? (
+                  {allDomainsToShow.length > 0 ? (
                     <>
                       {/* Parent Domain */}
                       <div className="flex items-center gap-2 group relative z-10 bg-[#0a0a0a] py-0.5">
                         <Globe className="h-4 w-4 text-zinc-500" />
-                        <a href={deployment.finalSummary?.frontendUrl || deployment.deploymentUrl || '#'} target="_blank" rel="noopener noreferrer" className="text-zinc-200 hover:underline font-medium">
-                          {(deployment.finalSummary?.frontendUrl || deployment.deploymentUrl || 'Preview Domain').replace('https://', '')}
+                        <a href={allDomainsToShow[0].startsWith('http') ? allDomainsToShow[0] : `https://${allDomainsToShow[0]}`} target="_blank" rel="noopener noreferrer" className="text-zinc-200 hover:underline font-medium">
+                          {allDomainsToShow[0].replace('https://', '').replace('http://', '')}
                         </a>
-                        <span className="bg-zinc-800 text-zinc-300 text-[11px] font-medium px-1.5 py-0.5 rounded ml-1">+2</span>
+                        {allDomainsToShow.length > 1 && (
+                          <span className="bg-zinc-800 text-zinc-300 text-[11px] font-medium px-1.5 py-0.5 rounded ml-1">+{allDomainsToShow.length - 1}</span>
+                        )}
                         <ExternalLink className="h-3.5 w-3.5 text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
                       
                       {/* Children Domains */}
-                      <div className="pl-6 mt-1 flex flex-col">
-                        {deployment.deploymentUrl && deployment.deploymentUrl !== deployment.finalSummary?.frontendUrl && (
-                          <div className="flex items-center gap-2 relative py-1">
-                            <TreeLine isLast={!deployment.providerUrl} />
-                            <a href={deployment.deploymentUrl} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-200 hover:underline truncate max-w-[300px] text-[13px] z-10">
-                              {deployment.deploymentUrl.replace('https://', '')}
-                            </a>
-                          </div>
-                        )}
-                        {deployment.providerUrl && (
-                          <div className="flex items-center gap-2 relative py-1">
-                            <TreeLine isLast={true} />
-                            <a href={deployment.providerUrl} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-200 hover:underline truncate max-w-[300px] text-[13px] z-10">
-                              {deployment.providerUrl.replace('https://', '')}
-                            </a>
-                          </div>
-                        )}
-                      </div>
+                      {allDomainsToShow.length > 1 && (
+                        <div className="pl-6 mt-1 flex flex-col">
+                          {allDomainsToShow.slice(1).map((domainStr: string, idx: number) => (
+                            <div key={idx} className="flex items-center gap-2 relative py-1">
+                              <TreeLine isLast={idx === allDomainsToShow.length - 2} />
+                              <a href={domainStr.startsWith('http') ? domainStr : `https://${domainStr}`} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-200 hover:underline truncate max-w-[300px] text-[13px] z-10">
+                                {domainStr.replace('https://', '').replace('http://', '')}
+                              </a>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </>
                   ) : (
                     <span className="text-zinc-500 text-sm">No domains assigned yet</span>
@@ -882,7 +1062,9 @@ export default function DeploymentDetailsPage() {
           {/* Checks */}
           <AccordionItem 
             title="Deployment Checks" 
-            rightContent={<Clock className="h-4 w-4 text-zinc-500" />}
+            rightContent={isRunning ? <Loader2 className="h-4 w-4 text-blue-500 animate-spin" /> : 
+                          isSuccess ? <CheckCircle2 className="h-4 w-4 text-blue-500" /> : 
+                          isFailed ? <AlertTriangle className="h-4 w-4 text-red-500" /> : <Clock className="h-4 w-4 text-zinc-500" />}
             isOpen={openChecks} 
             toggle={() => setOpenChecks(!openChecks)}
           >
@@ -909,19 +1091,25 @@ export default function DeploymentDetailsPage() {
           {/* Domains */}
           <AccordionItem 
             title="Assigning Custom Domains" 
-            rightContent={isSuccess ? <div className="h-5 w-5 rounded-full bg-blue-500 flex items-center justify-center"><CheckCircle2 className="h-3 w-3 text-white" /></div> : <div className="h-5 w-5 rounded-full border border-zinc-700" />}
+            rightContent={isRunning ? <Loader2 className="h-4 w-4 text-blue-500 animate-spin" /> : 
+                          isSuccess ? <CheckCircle2 className="h-4 w-4 text-blue-500" /> : 
+                          isFailed ? <AlertTriangle className="h-4 w-4 text-red-500" /> : <Clock className="h-4 w-4 text-zinc-500" />}
             isOpen={openDomains} 
             toggle={() => setOpenDomains(!openDomains)}
           >
             <div className="p-4 text-[14px] text-zinc-400">
               <p className="mb-4">Domains are automatically assigned upon successful deployment.</p>
-              {deployment.finalSummary?.frontendUrl && (
-                <div className="flex items-center gap-3 p-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
-                  <Globe className="h-4 w-4 text-emerald-400" />
-                  <span className="text-zinc-200">{deployment.finalSummary.frontendUrl}</span>
-                  <span className="ml-auto text-[12px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20">Assigned</span>
-                </div>
-              )}
+              <div className="space-y-2">
+                {allDomainsToShow.length > 0 ? allDomainsToShow.map((domainStr: string, idx: number) => (
+                  <div key={idx} className="flex items-center gap-3 p-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
+                    <Globe className="h-4 w-4 text-emerald-400" />
+                    <span className="text-zinc-200">{domainStr}</span>
+                    <span className="ml-auto text-[12px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20">Assigned</span>
+                  </div>
+                )) : (
+                  isSuccess && <span className="text-zinc-500 italic">No domains configured.</span>
+                )}
+              </div>
             </div>
           </AccordionItem>
 
