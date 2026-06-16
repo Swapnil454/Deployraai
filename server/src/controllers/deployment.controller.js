@@ -533,6 +533,11 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
             });
             
             if (finalStatus === 'completed' && deploymentUrl) {
+               await appendLog('success', '', `==> Your service is live 🎉`);
+               await appendLog('success', '', `==> `);
+               await appendLog('success', '', `==> ///////////////////////////////////////////////////////////`);
+               await appendLog('success', '', `==> `);
+               await appendLog('success', '', `==> Available at your primary URL ${deploymentUrl}`);
                captureDeploymentScreenshot(deployment._id, deploymentUrl).catch(console.error);
             }
           }
@@ -684,6 +689,11 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
               status: 'completed',
               completedAt: new Date()
             });
+            await appendLog('success', '', `==> Your service is live 🎉`);
+            await appendLog('success', '', `==> `);
+            await appendLog('success', '', `==> ///////////////////////////////////////////////////////////`);
+            await appendLog('success', '', `==> `);
+            await appendLog('success', '', `==> Available at your primary URL https://railway.app/project/${providerProjectId}`);
           }
           
           return { url: null, dashboardUrl: `https://railway.app/project/${providerProjectId}` };
@@ -797,6 +807,14 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
               ...(pollRenderUrl ? { deploymentUrl: pollRenderUrl, 'finalSummary.backendUrl': pollRenderUrl } : {})
             });
             if (!isRenderSuccess) throw new Error(renderErrorMsg);
+            
+            if (isRenderSuccess && pollRenderUrl) {
+               await appendLog('success', '', `==> Your service is live 🎉`);
+               await appendLog('success', '', `==> `);
+               await appendLog('success', '', `==> ///////////////////////////////////////////////////////////`);
+               await appendLog('success', '', `==> `);
+               await appendLog('success', '', `==> Available at your primary URL ${pollRenderUrl}`);
+            }
           }
           
           return { url: pollRenderUrl, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
@@ -1036,6 +1054,17 @@ export const triggerFullDeployment = async (req, res) => {
          await appendLog(finalStatus === 'success' ? 'success' : 'error', 'checking_full_stack', `Full-stack deployment orchestration completed with status: ${finalStatus}`);
          
          if (finalStatus === 'success') {
+             await appendLog('success', '', `==> Your service is live 🎉`);
+             await appendLog('success', '', `==> `);
+             await appendLog('success', '', `==> ///////////////////////////////////////////////////////////`);
+             await appendLog('success', '', `==> `);
+             if (frontendUrl) {
+                 await appendLog('success', '', `==> Available at your primary URL ${frontendUrl}`);
+             }
+             if (backendUrl) {
+                 await appendLog('success', '', `==> Available at your backend URL ${backendUrl}`);
+             }
+             
              try {
                  await createDefaultMonitors(projectId, frontendUrl, backendUrl);
              } catch (monitorErr) {
