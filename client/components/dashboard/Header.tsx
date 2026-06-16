@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { usePathname, useRouter } from "next/navigation";
-import { Search, Plus, ChevronsUpDown } from "lucide-react";
+import { usePathname, useRouter, useParams } from "next/navigation";
+import { Search, Plus, ChevronsUpDown, X } from "lucide-react";
 import { ProjectAvatar } from "./ProjectAvatar";
 
 // Simple mapping for titles
@@ -23,6 +23,10 @@ const TITLE_MAP: Record<string, string> = {
 export const Header = ({ projects }: { projects: any[] }) => {
   const pathname = usePathname() || "";
   const router = useRouter();
+  const params = useParams() as any;
+  
+  const currentProjectId = params?.projectId || params?.id;
+  const currentProject = currentProjectId ? projects.find((p: any) => p._id === currentProjectId) : null;
   
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const [projectSearchQuery, setProjectSearchQuery] = useState("");
@@ -38,7 +42,12 @@ export const Header = ({ projects }: { projects: any[] }) => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isProjectDropdownOpen]);
 
-  const currentTitle = TITLE_MAP[pathname] || "Overview";
+  let currentTitle = TITLE_MAP[pathname] || "Overview";
+  
+  // Dynamic titles for dynamic routes
+  if (pathname.startsWith("/dashboard/logs/")) {
+    currentTitle = "Deployment Logs";
+  }
 
   return (
     <div className="w-full border-b border-zinc-800 bg-black px-8 h-[48px] shrink-0 sticky top-0 z-40">
@@ -46,13 +55,42 @@ export const Header = ({ projects }: { projects: any[] }) => {
         {/* Left: All Projects Dropdown */}
         <div className="flex-1 flex items-center h-full">
           <div className="relative h-full flex items-center">
-            <button 
-              onClick={() => setIsProjectDropdownOpen(!isProjectDropdownOpen)}
-              className={`flex items-center gap-1.5 text-[14px] font-semibold transition-colors px-2 py-1.5 -ml-2 rounded-md ${isProjectDropdownOpen ? 'bg-zinc-900/80 text-white' : 'text-zinc-200 hover:bg-zinc-900/50 hover:text-white'}`}
-            >
-              All Projects
-              <ChevronsUpDown className="h-4 w-4 text-zinc-400" />
-            </button>
+            <div className="flex items-center gap-1 group">
+              <button 
+                onClick={() => setIsProjectDropdownOpen(!isProjectDropdownOpen)}
+                className={`flex items-center gap-1.5 text-[14px] font-semibold transition-colors px-2 py-1.5 -ml-2 rounded-md ${isProjectDropdownOpen ? 'bg-zinc-900/80 text-white' : 'text-zinc-200 hover:bg-zinc-900/50 hover:text-white'}`}
+              >
+                {currentProject ? (
+                  <>
+                    <div className="h-5 w-5 shrink-0 flex items-center justify-center overflow-hidden rounded-full">
+                      <ProjectAvatar project={currentProject} />
+                    </div>
+                    {currentProject.repoName}
+                  </>
+                ) : (
+                  "All Projects"
+                )}
+                <ChevronsUpDown className="h-4 w-4 text-zinc-400" />
+              </button>
+
+              {currentProject && (
+                <button
+                  onClick={() => {
+                    if (pathname.startsWith('/dashboard/deployments')) {
+                      router.push('/dashboard/deployments/fullstack');
+                    } else if (pathname.startsWith('/dashboard/logs')) {
+                      router.push('/dashboard/logs');
+                    } else {
+                      router.push('/dashboard/projects');
+                    }
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-1 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded transition-all cursor-pointer"
+                  title="Clear Project Selection"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
 
             {isProjectDropdownOpen && (
               <div className="absolute top-[calc(100%+8px)] left-0 w-[300px] bg-[#0a0a0a] border border-zinc-800 rounded-lg shadow-xl z-50 overflow-hidden">
@@ -82,6 +120,8 @@ export const Header = ({ projects }: { projects: any[] }) => {
                       onClick={() => {
                         if (pathname.startsWith('/dashboard/deployments/')) {
                           router.push(`${pathname}?projectId=${p._id}`);
+                        } else if (pathname.startsWith('/dashboard/logs')) {
+                          router.push(`/dashboard/logs/${p._id}`);
                         } else {
                           router.push(`/dashboard/projects/${p._id}/${p.status === 'configured' ? 'deploy' : 'overview'}`);
                         }
