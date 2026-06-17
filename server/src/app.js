@@ -25,6 +25,7 @@ app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+app.use(express.static(path.join(__dirname, '../public')));
 app.use('/screenshots', express.static(path.join(__dirname, '../public/screenshots')));
 
 // Mount routes
@@ -35,9 +36,31 @@ app.use("/api/projects", projectRoutes);
 app.use("/api/integrations", integrationRoutes);
 app.use("/api/deployments", deploymentRoutes);
 app.use("/api/fix-prs", fixPrRoutes);
+
+
+
 app.use("/api", domainRoutes);
 app.use("/api", monitoringRoutes);
 app.use("/api/admin", adminRoutes);
+
+// Analytics routes need open CORS since they're called from arbitrary user websites
+app.use("/api/analytics", (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+});
+
+app.use("/api/analytics", async (req, res, next) => {
+    try {
+        const { default: router } = await import("./routes/analytics.routes.js");
+        return router(req, res, next);
+    } catch (err) {
+        next(err);
+    }
+});
+
 
 app.get("/", (req, res) => {
     res.send({

@@ -60,16 +60,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (loading || !user) {
     return (
-      <div className="flex min-h-[calc(100vh-64px)] items-center justify-center bg-black text-white">
+      <div className="flex min-h-screen items-center justify-center bg-black text-white">
         <Loader2 className="h-8 w-8 animate-spin text-zinc-500" />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-64px)] bg-black text-white">
+    <div className="flex min-h-screen bg-black text-white">
       <Sidebar user={user} />
-      <main className="flex-1 flex flex-col overflow-auto h-[calc(100vh-64px)] relative">
+      <main className="flex-1 flex flex-col overflow-auto h-screen relative">
         <Header projects={projects} />
         {children}
       </main>

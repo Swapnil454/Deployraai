@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Calendar, Users, Monitor, GitBranch, Activity, Search, ChevronDown, Check, MoreHorizontal, X, PlusCircle, Trash, ChevronLeft, ChevronRight } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Calendar, Users, RefreshCw, Monitor, GitBranch, Activity, Search, ChevronDown, Check, MoreHorizontal, X, PlusCircle, Trash, ChevronLeft, ChevronRight } from "lucide-react";
 
 function FilterDropdown({ icon: Icon, value, onChange, options, placeholder, emptyText, className, isAuthor }: any) {
   const [open, setOpen] = useState(false);
@@ -435,9 +436,10 @@ function DateRangeDropdown({ icon: Icon, dateRange, setDateRange, customStart, s
   );
 }
 
-function ActionMenu({ onClear }: { onClear: () => void }) {
+function ActionMenu({ onClear, onRefresh }: { onClear: () => void, onRefresh?: () => void }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -460,7 +462,18 @@ function ActionMenu({ onClear }: { onClear: () => void }) {
 
       {open && (
         <div className="absolute z-50 top-[calc(100%+4px)] right-0 w-[220px] bg-[#0a0a0a] border border-zinc-800 rounded-lg shadow-2xl p-1 flex flex-col">
-          <div className="px-3 py-2 rounded-md text-[13px] text-zinc-500 cursor-not-allowed flex items-center gap-2">
+          {onRefresh && (
+            <div 
+              onClick={() => { onRefresh(); setOpen(false); }}
+              className="px-3 py-2 rounded-md text-[13px] text-zinc-300 hover:bg-zinc-800/50 hover:text-white cursor-pointer flex items-center gap-2 transition-colors"
+            >
+               <RefreshCw className="h-3.5 w-3.5 shrink-0" /> Refresh
+            </div>
+          )}
+          <div 
+            onClick={() => { router.push('/dashboard/new-deployment'); setOpen(false); }}
+            className="px-3 py-2 rounded-md text-[13px] text-zinc-300 hover:bg-zinc-800/50 hover:text-white cursor-pointer flex items-center gap-2 transition-colors"
+          >
              <PlusCircle className="h-3.5 w-3.5 shrink-0" /> Create Deployment
           </div>
           <div className="px-3 py-2 rounded-md text-[13px] text-zinc-500 cursor-not-allowed flex items-center gap-2">
@@ -469,6 +482,7 @@ function ActionMenu({ onClear }: { onClear: () => void }) {
           <div className="px-3 py-2 rounded-md text-[13px] text-zinc-500 cursor-not-allowed flex items-center gap-2">
              <Trash className="h-3.5 w-3.5 shrink-0" /> Deployment Retention
           </div>
+          
           <div className="h-px bg-zinc-800 my-1 mx-1"></div>
           <div 
             onClick={() => { onClear(); setOpen(false); }}
@@ -491,10 +505,10 @@ export function DeploymentFilterBar({
   author, setAuthor,
   status, setStatus,
   authorsList, branchesList,
-  onClear
+  onClear, onRefresh
 }: any) {
   return (
-    <div className="flex flex-wrap items-center gap-2 w-full py-4">
+    <div className="flex flex-wrap items-center gap-2 w-full py-2">
       {/* Left Group */}
       <div className="flex flex-1 items-center gap-3 min-w-[300px]">
         <FilterDropdown 
@@ -529,6 +543,23 @@ export function DeploymentFilterBar({
             { value: 'preview', label: 'Preview' }
           ]}
         />
+
+        <DropdownMenu 
+          value={['1', '3', '7', '15', '30'].includes(dateRange) ? dateRange : 'all'}
+          onChange={(val: string) => {
+             setDateRange(val);
+             setCustomStart('');
+             setCustomEnd('');
+          }}
+          placeholder="All Time"
+          options={[
+            { value: '1', label: '24h ago' },
+            { value: '3', label: '3d ago' },
+            { value: '7', label: '7d ago' },
+            { value: '15', label: '15d ago' },
+            { value: '30', label: '30d ago' }
+          ]}
+        />
         
         <DateRangeDropdown 
           icon={Calendar}
@@ -550,7 +581,7 @@ export function DeploymentFilterBar({
           ]}
         />
 
-        <ActionMenu onClear={onClear} />
+        <ActionMenu onClear={onClear} onRefresh={onRefresh} />
       </div>
     </div>
   );

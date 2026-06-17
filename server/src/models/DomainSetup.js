@@ -73,6 +73,11 @@ const DomainSetupSchema = new mongoose.Schema({
   consecutiveFailures: { type: Number, default: 0 },
   degradedAt:          { type: Date },
 
+  // Redirect tracking
+  isRedirect:     { type: Boolean, default: false },
+  redirectStatus: String,
+  redirectTarget: String,
+
   dnsRecords: [dnsRecordSchema],
 
   sslStatus:        String,

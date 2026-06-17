@@ -105,7 +105,7 @@ const addLog = (domainSetup, message, level = "info") => {
 export const addCustomDomain = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { rootDomain } = req.body;
+    const { rootDomain, targetService = 'both', addDomainOption, redirectStatus, redirectTarget } = req.body;
     const userId = req.user.userId;
 
     // ── 1. Input validation ──────────────────────────────────────────────────
@@ -141,7 +141,7 @@ export const addCustomDomain = async (req, res) => {
     }
 
     const vercelProjectId = project.configuration?.vercelProjectId;
-    if (project.configuration.frontendPlatform === "vercel" && !vercelProjectId) {
+    if ((targetService === 'frontend' || targetService === 'both') && project.configuration.frontendPlatform === "vercel" && !vercelProjectId) {
       return res.status(400).json({
         error: "Vercel Project ID not found. Please deploy frontend first.",
       });
@@ -150,10 +150,12 @@ export const addCustomDomain = async (req, res) => {
     // ── 4. Idempotency — return existing setup for this project + domain ─────
     const existing = await DomainSetup.findOne({ projectId, rootDomain });
     if (existing) {
-      return res.status(200).json({ success: true, domainSetup: existing, alreadyExists: true });
+      return res.status(400).json({ error: "This domain already exists in this project." });
     }
 
     // ── 5. Global uniqueness — reject if another project already owns this domain ──
+    // The user requested to disable global checking and only check in specific projects.
+    /*
     const globalConflict = await DomainSetup.findOne({
       rootDomain,
       status: { $in: ["active", "partially_active", "degraded", "verifying", "pending_dns"] },
@@ -165,11 +167,15 @@ export const addCustomDomain = async (req, res) => {
           "Remove it from that project before adding it here.",
       });
     }
+    */
 
     // ── 6. Build DomainSetup document ────────────────────────────────────────
-    const frontendDomain = rootDomain;
-    const wwwDomain = `www.${rootDomain}`;
-    const backendDomain = `api.${rootDomain}`;
+    const isFrontend = targetService === 'frontend' || targetService === 'both';
+    const isBackend = targetService === 'backend' || targetService === 'both';
+
+    const frontendDomain = isFrontend ? rootDomain : undefined;
+    const wwwDomain = isFrontend ? `www.${rootDomain}` : undefined;
+    const backendDomain = isBackend ? (targetService === 'backend' ? rootDomain : `api.${rootDomain}`) : undefined;
 
     const domainSetup = new DomainSetup({
       userId,
@@ -178,19 +184,22 @@ export const addCustomDomain = async (req, res) => {
       frontendDomain,
       wwwDomain,
       backendDomain,
-      frontendProvider: project.configuration.frontendPlatform,
-      backendProvider: project.configuration.backendPlatform,
+      frontendProvider: isFrontend ? project.configuration.frontendPlatform : undefined,
+      backendProvider: isBackend ? project.configuration.backendPlatform : undefined,
       status: "pending_dns",
       dnsRecords: [],
-      providerProjectId: vercelProjectId,
+      providerProjectId: isFrontend ? vercelProjectId : undefined,
+      isRedirect: addDomainOption === 'redirect',
+      redirectStatus: addDomainOption === 'redirect' ? redirectStatus : undefined,
+      redirectTarget: addDomainOption === 'redirect' ? redirectTarget : undefined,
     });
 
-    addLog(domainSetup, `Domain setup initiated for ${rootDomain}`);
+    addLog(domainSetup, `Domain setup initiated for ${rootDomain} (Target: ${targetService})`);
 
     // ── 7. Register with providers ───────────────────────────────────────────
 
     // Frontend: Vercel
-    if (project.configuration.frontendPlatform === "vercel") {
+    if (isFrontend && project.configuration.frontendPlatform === "vercel") {
       try {
         const token = await getVercelToken(userId);
         if (token) {
@@ -227,7 +236,7 @@ export const addCustomDomain = async (req, res) => {
       project.configuration?.renderServiceId ||
       project.configuration?.railwayServiceId;
 
-    if (project.configuration.backendPlatform === "render" && backendServiceId) {
+    if (isBackend && project.configuration.backendPlatform === "render" && backendServiceId) {
       try {
         const token = await getRenderToken(userId);
         if (token) {
@@ -241,13 +250,13 @@ export const addCustomDomain = async (req, res) => {
       } finally {
         let renderUrl = latestDeployment?.finalSummary?.backendUrl || "onrender.com";
         renderUrl = renderUrl.replace(/^https?:\/\//, "");
-        domainSetup.dnsRecords.push({ type: "CNAME", name: "api", value: renderUrl, purpose: "backend" });
+        domainSetup.dnsRecords.push({ type: "CNAME", name: backendDomain === rootDomain ? "@" : "api", value: renderUrl, purpose: "backend" });
       }
-    } else if (project.configuration.backendPlatform === "railway" && backendServiceId) {
+    } else if (isBackend && project.configuration.backendPlatform === "railway" && backendServiceId) {
       domainSetup.backendVerification = "manual_setup_required";
       domainSetup.dnsRecords.push({
         type: "CNAME",
-        name: "api",
+        name: backendDomain === rootDomain ? "@" : "api",
         value: "your-railway-provided-domain.up.railway.app",
         purpose: "backend",
         status: "pending",
@@ -275,9 +284,121 @@ export const getProjectDomains = async (req, res) => {
   }
 };
 
+export const getAllDomains = async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    
+    const match = { userId: req.user.userId };
+    if (projectId) match.projectId = projectId;
+    
+    const customDomains = await DomainSetup.find(match).populate("projectId", "repoName").sort({ createdAt: -1 }).lean();
+
+    const projMatch = { userId: req.user.userId };
+    if (projectId) projMatch._id = projectId;
+    const projects = await Project.find(projMatch).lean();
+    
+    const Deployment = (await import('../models/Deployment.js')).default;
+    const allDomains = [];
+
+    customDomains.forEach(cd => {
+      if (cd.frontendDomain) {
+        allDomains.push({
+          id: cd._id.toString(),
+          domain: cd.rootDomain,
+          type: 'Third Party',
+          isBackend: false,
+          provider: 'third_party',
+          status: cd.status,
+          projectId: cd.projectId?._id,
+          projectName: cd.projectId?.repoName,
+          createdAt: cd.createdAt,
+          isRedirect: cd.isRedirect,
+          redirectStatus: cd.redirectStatus,
+          redirectTarget: cd.redirectTarget
+        });
+      }
+      if (cd.backendDomain) {
+         allDomains.push({
+          id: cd._id.toString() + '_api',
+          domain: cd.backendDomain,
+          type: 'Third Party API',
+          isBackend: true,
+          provider: 'third_party',
+          status: cd.backendVerification || 'pending',
+          projectId: cd.projectId?._id,
+          projectName: cd.projectId?.repoName,
+          createdAt: cd.createdAt
+        });
+      }
+    });
+
+    if (projectId) {
+      for (const project of projects) {
+        const feDep = await Deployment.findOne({ 
+          projectId: project._id, 
+          type: { $in: ['frontend', 'full'] },
+          status: { $in: ['success', 'completed'] }
+        }).sort({ createdAt: -1 }).lean();
+
+        if (feDep && feDep.finalSummary?.frontendUrl) {
+           allDomains.push({
+              id: `provider_fe_${project._id}`,
+              domain: feDep.finalSummary.frontendUrl.replace(/^https?:\/\//, ''),
+              type: `${feDep.platform.charAt(0).toUpperCase() + feDep.platform.slice(1)} Provided`,
+              isBackend: false,
+              provider: feDep.platform,
+              status: 'active',
+              projectId: project._id,
+              projectName: project.repoName,
+              createdAt: feDep.createdAt
+           });
+        }
+
+        const beDep = await Deployment.findOne({ 
+          projectId: project._id, 
+          type: { $in: ['backend', 'full'] },
+          status: { $in: ['success', 'completed'] }
+        }).sort({ createdAt: -1 }).lean();
+
+        if (beDep && beDep.finalSummary?.backendUrl) {
+           allDomains.push({
+              id: `provider_be_${project._id}`,
+              domain: beDep.finalSummary.backendUrl.replace(/^https?:\/\//, ''),
+              type: `${beDep.platform.charAt(0).toUpperCase() + beDep.platform.slice(1)} API`,
+              isBackend: true,
+              provider: beDep.platform,
+              status: 'active',
+              projectId: project._id,
+              projectName: project.repoName,
+              createdAt: beDep.createdAt
+           });
+        }
+        
+        allDomains.push({
+          id: `deployai_${project._id}`,
+          domain: `${project.repoName.toLowerCase().replace(/[^a-z0-9-]/g, '')}.deployai.app`,
+          type: `DeployAI Provided`,
+          isBackend: false,
+          provider: 'deployai',
+          status: 'active',
+          projectId: project._id,
+          projectName: project.repoName,
+          createdAt: project.createdAt
+        });
+      }
+    }
+
+    res.json(allDomains);
+  } catch (error) {
+    console.error("Get All Domains Error:", error);
+    res.status(500).json({ error: "Failed to fetch domains." });
+  }
+};
+
 export const getDomain = async (req, res) => {
   try {
-    const { domainSetupId } = req.params;
+    let { domainSetupId } = req.params;
+    if (domainSetupId && domainSetupId.endsWith('_api')) domainSetupId = domainSetupId.replace('_api', '');
     const domain = await DomainSetup.findOne({ _id: domainSetupId, userId: req.user.userId });
     if (!domain) return res.status(404).json({ error: "Domain not found." });
     res.json(domain);
@@ -483,7 +604,8 @@ export const verifyDomainLogic = async (domainSetup, { fromCron = false } = {}) 
 
 export const verifyDomain = async (req, res) => {
   try {
-    const { domainSetupId } = req.params;
+    let { domainSetupId } = req.params;
+    if (domainSetupId && domainSetupId.endsWith('_api')) domainSetupId = domainSetupId.replace('_api', '');
     const userId = req.user.userId;
 
     // ── Rate limit — 1 call per 30 s per domainSetupId ───────────────────────
@@ -514,7 +636,10 @@ export const verifyDomain = async (req, res) => {
 
 export const deleteDomain = async (req, res) => {
   try {
-    const { domainSetupId } = req.params;
+    let { domainSetupId } = req.params;
+    if (domainSetupId && domainSetupId.endsWith('_api')) {
+      domainSetupId = domainSetupId.replace('_api', '');
+    }
     const userId = req.user.userId;
 
     const domainSetup = await DomainSetup.findOne({ _id: domainSetupId, userId });
@@ -564,7 +689,8 @@ export const deleteDomain = async (req, res) => {
 
 export const applyCloudflareDns = async (req, res) => {
   try {
-    const { domainSetupId } = req.params;
+    let { domainSetupId } = req.params;
+    if (domainSetupId && domainSetupId.endsWith('_api')) domainSetupId = domainSetupId.replace('_api', '');
     const { dryRun } = req.query;
     const isDryRun = dryRun === "true";
     const userId = req.user.userId;
@@ -637,5 +763,54 @@ export const applyCloudflareDns = async (req, res) => {
   } catch (error) {
     console.error("Apply Cloudflare DNS error:", error);
     res.status(500).json({ error: error.message || "Failed to apply DNS records." });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const updateDomain = async (req, res) => {
+  try {
+    let { domainSetupId } = req.params;
+    if (domainSetupId && domainSetupId.endsWith('_api')) domainSetupId = domainSetupId.replace('_api', '');
+    const { addDomainOption, redirectStatus, redirectTarget, targetService } = req.body;
+    const userId = req.user.userId;
+
+    const domainSetup = await DomainSetup.findOne({ _id: domainSetupId, userId });
+    
+    if (!domainSetup) {
+      return res.status(404).json({ error: "Domain setup not found." });
+    }
+
+    const isRedirect = addDomainOption === 'redirect';
+    domainSetup.isRedirect = isRedirect;
+    
+    if (isRedirect) {
+      domainSetup.redirectStatus = redirectStatus;
+      domainSetup.redirectTarget = redirectTarget;
+    } else {
+      domainSetup.redirectStatus = undefined;
+      domainSetup.redirectTarget = undefined;
+    }
+    
+    if (targetService === 'backend') {
+      domainSetup.backendDomain = domainSetup.rootDomain;
+      domainSetup.frontendDomain = undefined;
+      domainSetup.wwwDomain = undefined;
+    } else if (targetService === 'frontend') {
+      domainSetup.frontendDomain = domainSetup.rootDomain;
+      domainSetup.wwwDomain = `www.${domainSetup.rootDomain}`;
+      domainSetup.backendDomain = undefined;
+    } else if (targetService === 'both') {
+      domainSetup.frontendDomain = domainSetup.rootDomain;
+      domainSetup.wwwDomain = `www.${domainSetup.rootDomain}`;
+      domainSetup.backendDomain = `api.${domainSetup.rootDomain}`;
+    }
+
+    await domainSetup.save();
+
+    res.json({ success: true, domainSetup });
+  } catch (error) {
+    console.error("Update custom domain error:", error);
+    res.status(500).json({ error: "Failed to update custom domain." });
   }
 };
