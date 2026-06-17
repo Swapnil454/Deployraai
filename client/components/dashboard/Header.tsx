@@ -82,6 +82,8 @@ export const Header = ({ projects }: { projects: any[] }) => {
                       router.push('/dashboard/deployments/fullstack');
                     } else if (pathname.startsWith('/dashboard/logs')) {
                       router.push('/dashboard/logs');
+                    } else if (pathname.startsWith('/dashboard/domains')) {
+                      router.push('/dashboard/domains');
                     } else {
                       router.push('/dashboard/projects');
                     }
@@ -124,6 +126,8 @@ export const Header = ({ projects }: { projects: any[] }) => {
                           router.push(`${pathname}?projectId=${p._id}`);
                         } else if (pathname.startsWith('/dashboard/logs')) {
                           router.push(`/dashboard/logs/${p._id}`);
+                        } else if (pathname.startsWith('/dashboard/domains')) {
+                          router.push(`/dashboard/domains?projectId=${p._id}`);
                         } else {
                           router.push(`/dashboard/projects/${p._id}/${p.status === 'configured' ? 'deploy' : 'overview'}`);
                         }
