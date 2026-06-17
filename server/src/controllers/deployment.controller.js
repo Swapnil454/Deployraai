@@ -37,7 +37,8 @@ import {
   getVercelDeployments,
   getVercelProjects,
   getVercelProject,
-  getVercelDeploymentEvents
+  getVercelDeploymentEvents,
+  updateVercelProject
 } from "../services/providers/vercel.service.js";
 import { checkBackendHealth, checkFrontendHealth, checkCors } from "../services/healthCheck.service.js";
 import { sanitizeDeploymentLogs } from "../utils/sanitizeLogs.js";
@@ -341,6 +342,7 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
          if (injectedEnvVars && injectedEnvVars.length > 0) {
             envVars.push(...injectedEnvVars);
          }
+
         await appendLog('success', 'env_setup', 'Frontend variables prepared');
 
         let providerServiceId = project.configuration.vercelProjectId;
@@ -349,35 +351,48 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
         const safeRepoName = (project.repoName || 'app').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
         let projectName = `${safeRepoName}-deployra`;
 
+        let installCommandPayload = project.configuration.installCommand;
+
+
         try {
           if (providerServiceId) {
              const previousDeploy = await Deployment.findOne({ projectId, platform: { $in: ['vercel', 'multiple'] }, providerServiceId }).sort({ createdAt: -1 });
              const previousEnvSnapshot = previousDeploy?.configSnapshot?.envSnapshotStr || "";
-             const currentEnvSnapshot = JSON.stringify([...(project.configuration.envVariables?.frontend || []), ...(injectedEnvVars || [])]);
-             const envChanged = previousEnvSnapshot !== currentEnvSnapshot || (injectedEnvVars && injectedEnvVars.length > 0);
+             const currentEnvSnapshot = JSON.stringify(envVars);
+             const envChanged = previousEnvSnapshot !== currentEnvSnapshot;
 
+             await appendLog('info', 'project_update', `Found existing Vercel project (${projectName}). Preparing redeployment...`);
+
+             // Always update env vars and project settings before redeploying
              if (envChanged) {
-               await appendLog('info', 'project_update', `Found existing Vercel project (${projectName}). Updating environment variables...`);
                await updateVercelEnvVars(token, providerServiceId, envVars);
-               
-               await appendLog('info', 'deploy_trigger', 'Environment changed. Triggering redeployment on existing Vercel project...');
-               try {
-                 const deployRes = await triggerVercelDeploy(token, {
-                   name: projectName,
-                   projectName: projectName,
-                   repoFullName: project.repoFullName,
-                   branch: project.selectedBranch
-                 });
-                 deploymentUrl = deployRes.url ? `https://${deployRes.url}` : null;
-                 await appendLog('success', 'deploy_trigger', 'Vercel redeployment started successfully');
-               } catch (deployErr) {
-                 await appendLog('warning', 'deploy_trigger', 'API trigger failed, assuming manual Vercel Git trigger...', { error: deployErr.message });
-               }
-             } else {
-               await appendLog('info', 'project_update', `Found existing Vercel project (${projectName}). Environment variables unchanged.`);
-               await appendLog('info', 'deploy_trigger', 'No configuration changes detected. Fetching latest deployment status...');
-               // We don't trigger a new deployment, we just let the polling loop fetch the latest one
+               await appendLog('info', 'project_update', 'Environment variables updated on Vercel.');
              }
+             
+             // Ensure the installCommand is restored to its original value, clearing any previous build-time injection.
+             await updateVercelProject(token, providerServiceId, { installCommand: installCommandPayload || null });
+             await appendLog('info', 'project_update', 'Build settings synchronized on Vercel.');
+
+
+             // ALWAYS trigger an actual deployment on Vercel
+             await appendLog('info', 'deploy_trigger', 'Triggering redeployment on Vercel...');
+             try {
+               const deployRes = await triggerVercelDeploy(token, {
+                 name: projectName,
+                 projectId: providerServiceId,
+                 repoFullName: project.repoFullName,
+                 branch: project.selectedBranch
+               });
+               if (deployRes.url) {
+                 deploymentUrl = `https://${deployRes.url}`;
+               }
+               await appendLog('success', 'deploy_trigger', 'Vercel redeployment triggered successfully! Build is now running.');
+             } catch (deployErr) {
+               console.error('[DeployAI] Vercel triggerVercelDeploy FAILED:', deployErr.message, '| providerServiceId:', providerServiceId, '| repoFullName:', project.repoFullName, '| branch:', project.selectedBranch);
+               await appendLog('error', 'deploy_trigger', 'Vercel API trigger failed: ' + deployErr.message);
+               // Do not silently continue — surface the error to the user
+             }
+
           } else {
              await appendLog('info', 'project_create', 'Creating new Vercel Project linked to GitHub...');
              try {
@@ -387,7 +402,7 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
                  branch: project.selectedBranch,
                  rootDir: project.configuration.frontendRoot,
                  buildCommand: project.configuration.frontendBuildCommand,
-                 installCommand: project.configuration.installCommand,
+                 installCommand: installCommandPayload,
                  outputDirectory: project.configuration.outputDirectory,
                  envVars
                });
@@ -413,7 +428,7 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
              try {
                const deployRes = await triggerVercelDeploy(token, {
                  name: projectName,
-                 projectName: projectName,
+                 projectId: providerServiceId,
                  repoFullName: project.repoFullName,
                  branch: project.selectedBranch
                });
@@ -436,20 +451,27 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
           let isCompleted = false;
           let finalStatus = 'failed';
           let finalErrorMessage = null;
+          let screenshotUrlForCapture = null;
+          // Record timestamp just before we poll so we only accept NEW deployments
+          const pollStartTime = Date.now() - 30000; // Allow 30s window in case trigger was slightly earlier
           
           for (let i = 0; i < 60; i++) { // Max 5 minutes
             await new Promise(resolve => setTimeout(resolve, 5000));
             try {
               const deploysResp = await getVercelDeployments(token, providerServiceId);
-              if (deploysResp && deploysResp.deployments && deploysResp.deployments.length > 0) {
-                const latest = deploysResp.deployments[0];
-                const status = latest.readyState; // QUEUED, BUILDING, ERROR, INITIALIZING, READY, CANCELED
+              if (deploysResp && deploysResp.deployments) {
+                // Only look at deployments created after we started this deployment job
+                const validDeployments = deploysResp.deployments.filter(d => d.createdAt > pollStartTime);
+                if (validDeployments.length > 0) {
+                  const latest = validDeployments[0];
+                  const status = latest.readyState; // QUEUED, BUILDING, ERROR, INITIALIZING, READY, CANCELED
                 
                 if (status === 'READY') {
                   isCompleted = true;
                   finalStatus = 'completed';
                   await appendLog('success', 'deploy_trigger', 'Vercel deployment is READY and successful!');
                   if (latest.url) {
+                    screenshotUrlForCapture = `https://${latest.url}`;
                     deploymentUrl = `https://${latest.url}`;
                     let currentDashUrl = `https://vercel.com/${user.username}/${projectName}`;
                     if (latest.inspectorUrl) {
@@ -512,6 +534,7 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
                   
                   break;
                 }
+              }
               }
             } catch (pollErr) {
               console.error("Vercel polling error:", pollErr.message);

@@ -21,7 +21,7 @@ export default function Header() {
           setUser(userData);
         }
       } catch (error) {
-        console.error("Not logged in");
+        // Silently fail if not logged in
       }
     };
     fetchUser();

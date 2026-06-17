@@ -303,3 +303,123 @@ export const updateProjectConfig = async (req, res) => {
     res.status(500).json({ error: "Failed to save configuration" });
   }
 };
+
+import crypto from "crypto";
+
+function generateTrackingId() {
+  return `da_${crypto.randomBytes(16).toString("hex")}`;
+}
+
+export const enableAnalytics = async (req, res) => {
+  try {
+    const project = await Project.findOne({
+      _id: req.params.projectId,
+      userId: req.user.userId,
+    });
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    if (!project.analytics?.trackingId) {
+      project.analytics = {
+        enabled: true,
+        trackingId: generateTrackingId(),
+        enabledAt: new Date(),
+      };
+    } else {
+      project.analytics.enabled = true;
+      project.analytics.enabledAt = new Date();
+    }
+
+    await project.save();
+
+    res.json({
+      success: true,
+      trackingId: project.analytics.trackingId,
+    });
+  } catch (error) {
+    console.error("Enable Analytics Error:", error);
+    res.status(500).json({ success: false, message: "Failed to enable analytics" });
+  }
+};
+
+import AnalyticsEvent from "../models/AnalyticsEvent.js";
+
+function getFromDate(range) {
+  const now = new Date();
+  const map = {
+    "24h": 1,
+    "3d": 3,
+    "7d": 7,
+    "30d": 30,
+  };
+  const days = map[range] || 7;
+  now.setDate(now.getDate() - days);
+  return now;
+}
+
+export const getAnalyticsSummary = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { range = "7d", environment = "all" } = req.query;
+
+    const project = await Project.findOne({
+      _id: projectId,
+      userId: req.user.userId,
+    });
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    const fromDate = getFromDate(range);
+
+    const match = {
+      projectId: project._id,
+      timestamp: { $gte: fromDate },
+    };
+
+    if (environment !== "all") {
+      match.environment = environment;
+    }
+
+    const [pageViews, visitors, topPages] =
+      await Promise.all([
+        AnalyticsEvent.countDocuments({
+          ...match,
+          eventType: "page_view",
+        }),
+
+        AnalyticsEvent.distinct("visitorHash", {
+          ...match,
+          eventType: "page_view",
+        }),
+
+        AnalyticsEvent.aggregate([
+          { $match: { ...match, eventType: "page_view" } },
+          { $group: { _id: "$path", count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+          { $limit: 10 },
+        ]),
+      ]);
+
+    res.json({
+      success: true,
+      data: {
+        pageViews,
+        visitors: visitors.length,
+        topPages,
+      },
+    });
+  } catch (error) {
+    console.error("Get Analytics Summary Error:", error);
+    res.status(500).json({ success: false, message: "Failed to get analytics summary" });
+  }
+};

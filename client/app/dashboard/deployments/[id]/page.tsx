@@ -209,6 +209,7 @@ export default function DeploymentDetailsPage() {
   const allDomainsToShow = useMemo(() => {
     if (!deployment) return [];
     const applicableCustomDomains = (deployment.customDomains || []).filter((d: any) => {
+      if (d.status !== 'verified') return false;
       if (deployment.type === 'backend') return d.type === 'backend';
       if (deployment.type === 'frontend') return d.type === 'frontend' || d.type === 'www';
       return true;

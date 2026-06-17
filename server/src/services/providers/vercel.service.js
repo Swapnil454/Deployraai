@@ -29,6 +29,7 @@ const vercelAPI = async (token, method, endpoint, body = null) => {
   }
 
   if (!response.ok) {
+    console.error(`[VercelAPI] ${method} ${endpoint} failed with ${response.status}:`, text.substring(0, 500));
     throw new Error(data.error?.message || `Vercel API Error: ${response.status}`);
   }
 
@@ -75,6 +76,10 @@ export const createVercelProject = async (token, config) => {
   return vercelAPI(token, 'POST', '/v9/projects', payload);
 };
 
+export const updateVercelProject = async (token, projectId, updates) => {
+  return vercelAPI(token, 'PATCH', `/v9/projects/${projectId}`, updates);
+};
+
 export const updateVercelEnvVars = async (token, projectId, envVars) => {
   // Vercel v10 /env?upsert=true will update existing or create new
   if (!envVars || envVars.length === 0) return;
@@ -108,7 +113,7 @@ export const triggerVercelDeploy = async (token, config) => {
 
   const payload = {
     name: config.name,
-    project: config.projectName, // The string ID or name of the project
+    project: config.projectId || config.projectName, // Vercel project ID or name
     target: "production",
     gitSource: {
       type: "github",
@@ -126,7 +131,7 @@ export const triggerVercelDeploy = async (token, config) => {
 
 export const getVercelDeployments = async (token, projectId) => {
   // Fetch latest deployments for the project
-  return vercelAPI(token, 'GET', `/v6/deployments?projectId=${projectId}&limit=1`);
+  return vercelAPI(token, 'GET', `/v6/deployments?projectId=${projectId}&limit=5`);
 };
 
 export const deleteVercelDeployment = async (token, deploymentId) => {
