@@ -47,6 +47,8 @@ export const Header = ({ projects }: { projects: any[] }) => {
   // Dynamic titles for dynamic routes
   if (pathname.startsWith("/dashboard/logs/")) {
     currentTitle = "Deployment Logs";
+  } else if (pathname.startsWith("/dashboard/analytics/")) {
+    currentTitle = "Analytics";
   }
 
   return (
