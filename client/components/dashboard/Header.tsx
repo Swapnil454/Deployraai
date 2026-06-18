@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { usePathname, useRouter, useParams } from "next/navigation";
+import { usePathname, useRouter, useParams, useSearchParams } from "next/navigation";
 import { Search, Plus, ChevronsUpDown, X } from "lucide-react";
 import { ProjectAvatar } from "./ProjectAvatar";
 
@@ -24,8 +24,9 @@ export const Header = ({ projects }: { projects: any[] }) => {
   const pathname = usePathname() || "";
   const router = useRouter();
   const params = useParams() as any;
+  const searchParams = useSearchParams();
   
-  const currentProjectId = params?.projectId || params?.id;
+  const currentProjectId = params?.projectId || params?.id || searchParams.get('projectId');
   const currentProject = currentProjectId ? projects.find((p: any) => p._id === currentProjectId) : null;
   
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);

@@ -16,6 +16,23 @@ const DeploymentSchema = new mongoose.Schema({
   serviceName: { type: String, required: true },
   platform: { type: String, enum: ['vercel', 'netlify', 'railway', 'render', 'none', 'multiple'], required: true },
   status: { type: String, enum: ['queued', 'running', 'success', 'completed', 'failed', 'cancelled'], default: 'queued' },
+  orchestrationGroupId: { type: String, index: true },
+  triggerReason: {
+    type: String,
+    enum: [
+      "manual",
+      "initial_deploy",
+      "domain_primary_verified",
+      "domain_alias_cors_update",
+      "domain_make_primary",
+      "domain_removed",
+      "domain_removed_cors_update",
+      "domain_redirect_enabled",
+      "domain_redirect_disabled",
+      "retry"
+    ],
+    default: "manual"
+  },
 
   source: {
     repoOwner: { type: String },
@@ -96,6 +113,13 @@ const DeploymentSchema = new mongoose.Schema({
   durationMs: { type: Number },
 
   retryOfDeploymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deployment' },
+
+  domainSnapshot: {
+    frontendPrimaryDomain: { type: String },
+    backendPrimaryDomain: { type: String },
+    corsOrigins: [{ type: String }],
+    apiUrl: { type: String }
+  },
 
   aiAnalysis: {
     summary: { type: String },
