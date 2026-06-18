@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Search, MoreHorizontal, Loader2, Globe, Server, AlertTriangle, CornerDownRight , Clock, ChevronDown, X, ArrowUpCircle, Check, Copy } from "lucide-react";
+import { Search, MoreHorizontal, Loader2, Globe, Server, AlertTriangle, CornerDownRight , Clock, ChevronDown, X, ArrowUpCircle, Check, Copy, Activity } from "lucide-react";
 
 export default function DomainsPage() {
   const searchParams = useSearchParams();
@@ -66,6 +66,8 @@ export default function DomainsPage() {
 
   const [domainLogs, setDomainLogs] = useState<any[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [monitorSummary, setMonitorSummary] = useState<any>(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
   type ActiveDeployment = { id: string; type: "frontend" | "backend"; status: string; triggerReason: string; };
   const [activeDeployments, setActiveDeployments] = useState<Record<string, ActiveDeployment[]>>({});
   const autoPollingRef = useRef(false);
@@ -87,21 +89,47 @@ export default function DomainsPage() {
     }
   };
 
+  const fetchMonitorSummary = async (targetProjectId: string, silent = false) => {
+    if (!silent) setLoadingSummary(true);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${targetProjectId}/monitor-summary`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setMonitorSummary(data.summary || null);
+    } catch (err) {
+      console.error("Failed to fetch monitor summary:", err);
+    } finally {
+      if (!silent) setLoadingSummary(false);
+    }
+  };
+
   useEffect(() => {
     if (!expandedDomainId) {
       setDomainLogs([]);
+      setMonitorSummary(null);
       return;
     }
 
     fetchDomainActivity(expandedDomainId);
+    
+    const expandedDomain = domains.find(d => d.id === expandedDomainId);
+    const targetProjectId = expandedDomain?.projectId || projectId;
+    if (targetProjectId) {
+      fetchMonitorSummary(targetProjectId);
+    }
 
     const interval = setInterval(() => {
       if (document.visibilityState !== "visible") return;
       fetchDomainActivity(expandedDomainId, true);
+      if (targetProjectId) {
+        fetchMonitorSummary(targetProjectId, true);
+      }
     }, 15000);
 
     return () => clearInterval(interval);
-  }, [expandedDomainId]);
+  }, [expandedDomainId, domains, projectId]);
 
 
   // Polling for active deployments
@@ -457,6 +485,77 @@ export default function DomainsPage() {
               )}
             </div>
           )}
+
+          {/* Uptime Analytics */}
+          <div className="mt-8 border-t border-zinc-800 pt-8">
+            <h4 className="text-[13px] font-medium text-white mb-4 flex items-center gap-2">
+              <Activity className="w-4 h-4 text-emerald-400" />
+              Uptime & Analytics
+            </h4>
+            
+            {loadingSummary && !monitorSummary ? (
+              <div className="flex items-center gap-2 text-zinc-500 text-[13px] mb-8">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading analytics...
+              </div>
+            ) : monitorSummary && (monitorSummary.frontendUptime > 0 || monitorSummary.backendUptime > 0) ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                {/* Uptime Card */}
+                <div className="bg-[#111] border border-zinc-800 rounded-lg p-4 flex flex-col justify-between">
+                  <div>
+                    <h5 className="text-[12px] font-medium text-zinc-400 uppercase tracking-wider mb-3">Service Uptime</h5>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-3xl font-semibold text-white">
+                        {Math.max(monitorSummary.frontendUptime || 0, monitorSummary.backendUptime || 0).toFixed(2)}%
+                      </span>
+                      <span className="text-[13px] text-zinc-500">last 30 days</span>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex gap-4 text-[12px]">
+                    {monitorSummary.frontendUptime > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <div className={`w-2 h-2 rounded-full ${monitorSummary.frontendUptime >= 99 ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                        <span className="text-zinc-300">Frontend: {monitorSummary.frontendUptime.toFixed(2)}%</span>
+                      </div>
+                    )}
+                    {monitorSummary.backendUptime > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <div className={`w-2 h-2 rounded-full ${monitorSummary.backendUptime >= 99 ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                        <span className="text-zinc-300">Backend: {monitorSummary.backendUptime.toFixed(2)}%</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Latency Card */}
+                <div className="bg-[#111] border border-zinc-800 rounded-lg p-4 flex flex-col justify-between">
+                  <h5 className="text-[12px] font-medium text-zinc-400 uppercase tracking-wider mb-3">Recent Latency</h5>
+                  <div className="flex-1 flex items-end gap-1 h-12">
+                    {monitorSummary.recentChecks?.slice(0, 20).reverse().map((check: any, idx: number) => {
+                      // max height representation
+                      const heightPct = Math.min(100, Math.max(10, (check.responseTimeMs / 1000) * 100));
+                      const isOffline = check.status === 'offline';
+                      return (
+                        <div 
+                          key={check._id || idx}
+                          className={`w-full rounded-t-sm ${isOffline ? 'bg-red-500' : check.responseTimeMs > 800 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                          style={{ height: `${isOffline ? 10 : heightPct}%` }}
+                          title={`${check.responseTimeMs}ms - ${new Date(check.checkedAt).toLocaleTimeString()}`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className="mt-4 text-[12px] text-zinc-500 flex justify-between">
+                    <span>{monitorSummary.recentChecks?.[monitorSummary.recentChecks.length - 1]?.responseTimeMs || 0}ms average</span>
+                    <span>Live</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+               <div className="text-[13px] text-zinc-500 bg-zinc-900/30 p-4 rounded-lg border border-zinc-800 border-dashed mb-8">
+                 Analytics are being gathered. Check back soon.
+               </div>
+            )}
+          </div>
 
           {/* Activity Timeline */}
           <div className="mt-8 border-t border-zinc-800 pt-8">
