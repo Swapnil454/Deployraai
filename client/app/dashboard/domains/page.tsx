@@ -575,16 +575,7 @@ export default function DomainsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const makePrimaryDropdownRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    function handleDropdownClickOutside(event: MouseEvent) {
-      if (makePrimaryDropdownRef.current && !makePrimaryDropdownRef.current.contains(event.target as Node)) {
-        setActiveDropdownId(null);
-      }
-    }
-    document.addEventListener("mousedown", handleDropdownClickOutside);
-    return () => document.removeEventListener("mousedown", handleDropdownClickOutside);
-  }, []);
+
 
 
 
@@ -1251,7 +1242,8 @@ export default function DomainsPage() {
     if (editingDomainId === d.id) {
       return renderEditDomainRow(d);
     }
-    const isValid = d.status === 'active' || d.domain.includes('.vercel.app') || d.domain.includes('.deployai.app');
+    const isProvider = d.domain.includes('.vercel.app') || d.domain.includes('.deployai.app');
+    const isValid = ['active', 'partially_active', 'verifying'].includes(d.status) || isProvider;
     const isRedirect = d.domainRole === 'redirect';
     const redirectTarget = d.redirectTo || `www.${d.domain}`;
     
@@ -1262,7 +1254,7 @@ export default function DomainsPage() {
       if (!healthCheck || healthCheck.status === 'unknown') {
         return (
           <div className="flex items-center gap-2">
-            <span className="bg-zinc-800 text-zinc-400 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title="Health not checked yet">Unknown Health</span>
+            <span className="bg-zinc-800 text-zinc-400 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title="Health not checked yet">Not Checked</span>
           </div>
         );
       }
@@ -1302,7 +1294,7 @@ export default function DomainsPage() {
                 {d.domainRole === 'redirect' && (
                   <span className="bg-blue-500/10 text-blue-400 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide">Redirect</span>
                 )}
-                {renderHealthBadge(d.healthCheck)}
+                {!isProvider && renderHealthBadge(d.healthCheck)}
                 {checkingDomainId === d.id && (
                   <span className="text-[10px] text-zinc-500 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin"/> Checking...</span>
                 )}
@@ -1342,14 +1334,16 @@ export default function DomainsPage() {
 
           {/* Right Section: Buttons */}
           <div className="flex items-center justify-end gap-2 flex-1 min-w-[150px]">
-            <button 
-              onClick={() => handleCheckHealth(d.id)}
-              disabled={checkingDomainId === d.id}
-              className="px-3 py-1.5 bg-black border border-zinc-800 rounded-md text-[13px] font-medium text-zinc-300 hover:text-white hover:border-zinc-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {checkingDomainId === d.id && <Loader2 className="h-3 w-3 animate-spin" />}
-              Check Health
-            </button>
+            {['active', 'partially_active', 'degraded'].includes(d.status) && (
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleCheckHealth(d.id); }}
+                disabled={checkingDomainId === d.id}
+                className="px-3 py-1.5 bg-black border border-zinc-800 rounded-md text-[13px] font-medium text-zinc-300 hover:text-white hover:border-zinc-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {checkingDomainId === d.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                Check Health
+              </button>
+            )}
             <button onClick={() => setExpandedDomainId(expandedDomainId === d.id ? null : d.id)} className="px-3 py-1.5 bg-black border border-zinc-800 rounded-md text-[13px] font-medium text-zinc-300 hover:text-white hover:border-zinc-700 transition-colors shadow-sm">
               {expandedDomainId === d.id ? 'Hide Details' : 'View Details'}
             </button>
@@ -1360,7 +1354,7 @@ export default function DomainsPage() {
             )}
 
 
-            <div className="relative" ref={makePrimaryDropdownRef}>
+            <div className="relative">
               <button 
                 onClick={() => setActiveDropdownId(activeDropdownId === d.id ? null : d.id)}
                 className="p-1.5 bg-black border border-zinc-800 rounded-md text-zinc-400 hover:text-white hover:border-zinc-700 transition-colors shadow-sm"
@@ -1369,7 +1363,9 @@ export default function DomainsPage() {
               </button>
               
               {activeDropdownId === d.id && (
-                <div className="absolute right-0 top-full mt-1 w-48 bg-[#0a0a0a] border border-zinc-800 rounded-md shadow-lg overflow-hidden z-10 py-1">
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setActiveDropdownId(null)} />
+                  <div className="absolute right-0 top-full mt-1 w-48 bg-[#0a0a0a] border border-zinc-800 rounded-md shadow-lg overflow-hidden z-50 py-1">
                   {isValid && d.domainRole === 'alias' && !d.isRedirect ? (
                     <button
                       onClick={() => {
@@ -1431,6 +1427,7 @@ export default function DomainsPage() {
                     </div>
                   )}
                 </div>
+                </>
               )}
             </div>
           </div>
@@ -1493,9 +1490,9 @@ export default function DomainsPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-8">
-            <div className="border border-zinc-800 rounded-lg overflow-hidden bg-black shadow-xl">
+            <div className="border border-zinc-800 rounded-lg bg-black shadow-xl">
               {/* Frontend Section */}
-              <div className="bg-[#050505] px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
+              <div className="bg-[#050505] px-4 py-3 border-b border-zinc-800 flex items-center gap-2 rounded-t-lg">
                  <Globe className="h-4 w-4 text-zinc-400" />
                  <h3 className="text-[12px] font-semibold text-zinc-300 uppercase tracking-wider">Frontend Domains</h3>
               </div>
@@ -1508,9 +1505,9 @@ export default function DomainsPage() {
               </div>
             </div>
 
-            <div className="border border-zinc-800 rounded-lg overflow-hidden bg-black shadow-xl">
+            <div className="border border-zinc-800 rounded-lg bg-black shadow-xl">
               {/* Backend Section */}
-              <div className="bg-[#050505] px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
+              <div className="bg-[#050505] px-4 py-3 border-b border-zinc-800 flex items-center gap-2 rounded-t-lg">
                  <Server className="h-4 w-4 text-zinc-400" />
                  <h3 className="text-[12px] font-semibold text-zinc-300 uppercase tracking-wider">Backend Domains</h3>
               </div>
@@ -1632,12 +1629,14 @@ export default function DomainsPage() {
                          >
                            <Globe className="h-[12px] w-[12px]" /> Frontend
                          </button>
+                        {project?.configuration?.backendPlatform && project.configuration.backendPlatform !== 'none' && (
                          <button 
                            className={`w-full text-left px-2 py-1.5 text-[13px] rounded-md transition-colors flex items-center gap-2 ${targetService === 'backend' ? 'bg-[#0070f3] text-white' : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'}`}
                            onClick={() => { setTargetService('backend'); setIsServiceDropdownOpen(false); }}
                          >
                            <Server className="h-[12px] w-[12px]" /> Backend
                          </button>
+                         )}
                       </div>
                     )}
                   </div>

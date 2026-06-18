@@ -168,7 +168,11 @@ export const addCustomDomain = async (req, res) => {
     // â”€â”€ 4. Idempotency â€” return existing setup for this project + domain â”€â”€â”€â”€â”€
     const existing = await DomainSetup.findOne({ projectId, rootDomain });
     if (existing) {
-      return res.status(400).json({ error: "This domain already exists in this project." });
+      if (existing.status === 'removed') {
+        await DomainSetup.deleteOne({ _id: existing._id });
+      } else {
+        return res.status(400).json({ error: "This domain already exists in this project." });
+      }
     }
 
     // â”€â”€ 5. Global uniqueness â€” reject if another project already owns this domain â”€â”€
@@ -199,6 +203,7 @@ export const addCustomDomain = async (req, res) => {
       userId,
       projectId,
       rootDomain,
+      targetService,
       frontendDomain,
       wwwDomain,
       backendDomain,
@@ -315,7 +320,7 @@ export const getAllDomains = async (req, res) => {
   try {
     const { projectId } = req.query;
     
-    const match = { userId: req.user.userId };
+    const match = { userId: req.user.userId, status: { $ne: 'removed' } };
     if (projectId) match.projectId = projectId;
     
     const customDomains = await DomainSetup.find(match).populate("projectId", "repoName").sort({ createdAt: -1 }).lean();
@@ -328,10 +333,13 @@ export const getAllDomains = async (req, res) => {
     const allDomains = [];
 
     customDomains.forEach(cd => {
-      if (cd.targetService === 'frontend' || cd.targetService === 'both' || cd.frontendDomain) {
+      const frontendDomainName = cd.frontendDomain || ((cd.targetService === 'frontend' || cd.targetService === 'both') ? cd.rootDomain : null);
+      const backendDomainName = cd.backendDomain || (cd.targetService === 'backend' ? cd.rootDomain : (cd.targetService === 'both' && cd.rootDomain ? `api.${cd.rootDomain}` : null));
+
+      if (frontendDomainName) {
         allDomains.push({
           id: cd._id.toString(),
-          domain: cd.frontendDomain || cd.rootDomain,
+          domain: frontendDomainName,
           type: 'Third Party',
           isBackend: false,
           provider: 'third_party',
@@ -351,10 +359,10 @@ export const getAllDomains = async (req, res) => {
           backendDomain: cd.backendDomain
         });
       }
-      if (cd.targetService === 'backend' || cd.targetService === 'both' || cd.backendDomain) {
+      if (backendDomainName) {
          allDomains.push({
           id: cd._id.toString() + '_api',
-          domain: cd.backendDomain,
+          domain: backendDomainName,
           type: 'Third Party API',
           isBackend: true,
           provider: 'third_party',
@@ -373,11 +381,10 @@ export const getAllDomains = async (req, res) => {
       }
     });
 
-    if (projectId) {
-      // Keep track of domains we already added from DomainSetup to avoid duplicates
-      const existingDomainNames = new Set(allDomains.map(d => d.domain));
+    // Keep track of domains we already added from DomainSetup to avoid duplicates
+    const existingDomainNames = new Set(allDomains.map(d => d.domain));
 
-      for (const project of projects) {
+    for (const project of projects) {
         const hasPrimaryFrontend = customDomains.some(cd => cd.projectId?._id?.toString() === project._id.toString() && cd.domainRole === 'primary' && (cd.targetService === 'frontend' || cd.targetService === 'both'));
         const hasPrimaryBackend = customDomains.some(cd => cd.projectId?._id?.toString() === project._id.toString() && cd.domainRole === 'primary' && (cd.targetService === 'backend' || cd.targetService === 'both'));
 
@@ -432,26 +439,7 @@ export const getAllDomains = async (req, res) => {
                existingDomainNames.add(beUrl);
            }
         }
-        
-        const deployaiUrl = `${project.repoName.toLowerCase().replace(/[^a-z0-9-]/g, '')}.deployai.app`;
-        if (!existingDomainNames.has(deployaiUrl)) {
-            allDomains.push({
-              id: `deployai_${project._id}`,
-              domain: deployaiUrl,
-              type: `DeployAI Provided`,
-              isBackend: false,
-              provider: 'deployai',
-              status: 'active',
-              projectId: project._id,
-              projectName: project.repoName,
-              createdAt: project.createdAt,
-              domainRole: hasPrimaryFrontend ? 'alias' : 'primary',
-              targetService: 'frontend'
-            });
-            existingDomainNames.add(deployaiUrl);
-        }
       }
-    }
 
     res.json(allDomains);
   } catch (error) {
@@ -621,8 +609,19 @@ export const verifyDomainLogic = async (domainSetup, { fromCron = false } = {}) 
   }
 
   // â”€â”€ Compute overall status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const bothVerified     = frontendVerified && backendVerified;
-  const partiallyVerified = frontendVerified || backendVerified;
+  let bothVerified = false;
+  let partiallyVerified = false;
+
+  if (domainSetup.targetService === 'frontend') {
+    bothVerified = frontendVerified;
+  } else if (domainSetup.targetService === 'backend') {
+    bothVerified = backendVerified;
+  } else {
+    bothVerified = frontendVerified && backendVerified;
+    const frontendActuallyVerified = frontendVerified && domainSetup.frontendProvider && domainSetup.frontendProvider !== 'none';
+    const backendActuallyVerified = backendVerified && domainSetup.backendProvider && domainSetup.backendProvider !== 'none';
+    partiallyVerified = frontendActuallyVerified || backendActuallyVerified;
+  }
 
   if (bothVerified) {
     const wasActive    = prevStatus === "active";
@@ -1101,10 +1100,14 @@ export const makePrimary = async (req, res) => {
     const { projectId, targetService } = domain;
 
     // Demote old primary
+    const targetServiceFilter = targetService === 'both' 
+      ? { $in: ['frontend', 'backend', 'both'] } 
+      : { $in: [targetService, 'both'] };
+
     await DomainSetup.updateMany(
       {
         projectId,
-        targetService,
+        targetService: targetServiceFilter,
         status: { $in: ["active", "partially_active", "verifying", "degraded"] },
         _id: { $ne: domain._id }
       },
@@ -1512,16 +1515,30 @@ export const checkDomainHealth = async (req, res) => {
             // Basic reachability passed, check CORS against backend primary
             const backendPrimary = await DomainSetup.findOne({
               projectId: domain.projectId,
-              targetService: "backend",
+              targetService: { $in: ["backend", "both"] },
               status: "active",
               isPrimary: true
             });
 
-            if (!backendPrimary) {
-              health.status = "warning";
-              health.message = "Domain is reachable (text/html), but no active backend primary found to test CORS.";
+            let backendUrl = null;
+            if (backendPrimary) {
+              backendUrl = `https://${backendPrimary.backendDomain || backendPrimary.rootDomain}`;
             } else {
-              const backendUrl = `https://${backendPrimary.backendDomain || backendPrimary.rootDomain}`;
+              const beDep = await Deployment.findOne({ 
+                projectId: domain.projectId, 
+                type: { $in: ['backend', 'full'] },
+                status: { $in: ['success', 'completed'] }
+              }).sort({ createdAt: -1 }).lean();
+              if (beDep && beDep.finalSummary?.backendUrl) {
+                backendUrl = beDep.finalSummary.backendUrl;
+                if (!backendUrl.startsWith('http')) backendUrl = `https://${backendUrl}`;
+              }
+            }
+
+            if (!backendUrl) {
+              health.status = "warning";
+              health.message = "Domain is reachable (text/html), but no active backend found to test CORS.";
+            } else {
               try {
                 const corsResponse = await fetch(`${backendUrl}/health`, {
                   headers: { Origin: `https://${hostname}` },

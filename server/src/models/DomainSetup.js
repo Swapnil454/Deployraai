@@ -33,9 +33,9 @@ const DomainSetupSchema = new mongoose.Schema({
   },
   targetService: {
     type: String,
-    enum: ["frontend", "backend"],
+    enum: ["frontend", "backend", "both"],
     required: true,
-    default: "frontend"
+    default: "both"
   },
   frontendDomain: String,
   wwwDomain: String,
@@ -59,6 +59,7 @@ const DomainSetupSchema = new mongoose.Schema({
       "partially_active",
       "degraded",   // Was active; DNS records were subsequently removed
       "failed",
+      "removed"
     ],
     default: "draft",
     index: true,
