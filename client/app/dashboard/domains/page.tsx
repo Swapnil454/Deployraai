@@ -189,12 +189,17 @@ export default function DomainsPage() {
       autoPollingRef.current = true;
       try {
         const toPoll = autoPollableDomains.slice(0, 5);
+        let anyVerified = false;
         for (const domain of toPoll) {
           const attempts = pollingAttemptsRef.current[domain.id] || 0;
           if (attempts >= 20) continue; // max 10 minutes (20 * 30s)
           
           pollingAttemptsRef.current[domain.id] = attempts + 1;
-          await handleVerifyDomain(domain.id, true);
+          const verified = await handleVerifyDomain(domain.id, true);
+          if (verified) anyVerified = true;
+        }
+        if (anyVerified) {
+          fetchDomains();
         }
       } finally {
         autoPollingRef.current = false;
@@ -843,14 +848,17 @@ export default function DomainsPage() {
           } else {
             showToast("Verification failed. Please ensure you have added the DNS records to your provider.", "error");
           }
+          fetchDomains();
         }
-        fetchDomains();
+        return isVerified;
       } else {
         if (!isAutoPoll) showToast(data.error || "Failed to verify domain", "error");
+        return false;
       }
     } catch (err) {
       console.error(err);
       if (!isAutoPoll) showToast("An error occurred while verifying the domain.", "error");
+      return false;
     } finally {
       if (!isAutoPoll) setVerifyingDomain(null);
     }

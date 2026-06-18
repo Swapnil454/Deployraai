@@ -11,6 +11,7 @@ import {
   forceVerifyVercelDomain,
   updateVercelDomain,
 } from "../services/providers/vercel.service.js";
+import { triggerBackendService, triggerFrontendService, createQueuedFrontendDeployment } from "../services/deployment.service.js";
 import {
   getRenderToken,
   addRenderCustomDomain,
@@ -1076,7 +1077,55 @@ export const makePrimary = async (req, res) => {
     const userId = req.user.userId;
 
     if (!domainSetupId.match(/^[a-f\d]{24}$/i)) {
-      return res.status(400).json({ error: "Provider-managed domains cannot be modified here." });
+      if (domainSetupId.startsWith('provider_') || domainSetupId.startsWith('deployai_')) {
+        const type = domainSetupId.startsWith('provider_fe_') || domainSetupId.startsWith('deployai_') ? 'frontend' : 'backend';
+        const projectId = domainSetupId.split('_').pop();
+        
+        const project = await Project.findOne({ _id: projectId, userId });
+        if (!project) return res.status(404).json({ error: "Project not found" });
+
+        // Demote all primary domains for this service to fallback to the provider URL
+        await DomainSetup.updateMany(
+          {
+            projectId,
+            targetService: { $in: [type, 'both'] },
+            status: { $in: ["active", "partially_active", "verifying", "degraded"] },
+          },
+          {
+            $set: {
+              isPrimary: false,
+              domainRole: "alias",
+              redirectTo: null
+            }
+          }
+        );
+
+        const backendDep = await triggerBackendService(projectId, userId, "domain_make_primary");
+        const frontendDep = await createQueuedFrontendDeployment(projectId, userId, "domain_make_primary");
+
+        // Orchestrate background deployments for fallback
+        (async () => {
+          try {
+            if (backendDep) {
+              const waitResult = await waitForDeploymentHealthy(backendDep.id, 'backend');
+              if (waitResult.status === 'failed') return;
+            }
+            if (frontendDep) {
+              await triggerFrontendService(projectId, userId, "domain_make_primary", frontendDep.id);
+            }
+          } catch (e) {
+            console.error("Background Make Primary fallback error:", e);
+          }
+        })();
+
+        return res.json({ 
+          success: true, 
+          message: "Provider domain restored to primary successfully. Deployments triggered.", 
+          deployments: [backendDep, frontendDep].filter(Boolean)
+        });
+      }
+
+      return res.status(400).json({ error: "Invalid domain setup ID." });
     }
 
     const domain = await DomainSetup.findOne({
