@@ -578,7 +578,13 @@ export const verifyDomainLogic = async (domainSetup, { fromCron = false } = {}) 
           if (domainId) {
             try { await forceVerifyRenderDomain(token, backendServiceId, domainId); } catch (_) {}
 
-            const rData = await getRenderCustomDomain(token, backendServiceId, domainId);
+            let rData = null;
+            try {
+              rData = await getRenderCustomDomain(token, backendServiceId, domainId);
+            } catch (err) {
+              addLog(domainSetup, `Backend domain check failed: ${err.message}`, "error");
+            }
+            
             const renderVerified =
               rData?.verificationStatus === "verified" ||
               rData?.customDomain?.verificationStatus === "verified";

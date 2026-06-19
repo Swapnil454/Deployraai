@@ -56,6 +56,7 @@ export default function DomainsPage() {
 
   // Advanced View States
   const [expandedDomainId, setExpandedDomainId] = useState<string | null>(null);
+  const [analyticsDomainId, setAnalyticsDomainId] = useState<string | null>(null);
   const [integrations, setIntegrations] = useState<any>(null);
   const [verifyingDomain, setVerifyingDomain] = useState<string | null>(null);
   const [cloudflareKey, setCloudflareKey] = useState("");
@@ -106,15 +107,16 @@ export default function DomainsPage() {
   };
 
   useEffect(() => {
-    if (!expandedDomainId) {
+    const activeDomainId = expandedDomainId || analyticsDomainId;
+    if (!activeDomainId) {
       setDomainLogs([]);
       setMonitorSummary(null);
       return;
     }
 
-    fetchDomainActivity(expandedDomainId);
+    fetchDomainActivity(activeDomainId);
     
-    const expandedDomain = domains.find(d => d.id === expandedDomainId);
+    const expandedDomain = domains.find(d => d.id === activeDomainId);
     const targetProjectId = expandedDomain?.projectId || projectId;
     if (targetProjectId) {
       fetchMonitorSummary(targetProjectId);
@@ -122,14 +124,14 @@ export default function DomainsPage() {
 
     const interval = setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      fetchDomainActivity(expandedDomainId, true);
+      fetchDomainActivity(activeDomainId, true);
       if (targetProjectId) {
         fetchMonitorSummary(targetProjectId, true);
       }
     }, 15000);
 
     return () => clearInterval(interval);
-  }, [expandedDomainId, domains, projectId]);
+  }, [expandedDomainId, analyticsDomainId, domains, projectId]);
 
 
   // Polling for active deployments
@@ -371,7 +373,7 @@ export default function DomainsPage() {
                           <button 
                             onClick={() => handleVerifyDomain(d.id)}
                             disabled={verifyingDomain === d.id}
-                            className="rounded px-2 py-1 text-[12px] font-medium border border-zinc-700 bg-black text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-50 transition-colors flex items-center gap-1"
+                            className="rounded px-2 py-1 text-[12px] font-medium border border-zinc-700 bg-black text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-50 transition-colors flex items-center gap-1 whitespace-nowrap shrink-0"
                           >
                             {verifyingDomain === d.id && <Loader2 className="h-3 w-3 animate-spin" />}
                             Check DNS
@@ -381,7 +383,7 @@ export default function DomainsPage() {
                             <button 
                               onClick={() => handleCheckHealth(d.id)}
                               disabled={checkingDomainId === d.id}
-                              className="rounded px-2 py-1 text-[12px] font-medium border border-zinc-700 bg-black text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-50 transition-colors flex items-center gap-1"
+                              className="rounded px-2 py-1 text-[12px] font-medium border border-zinc-700 bg-black text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-50 transition-colors flex items-center gap-1 whitespace-nowrap shrink-0"
                             >
                               {checkingDomainId === d.id && <Loader2 className="h-3 w-3 animate-spin" />}
                               Check Health
@@ -390,7 +392,7 @@ export default function DomainsPage() {
                             <button 
                               disabled
                               title="Verify DNS first before running health checks."
-                              className="rounded px-2 py-1 text-[12px] font-medium border border-zinc-800 bg-zinc-900 text-zinc-600 cursor-not-allowed flex items-center gap-1"
+                              className="rounded px-2 py-1 text-[12px] font-medium border border-zinc-800 bg-zinc-900 text-zinc-600 cursor-not-allowed flex items-center gap-1 whitespace-nowrap shrink-0"
                             >
                               Check Health
                             </button>
@@ -486,142 +488,7 @@ export default function DomainsPage() {
             </div>
           )}
 
-          {/* Uptime Analytics */}
-          <div className="mt-8 border-t border-zinc-800 pt-8">
-            <h4 className="text-[13px] font-medium text-white mb-4 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-emerald-400" />
-              Uptime & Analytics
-            </h4>
-            
-            {loadingSummary && !monitorSummary ? (
-              <div className="flex items-center gap-2 text-zinc-500 text-[13px] mb-8">
-                <Loader2 className="w-4 h-4 animate-spin" /> Loading analytics...
-              </div>
-            ) : monitorSummary && (monitorSummary.frontendUptime > 0 || monitorSummary.backendUptime > 0) ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                {/* Uptime Card */}
-                <div className="bg-[#111] border border-zinc-800 rounded-lg p-4 flex flex-col justify-between">
-                  <div>
-                    <h5 className="text-[12px] font-medium text-zinc-400 uppercase tracking-wider mb-3">Service Uptime</h5>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-3xl font-semibold text-white">
-                        {Math.max(monitorSummary.frontendUptime || 0, monitorSummary.backendUptime || 0).toFixed(2)}%
-                      </span>
-                      <span className="text-[13px] text-zinc-500">last 30 days</span>
-                    </div>
                   </div>
-                  <div className="mt-4 flex gap-4 text-[12px]">
-                    {monitorSummary.frontendUptime > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <div className={`w-2 h-2 rounded-full ${monitorSummary.frontendUptime >= 99 ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                        <span className="text-zinc-300">Frontend: {monitorSummary.frontendUptime.toFixed(2)}%</span>
-                      </div>
-                    )}
-                    {monitorSummary.backendUptime > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <div className={`w-2 h-2 rounded-full ${monitorSummary.backendUptime >= 99 ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                        <span className="text-zinc-300">Backend: {monitorSummary.backendUptime.toFixed(2)}%</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Latency Card */}
-                <div className="bg-[#111] border border-zinc-800 rounded-lg p-4 flex flex-col justify-between">
-                  <h5 className="text-[12px] font-medium text-zinc-400 uppercase tracking-wider mb-3">Recent Latency</h5>
-                  <div className="flex-1 flex items-end gap-1 h-12">
-                    {monitorSummary.recentChecks?.slice(0, 20).reverse().map((check: any, idx: number) => {
-                      // max height representation
-                      const heightPct = Math.min(100, Math.max(10, (check.responseTimeMs / 1000) * 100));
-                      const isOffline = check.status === 'offline';
-                      return (
-                        <div 
-                          key={check._id || idx}
-                          className={`w-full rounded-t-sm ${isOffline ? 'bg-red-500' : check.responseTimeMs > 800 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                          style={{ height: `${isOffline ? 10 : heightPct}%` }}
-                          title={`${check.responseTimeMs}ms - ${new Date(check.checkedAt).toLocaleTimeString()}`}
-                        />
-                      );
-                    })}
-                  </div>
-                  <div className="mt-4 text-[12px] text-zinc-500 flex justify-between">
-                    <span>{monitorSummary.recentChecks?.[monitorSummary.recentChecks.length - 1]?.responseTimeMs || 0}ms average</span>
-                    <span>Live</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-               <div className="text-[13px] text-zinc-500 bg-zinc-900/30 p-4 rounded-lg border border-zinc-800 border-dashed mb-8">
-                 Analytics are being gathered. Check back soon.
-               </div>
-            )}
-          </div>
-
-          {/* Activity Timeline */}
-          <div className="mt-8 border-t border-zinc-800 pt-8">
-            <h4 className="text-[13px] font-medium text-white mb-4 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-zinc-400" />
-              Activity Timeline
-            </h4>
-            
-            {loadingLogs ? (
-              <div className="flex items-center gap-2 text-zinc-500 text-[13px]">
-                <Loader2 className="w-4 h-4 animate-spin" /> Loading timeline...
-              </div>
-            ) : domainLogs.length === 0 ? (
-              <div className="text-[13px] text-zinc-500 bg-zinc-900/30 p-4 rounded-lg border border-zinc-800 border-dashed">
-                No activity recorded yet.
-              </div>
-            ) : (
-              <div className="space-y-5 pl-2">
-                {domainLogs.map((log, i) => (
-                  <div key={log._id || i} className="relative pl-6">
-                    {/* Vertical line connecting timeline dots */}
-                    {i !== domainLogs.length - 1 && (
-                      <div className="absolute left-[5px] top-6 bottom-[-20px] w-[2px] bg-zinc-800"></div>
-                    )}
-                    
-                    {/* Timeline dot */}
-                    <div className={`absolute left-0 top-1.5 w-3 h-3 rounded-full border-2 border-[#0a0a0a] z-10 ${
-                      log.status === 'success' ? 'bg-emerald-500' :
-                      log.status === 'error' ? 'bg-red-500' :
-                      log.status === 'warning' ? 'bg-amber-500' :
-                      'bg-blue-500'
-                    }`}></div>
-                    
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="text-[13px] text-zinc-200 leading-relaxed">{log.message}</div>
-                        
-                        {log.metadata && Object.keys(log.metadata).length > 0 && (
-                          <div className="mt-1.5 text-[11px] font-mono text-zinc-400 bg-black/60 border border-zinc-800/50 px-2 py-1.5 rounded inline-block">
-                            {Object.entries(log.metadata).map(([k, v]) => (
-                              <span key={k} className="mr-3 last:mr-0"><span className="text-zinc-600">{k}:</span> {String(v)}</span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-zinc-500 flex flex-col items-end whitespace-nowrap mt-0.5">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider mb-1 ${
-                          log.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
-                          log.status === 'error' ? 'bg-red-500/10 text-red-400' :
-                          log.status === 'warning' ? 'bg-amber-500/10 text-amber-400' :
-                          'bg-blue-500/10 text-blue-400'
-                        }`}>
-                          {log.status}
-                        </span>
-                        {new Date(log.createdAt).toLocaleString(undefined, {
-                          month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-        </div>
       </div>
     );
   };
@@ -1213,6 +1080,150 @@ export default function DomainsPage() {
   };
 
   
+  
+  const renderAnalyticsView = (d: any) => {
+    return (
+      <div className="p-6 bg-[#0a0a0a] border-t border-zinc-800 animate-in slide-in-from-top-2 duration-200">
+        {/* Uptime Analytics */}
+          <div className="mt-8 border-t border-zinc-800 pt-8">
+            <h4 className="text-[13px] font-medium text-white mb-4 flex items-center gap-2">
+              <Activity className="w-4 h-4 text-emerald-400" />
+              Uptime & Analytics
+            </h4>
+            
+            {loadingSummary && !monitorSummary ? (
+              <div className="flex items-center gap-2 text-zinc-500 text-[13px] mb-8">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading analytics...
+              </div>
+            ) : monitorSummary && (monitorSummary.frontendUptime > 0 || monitorSummary.backendUptime > 0) ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                {/* Uptime Card */}
+                <div className="bg-[#111] border border-zinc-800 rounded-lg p-4 flex flex-col justify-between">
+                  <div>
+                    <h5 className="text-[12px] font-medium text-zinc-400 uppercase tracking-wider mb-3">Service Uptime</h5>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-3xl font-semibold text-white">
+                        {Math.max(monitorSummary.frontendUptime || 0, monitorSummary.backendUptime || 0).toFixed(2)}%
+                      </span>
+                      <span className="text-[13px] text-zinc-500">last 30 days</span>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex gap-4 text-[12px]">
+                    {monitorSummary.frontendUptime > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <div className={`w-2 h-2 rounded-full ${monitorSummary.frontendUptime >= 99 ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                        <span className="text-zinc-300">Frontend: {monitorSummary.frontendUptime.toFixed(2)}%</span>
+                      </div>
+                    )}
+                    {monitorSummary.backendUptime > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <div className={`w-2 h-2 rounded-full ${monitorSummary.backendUptime >= 99 ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                        <span className="text-zinc-300">Backend: {monitorSummary.backendUptime.toFixed(2)}%</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Latency Card */}
+                <div className="bg-[#111] border border-zinc-800 rounded-lg p-4 flex flex-col justify-between">
+                  <h5 className="text-[12px] font-medium text-zinc-400 uppercase tracking-wider mb-3">Recent Latency</h5>
+                  <div className="flex-1 flex items-end gap-1 h-12">
+                    {monitorSummary.recentChecks?.slice(0, 20).reverse().map((check: any, idx: number) => {
+                      // max height representation
+                      const heightPct = Math.min(100, Math.max(10, (check.responseTimeMs / 1000) * 100));
+                      const isOffline = check.status === 'offline';
+                      return (
+                        <div 
+                          key={check._id || idx}
+                          className={`w-full rounded-t-sm ${isOffline ? 'bg-red-500' : check.responseTimeMs > 800 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                          style={{ height: `${isOffline ? 10 : heightPct}%` }}
+                          title={`${check.responseTimeMs}ms - ${new Date(check.checkedAt).toLocaleTimeString()}`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className="mt-4 text-[12px] text-zinc-500 flex justify-between">
+                    <span>{monitorSummary.recentChecks?.[monitorSummary.recentChecks.length - 1]?.responseTimeMs || 0}ms average</span>
+                    <span>Live</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+               <div className="text-[13px] text-zinc-500 bg-zinc-900/30 p-4 rounded-lg border border-zinc-800 border-dashed mb-8">
+                 Analytics are being gathered. Check back soon.
+               </div>
+            )}
+          </div>
+
+          {/* Activity Timeline */}
+          <div className="mt-8 border-t border-zinc-800 pt-8">
+            <h4 className="text-[13px] font-medium text-white mb-4 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-zinc-400" />
+              Activity Timeline
+            </h4>
+            
+            {loadingLogs ? (
+              <div className="flex items-center gap-2 text-zinc-500 text-[13px]">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading timeline...
+              </div>
+            ) : domainLogs.length === 0 ? (
+              <div className="text-[13px] text-zinc-500 bg-zinc-900/30 p-4 rounded-lg border border-zinc-800 border-dashed">
+                No activity recorded yet.
+              </div>
+            ) : (
+              <div className="space-y-5 pl-2">
+                {domainLogs.map((log, i) => (
+                  <div key={log._id || i} className="relative pl-6">
+                    {/* Vertical line connecting timeline dots */}
+                    {i !== domainLogs.length - 1 && (
+                      <div className="absolute left-[5px] top-6 bottom-[-20px] w-[2px] bg-zinc-800"></div>
+                    )}
+                    
+                    {/* Timeline dot */}
+                    <div className={`absolute left-0 top-1.5 w-3 h-3 rounded-full border-2 border-[#0a0a0a] z-10 ${
+                      log.status === 'success' ? 'bg-emerald-500' :
+                      log.status === 'error' ? 'bg-red-500' :
+                      log.status === 'warning' ? 'bg-amber-500' :
+                      'bg-blue-500'
+                    }`}></div>
+                    
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-[13px] text-zinc-200 leading-relaxed">{log.message}</div>
+                        
+                        {log.metadata && Object.keys(log.metadata).length > 0 && (
+                          <div className="mt-1.5 text-[11px] font-mono text-zinc-400 bg-black/60 border border-zinc-800/50 px-2 py-1.5 rounded inline-block">
+                            {Object.entries(log.metadata).map(([k, v]) => (
+                              <span key={k} className="mr-3 last:mr-0"><span className="text-zinc-600">{k}:</span> {String(v)}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-zinc-500 flex flex-col items-end whitespace-nowrap mt-0.5">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider mb-1 ${
+                          log.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
+                          log.status === 'error' ? 'bg-red-500/10 text-red-400' :
+                          log.status === 'warning' ? 'bg-amber-500/10 text-amber-400' :
+                          'bg-blue-500/10 text-blue-400'
+                        }`}>
+                          {log.status}
+                        </span>
+                        {new Date(log.createdAt).toLocaleString(undefined, {
+                          month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+
+      </div>
+    );
+  };
+
   const renderEditDomainRow = (d: any) => {
     return (
       <div key={`edit-${d.id}`} className="border-b border-zinc-800 bg-[#0a0a0a]">
@@ -1367,9 +1378,9 @@ export default function DomainsPage() {
       }
       return (
         <div className="flex items-center gap-2">
-          {healthCheck.status === 'healthy' && <span className="bg-emerald-500/10 text-emerald-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={healthCheck.message}>Healthy</span>}
-          {healthCheck.status === 'warning' && <span className="bg-yellow-500/10 text-yellow-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={healthCheck.message}>Warning</span>}
-          {healthCheck.status === 'failed' && <span className="bg-red-500/10 text-red-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={healthCheck.message}>Failed</span>}
+          {healthCheck.status === 'healthy' && <span className="bg-emerald-500/10 text-emerald-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={healthCheck.message || 'Warning'}>Healthy</span>}
+          {healthCheck.status === 'warning' && <span className="bg-yellow-500/10 text-yellow-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={healthCheck.message || 'Warning'}>Warning</span>}
+          {healthCheck.status === 'failed' && <span className="bg-red-500/10 text-red-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={healthCheck.message || 'Warning'}>Failed</span>}
           <span className="text-[10px] text-zinc-500">checked {checkedText}</span>
         </div>
       );
@@ -1445,17 +1456,45 @@ export default function DomainsPage() {
               <button 
                 onClick={(e) => { e.stopPropagation(); handleCheckHealth(d.id); }}
                 disabled={checkingDomainId === d.id}
-                className="px-3 py-1.5 bg-black border border-zinc-800 rounded-md text-[13px] font-medium text-zinc-300 hover:text-white hover:border-zinc-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-3 py-1.5 bg-black border border-zinc-800 rounded-md text-[13px] font-medium text-zinc-300 hover:text-white hover:border-zinc-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap shrink-0"
               >
                 {checkingDomainId === d.id && <Loader2 className="h-3 w-3 animate-spin" />}
                 Check Health
               </button>
             )}
-            <button onClick={() => setExpandedDomainId(expandedDomainId === d.id ? null : d.id)} className="px-3 py-1.5 bg-black border border-zinc-800 rounded-md text-[13px] font-medium text-zinc-300 hover:text-white hover:border-zinc-700 transition-colors shadow-sm">
+            
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                if (analyticsDomainId === d.id) {
+                  setAnalyticsDomainId(null);
+                } else {
+                  setAnalyticsDomainId(d.id);
+                  setExpandedDomainId(null);
+                  if (typeof editingDomainId !== 'undefined' && editingDomainId) setEditingDomainId(null);
+                }
+              }} 
+              className={`px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors shadow-sm whitespace-nowrap shrink-0 ${analyticsDomainId === d.id ? 'bg-zinc-800 text-white border border-zinc-700' : 'bg-black text-zinc-300 border border-zinc-800 hover:text-white hover:border-zinc-700'}`}
+            >
+              Analytics
+            </button>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                if (expandedDomainId === d.id) {
+                  setExpandedDomainId(null);
+                } else {
+                  setExpandedDomainId(d.id);
+                  setAnalyticsDomainId(null);
+                  if (typeof editingDomainId !== 'undefined' && editingDomainId) setEditingDomainId(null);
+                }
+              }} 
+              className="px-3 py-1.5 bg-black border border-zinc-800 rounded-md text-[13px] font-medium text-zinc-300 hover:text-white hover:border-zinc-700 transition-colors shadow-sm whitespace-nowrap shrink-0"
+            >
               {expandedDomainId === d.id ? 'Hide Details' : 'View Details'}
             </button>
             {d.provider === 'third_party' && (
-              <button onClick={() => handleEditClick(d)} className="px-3 py-1.5 bg-black border border-zinc-800 rounded-md text-[13px] font-medium text-zinc-300 hover:text-white hover:border-zinc-700 transition-colors shadow-sm">
+              <button onClick={() => handleEditClick(d)} className="px-3 py-1.5 bg-black border border-zinc-800 rounded-md text-[13px] font-medium text-zinc-300 hover:text-white hover:border-zinc-700 transition-colors shadow-sm whitespace-nowrap shrink-0">
                 Edit
               </button>
             )}
@@ -1541,6 +1580,7 @@ export default function DomainsPage() {
         </div>
         
         {expandedDomainId === d.id && renderAdvancedView(d)}
+        {analyticsDomainId === d.id && renderAnalyticsView(d)}
       </div>
     );
   };
