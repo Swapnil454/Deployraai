@@ -42,6 +42,18 @@ const logDomainActivity = async ({ domainSetupId, projectId, userId, action, sta
       message,
       metadata
     });
+
+    // Auto-delete old logs, keep only the latest 40
+    const logsToKeep = 40;
+    const olderLogs = await DomainActivityLog.find({ domainSetupId })
+      .sort({ createdAt: -1 })
+      .skip(logsToKeep)
+      .select('_id');
+
+    if (olderLogs.length > 0) {
+      const idsToDelete = olderLogs.map(log => log._id);
+      await DomainActivityLog.deleteMany({ _id: { $in: idsToDelete } });
+    }
   } catch (error) {
     console.error("Failed to log domain activity:", error);
   }
@@ -331,6 +343,8 @@ export const getAllDomains = async (req, res) => {
     const projects = await Project.find(projMatch).lean();
     
     const Deployment = (await import('../models/Deployment.js')).default;
+    const Monitor = (await import('../models/Monitor.js')).default;
+    const allMonitors = await Monitor.find({ projectId: { $in: projects.map(p => p._id) } }).lean();
     const allDomains = [];
 
     customDomains.forEach(cd => {
@@ -398,6 +412,8 @@ export const getAllDomains = async (req, res) => {
         if (feDep && feDep.finalSummary?.frontendUrl) {
            const feUrl = feDep.finalSummary.frontendUrl.replace(/^https?:\/\//, '');
            if (!existingDomainNames.has(feUrl)) {
+                              const feMonitor = allMonitors.find(m => m.projectId.toString() === project._id.toString() && m.type === 'frontend');
+               const feHealth = feMonitor ? (feMonitor.status === 'online' ? 'Healthy' : (feMonitor.status === 'offline' ? 'Failing' : 'Degraded')) : undefined;
                allDomains.push({
                   id: `provider_fe_${project._id}`,
                   domain: feUrl,
@@ -409,7 +425,8 @@ export const getAllDomains = async (req, res) => {
                   projectName: project.repoName,
                   createdAt: feDep.createdAt,
                   domainRole: hasPrimaryFrontend ? 'alias' : 'primary',
-                  targetService: 'frontend'
+                  targetService: 'frontend',
+                  healthCheck: feHealth
                });
                existingDomainNames.add(feUrl);
            }
@@ -424,6 +441,8 @@ export const getAllDomains = async (req, res) => {
         if (beDep && beDep.finalSummary?.backendUrl) {
            const beUrl = beDep.finalSummary.backendUrl.replace(/^https?:\/\//, '');
            if (!existingDomainNames.has(beUrl)) {
+                              const beMonitor = allMonitors.find(m => m.projectId.toString() === project._id.toString() && m.type === 'backend');
+               const beHealth = beMonitor ? (beMonitor.status === 'online' ? 'Healthy' : (beMonitor.status === 'offline' ? 'Failing' : 'Degraded')) : undefined;
                allDomains.push({
                   id: `provider_be_${project._id}`,
                   domain: beUrl,
@@ -435,7 +454,8 @@ export const getAllDomains = async (req, res) => {
                   projectName: project.repoName,
                   createdAt: beDep.createdAt,
                   domainRole: hasPrimaryBackend ? 'alias' : 'primary',
-                  targetService: 'backend'
+                  targetService: 'backend',
+                  healthCheck: beHealth
                });
                existingDomainNames.add(beUrl);
            }
@@ -555,6 +575,7 @@ export const verifyDomainLogic = async (domainSetup, { fromCron = false } = {}) 
         const latestDeployment = await Deployment.findOne({
           projectId: domainSetup.projectId,
           status: { $in: ["completed", "success"] },
+          type: { $in: ["backend", "full"] },
         }).sort({ createdAt: -1 });
 
         const backendServiceId =
@@ -563,15 +584,20 @@ export const verifyDomainLogic = async (domainSetup, { fromCron = false } = {}) 
         if (backendServiceId) {
           let domainId = domainSetup.providerBackendDomainId;
           if (!domainId) {
-            const domains = await listRenderCustomDomains(token, backendServiceId);
-            if (Array.isArray(domains)) {
-              const matched = domains.find(
-                (d) => d.customDomain?.name === domainSetup.backendDomain || d.name === domainSetup.backendDomain
-              );
-              if (matched) {
-                domainId = matched.id || matched.customDomain?.id;
-                domainSetup.providerBackendDomainId = domainId;
+            try {
+              const domains = await listRenderCustomDomains(token, backendServiceId);
+              if (Array.isArray(domains)) {
+                const matched = domains.find(
+                  (d) => d.customDomain?.name === domainSetup.backendDomain || d.name === domainSetup.backendDomain
+                );
+                if (matched) {
+                  domainId = matched.id || matched.customDomain?.id;
+                  domainSetup.providerBackendDomainId = domainId;
+                }
               }
+            } catch (err) {
+              addLog(domainSetup, `Failed to fetch Render domains: ${err.message}`, "error");
+              console.error(`[verifyDomainLogic] listRenderCustomDomains error for ${domainSetup._id}:`, err);
             }
           }
 
@@ -1419,7 +1445,7 @@ export const checkDomainHealth = async (req, res) => {
         }).sort({ createdAt: -1 }).lean();
         
         if (!dep) return res.status(404).json({ success: false, message: "No successful deployment found for provider URL" });
-        const urlStr = type === 'frontend' ? dep.finalSummary?.frontendUrl : dep.finalSummary?.backendUrl;
+        const urlStr = type === 'frontend' ? (dep.finalSummary?.frontendUrl || dep.frontendUrl) : (dep.finalSummary?.backendUrl || dep.backendUrl);
         if (!urlStr) return res.status(404).json({ success: false, message: "Provider URL not found in deployment" });
         hostname = urlStr.replace(/^https?:\/\//, '');
       }
@@ -1676,6 +1702,16 @@ export const checkDomainHealth = async (req, res) => {
     domain.healthCheck = health;
     await domain.save();
 
+    const DomainActivityLog = (await import('../models/DomainActivityLog.js')).default;
+    await DomainActivityLog.create({
+      domainSetupId: domain._id,
+      projectId: domain.projectId,
+      userId,
+      action: 'health_check',
+      status: health.status === 'healthy' ? 'success' : (health.status === 'warning' ? 'warning' : 'error'),
+      message: `Health check: ${health.message}`
+    });
+
     res.json({ success: true, health });
   } catch (error) {
     console.error("Domain health check error:", error);
@@ -1685,18 +1721,22 @@ export const checkDomainHealth = async (req, res) => {
 
 export const getDomainActivity = async (req, res) => {
   try {
-    const { domainSetupId } = req.params;
+    let { domainSetupId } = req.params;
+    if (domainSetupId && domainSetupId.endsWith('_api')) domainSetupId = domainSetupId.replace('_api', '');
     const userId = req.user.userId;
 
     // Handle pseudo-domains
     if (domainSetupId.startsWith('provider_') || domainSetupId.startsWith('deployai_')) {
-      return res.json([{
-        _id: 'mock_log_1',
-        action: 'domain_created',
-        status: 'success',
-        message: 'Provider default URL automatically provisioned.',
-        createdAt: new Date(),
-      }]);
+      return res.json({
+        logs: [{
+          _id: 'mock_log_1',
+          action: 'domain_created',
+          status: 'success',
+          message: 'Provider default URL automatically provisioned.',
+          createdAt: new Date(),
+        }],
+        hasMore: false
+      });
     }
 
     if (!domainSetupId.match(/^[a-f\d]{24}$/i)) {
@@ -1709,15 +1749,21 @@ export const getDomainActivity = async (req, res) => {
       return res.status(404).json({ error: "Domain not found" });
     }
 
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
     const logs = await DomainActivityLog.find({
       domainSetupId,
       userId: req.user.userId
     })
       .sort({ createdAt: -1 })
-      .limit(50)
+      .skip(skip)
+      .limit(limit)
       .lean();
 
-    res.json(logs);
+    const hasMore = logs.length === limit;
+    res.json({ logs, hasMore });
   } catch (error) {
     console.error("Error fetching domain activity:", error);
     res.status(500).json({ error: "Failed to fetch domain activity" });

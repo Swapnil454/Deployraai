@@ -56,7 +56,6 @@ export default function DomainsPage() {
 
   // Advanced View States
   const [expandedDomainId, setExpandedDomainId] = useState<string | null>(null);
-  const [analyticsDomainId, setAnalyticsDomainId] = useState<string | null>(null);
   const [integrations, setIntegrations] = useState<any>(null);
   const [verifyingDomain, setVerifyingDomain] = useState<string | null>(null);
   const [cloudflareKey, setCloudflareKey] = useState("");
@@ -107,7 +106,7 @@ export default function DomainsPage() {
   };
 
   useEffect(() => {
-    const activeDomainId = expandedDomainId || analyticsDomainId;
+    const activeDomainId = expandedDomainId;
     if (!activeDomainId) {
       setDomainLogs([]);
       setMonitorSummary(null);
@@ -131,7 +130,7 @@ export default function DomainsPage() {
     }, 15000);
 
     return () => clearInterval(interval);
-  }, [expandedDomainId, analyticsDomainId, domains, projectId]);
+  }, [expandedDomainId, domains, projectId]);
 
 
   // Polling for active deployments
@@ -379,10 +378,10 @@ export default function DomainsPage() {
                             Check DNS
                           </button>
                           
-                          {d.status === 'active' ? (
+                          {['active', 'partially_active', 'degraded', 'verifying'].includes(d.status) ? (
                             <button 
                               onClick={() => handleCheckHealth(d.id)}
-                              disabled={checkingDomainId === d.id}
+                              disabled={checkingDomainId === d.id || d.status === 'verifying'}
                               className="rounded px-2 py-1 text-[12px] font-medium border border-zinc-700 bg-black text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-50 transition-colors flex items-center gap-1 whitespace-nowrap shrink-0"
                             >
                               {checkingDomainId === d.id && <Loader2 className="h-3 w-3 animate-spin" />}
@@ -1366,10 +1365,12 @@ export default function DomainsPage() {
     const redirectTarget = d.redirectTo || `www.${d.domain}`;
     
     const renderHealthBadge = (healthCheck: any) => {
-      const checkedAgo = healthCheck?.checkedAt ? Math.round((Date.now() - new Date(healthCheck.checkedAt).getTime()) / 60000) : null;
+      const isString = typeof healthCheck === 'string';
+      const status = isString ? healthCheck.toLowerCase() : healthCheck?.status;
+      const checkedAgo = !isString && healthCheck?.checkedAt ? Math.round((Date.now() - new Date(healthCheck.checkedAt).getTime()) / 60000) : null;
       const checkedText = checkedAgo !== null ? (checkedAgo === 0 ? 'just now' : `${checkedAgo}m ago`) : '';
 
-      if (!healthCheck || healthCheck.status === 'unknown') {
+      if (!status || status === 'unknown') {
         return (
           <div className="flex items-center gap-2">
             <span className="bg-zinc-800 text-zinc-400 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title="Health not checked yet">Not Checked</span>
@@ -1378,10 +1379,10 @@ export default function DomainsPage() {
       }
       return (
         <div className="flex items-center gap-2">
-          {healthCheck.status === 'healthy' && <span className="bg-emerald-500/10 text-emerald-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={healthCheck.message || 'Warning'}>Healthy</span>}
-          {healthCheck.status === 'warning' && <span className="bg-yellow-500/10 text-yellow-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={healthCheck.message || 'Warning'}>Warning</span>}
-          {healthCheck.status === 'failed' && <span className="bg-red-500/10 text-red-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={healthCheck.message || 'Warning'}>Failed</span>}
-          <span className="text-[10px] text-zinc-500">checked {checkedText}</span>
+          {status === 'healthy' && <span className="bg-emerald-500/10 text-emerald-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={!isString ? healthCheck.message : 'Healthy'}>Healthy</span>}
+          {(status === 'warning' || status === 'degraded') && <span className="bg-yellow-500/10 text-yellow-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={!isString ? healthCheck.message : 'Warning'}>Warning</span>}
+          {(status === 'failed' || status === 'failing') && <span className="bg-red-500/10 text-red-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={!isString ? healthCheck.message : 'Failed'}>Failed</span>}
+          {!isString && checkedText && <span className="text-[10px] text-zinc-500">checked {checkedText}</span>}
         </div>
       );
     };
@@ -1412,7 +1413,7 @@ export default function DomainsPage() {
                 {d.domainRole === 'redirect' && (
                   <span className="bg-blue-500/10 text-blue-400 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide">Redirect</span>
                 )}
-                {!isProvider && renderHealthBadge(d.healthCheck)}
+                {renderHealthBadge(d.healthCheck)}
                 {checkingDomainId === d.id && (
                   <span className="text-[10px] text-zinc-500 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin"/> Checking...</span>
                 )}
@@ -1452,7 +1453,7 @@ export default function DomainsPage() {
 
           {/* Right Section: Buttons */}
           <div className="flex items-center justify-end gap-2 flex-1 min-w-[150px]">
-            {['active', 'partially_active', 'degraded'].includes(d.status) && (
+            {['active', 'partially_active', 'degraded', 'verifying'].includes(d.status) && (
               <button 
                 onClick={(e) => { e.stopPropagation(); handleCheckHealth(d.id); }}
                 disabled={checkingDomainId === d.id}
@@ -1466,15 +1467,9 @@ export default function DomainsPage() {
             <button 
               onClick={(e) => {
                 e.stopPropagation();
-                if (analyticsDomainId === d.id) {
-                  setAnalyticsDomainId(null);
-                } else {
-                  setAnalyticsDomainId(d.id);
-                  setExpandedDomainId(null);
-                  if (typeof editingDomainId !== 'undefined' && editingDomainId) setEditingDomainId(null);
-                }
+                router.push(`/dashboard/domains/${d.id}/analytics?projectId=${d.projectId || projectId}&url=${encodeURIComponent(d.domain)}`);
               }} 
-              className={`px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors shadow-sm whitespace-nowrap shrink-0 ${analyticsDomainId === d.id ? 'bg-zinc-800 text-white border border-zinc-700' : 'bg-black text-zinc-300 border border-zinc-800 hover:text-white hover:border-zinc-700'}`}
+              className={`px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors shadow-sm whitespace-nowrap shrink-0 bg-black text-zinc-300 border border-zinc-800 hover:text-white hover:border-zinc-700`}
             >
               Analytics
             </button>
@@ -1485,7 +1480,6 @@ export default function DomainsPage() {
                   setExpandedDomainId(null);
                 } else {
                   setExpandedDomainId(d.id);
-                  setAnalyticsDomainId(null);
                   if (typeof editingDomainId !== 'undefined' && editingDomainId) setEditingDomainId(null);
                 }
               }} 
@@ -1580,8 +1574,7 @@ export default function DomainsPage() {
         </div>
         
         {expandedDomainId === d.id && renderAdvancedView(d)}
-        {analyticsDomainId === d.id && renderAnalyticsView(d)}
-      </div>
+              </div>
     );
   };
 
