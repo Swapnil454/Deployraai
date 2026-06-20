@@ -484,7 +484,7 @@ export const getAllDomains = async (req, res) => {
 
     res.json(allDomains);
   } catch (error) {
-    console.error("Get All Domains Error:", error);
+    console.error("Get All Domains Error:", error.message);
     res.status(500).json({ error: "Failed to fetch domains." });
   }
 };
@@ -577,16 +577,16 @@ export const verifyDomainLogic = async (domainSetup, { fromCron = false } = {}) 
             });
           }
 
-          addLog(domainSetup, `Frontend domain ${domainSetup.frontendDomain} not yet verified â€” DNS pending`, "warn");
+          addLog(domainSetup, `Frontend domain ${domainSetup.frontendDomain} not yet verified — DNS pending`, "warn");
         }
       }
     }
   } catch (e) {
-    console.error("[verifyDomainLogic] Vercel check error:", e);
+    console.error("[verifyDomainLogic] Vercel check error:", e.message);
     addLog(domainSetup, `Vercel check error: ${e.message}`, "error");
   }
 
-  // â”€â”€ Backend verification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ————————————————————————————————————————————————————————————————————————————————
   try {
     if (domainSetup.backendProvider === "render") {
       const token = await getRenderToken(domainSetup.userId);
@@ -660,25 +660,25 @@ export const verifyDomainLogic = async (domainSetup, { fromCron = false } = {}) 
 
             if (renderVerified) {
               backendVerified = true;
-              addLog(domainSetup, `Backend domain ${domainSetup.backendDomain} verified âœ“`);
+              addLog(domainSetup, `Backend domain ${domainSetup.backendDomain} verified ✓`);
             } else {
-              addLog(domainSetup, `Backend domain ${domainSetup.backendDomain} not yet verified â€” DNS pending`, "warn");
+              addLog(domainSetup, `Backend domain ${domainSetup.backendDomain} not yet verified — DNS pending`, "warn");
             }
           }
         }
       }
     } else if (domainSetup.backendVerification === "manual_setup_required") {
-      // Manual Railway â€” treat as verified so it doesn't block overall status
+      // Manual Railway — treat as verified so it doesn't block overall status
       backendVerified = true;
     } else if (!domainSetup.backendProvider || domainSetup.backendProvider === "none") {
       backendVerified = true;
     }
   } catch (e) {
-    console.error("[verifyDomainLogic] Render check error:", e);
+    console.error("[verifyDomainLogic] Render check error:", e.message);
     addLog(domainSetup, `Render check error: ${e.message}`, "error");
   }
 
-  // â”€â”€ Update per-provider verification fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ————————————————————————————————————————————————————————————————————————————————
   domainSetup.frontendVerification = frontendVerified ? "verified" : "pending";
   if (domainSetup.backendVerification !== "manual_setup_required") {
     domainSetup.backendVerification = backendVerified ? "verified" : "pending";

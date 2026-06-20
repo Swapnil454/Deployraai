@@ -1405,7 +1405,12 @@ export default function DomainsPage() {
             </div>
             <div className="flex flex-col">
               <div className="flex items-center gap-2 mb-1">
-                <span className="font-semibold text-white text-[14px]">{d.domain}</span>
+                <span 
+                  className="font-semibold text-white text-[14px] cursor-pointer hover:underline"
+                  onClick={() => window.open(`https://${d.domain}`, '_blank')}
+                >
+                  {d.domain}
+                </span>
                 {d.domainRole === 'primary' && (
                   <span className="bg-emerald-500/10 text-emerald-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide">Primary</span>
                 )}
@@ -1457,7 +1462,7 @@ export default function DomainsPage() {
           </div>
 
           {/* Right Section: Buttons */}
-          <div className="flex items-center justify-end gap-2 flex-1 min-w-[150px]">
+          <div className={`flex items-center justify-end gap-2 flex-1 min-w-[150px] ${!projectId ? 'hidden' : ''}`}>
             {['active', 'partially_active', 'degraded', 'verifying'].includes(d.status) && (
               <button 
                 onClick={(e) => { e.stopPropagation(); handleCheckHealth(d.id); }}
