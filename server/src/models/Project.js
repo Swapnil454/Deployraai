@@ -24,6 +24,19 @@ const ProjectSchema = new mongoose.Schema({
     default: 'analyzed' 
   },
 
+  analytics: {
+    enabled: {
+      type: Boolean,
+      default: false,
+    },
+    trackingId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    enabledAt: Date,
+  },
+
   configuration: {
     frontendPlatform: { type: String, enum: ['vercel', 'netlify', 'none'], default: 'none' },
     backendPlatform: { type: String, enum: ['render', 'railway', 'none'], default: 'none' },

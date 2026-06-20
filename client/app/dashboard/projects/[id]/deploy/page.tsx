@@ -31,14 +31,7 @@ export default function DeployPage() {
   const [deploymentsHistory, setDeploymentsHistory] = useState<any[]>([]);
   const [deploying, setDeploying] = useState(false);
 
-  const [domainSetups, setDomainSetups] = useState<any[]>([]);
-  const [rootDomainInput, setRootDomainInput] = useState("");
-  const [addingDomain, setAddingDomain] = useState(false);
-  const [verifyingDomain, setVerifyingDomain] = useState<string | null>(null);
-  const [cloudflareKey, setCloudflareKey] = useState("");
-  const [savingCloudflareKey, setSavingCloudflareKey] = useState(false);
-  const [applyingDns, setApplyingDns] = useState<string | null>(null);
-  const [dnsPreview, setDnsPreview] = useState<any[]>([]);
+
 
   const [monitors, setMonitors] = useState<any[]>([]);
   const [checkingMonitorId, setCheckingMonitorId] = useState<string | null>(null);
@@ -46,7 +39,6 @@ export default function DeployPage() {
   useEffect(() => {
     fetchData();
     fetchDeploymentsHistory();
-    fetchDomains();
     fetchMonitors();
     
     const errorParam = searchParams.get('error');
@@ -89,15 +81,7 @@ export default function DeployPage() {
     } catch (e) { console.error(e); }
   };
 
-  const fetchDomains = async () => {
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/domains`, { credentials: "include" });
-      if (res.ok) {
-        const data = await res.json();
-        setDomainSetups(data);
-      }
-    } catch (e) { console.error(e); }
-  };
+
 
   const fetchMonitors = async () => {
     try {
@@ -179,60 +163,7 @@ export default function DeployPage() {
     }
   };
 
-  const handleAddDomain = async () => {
-    try {
-      setAddingDomain(true);
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/domains`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ rootDomain: rootDomainInput })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setRootDomainInput("");
-        fetchDomains();
-      } else {
-        alert(data.error || "Failed to add domain");
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setAddingDomain(false);
-    }
-  };
 
-  const handleVerifyDomain = async (domainId: string) => {
-    try {
-      setVerifyingDomain(domainId);
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/domains/${domainId}/verify`, {
-        method: "POST",
-        credentials: "include"
-      });
-      if (res.ok) {
-        fetchDomains();
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setVerifyingDomain(null);
-    }
-  };
-
-  const handleDeleteDomain = async (domainId: string) => {
-    if (!confirm("Are you sure you want to delete this domain?")) return;
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/domains/${domainId}`, {
-        method: "DELETE",
-        credentials: "include"
-      });
-      if (res.ok) {
-        fetchDomains();
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
   const handleDisconnect = async () => {
     if (!activeDisconnectProvider) return;
@@ -267,54 +198,6 @@ export default function DeployPage() {
       console.error(e);
     } finally {
       setCheckingMonitorId(null);
-    }
-  };
-
-  const handleConnectCloudflare = async () => {
-    try {
-      setSavingCloudflareKey(true);
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/integrations/cloudflare/connect-api-key`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: "include",
-        body: JSON.stringify({ apiKey: cloudflareKey })
-      });
-      if (res.ok) {
-        setCloudflareKey("");
-        fetchData();
-      } else {
-        const data = await res.json();
-        alert(data.error || "Failed to connect Cloudflare");
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSavingCloudflareKey(false);
-    }
-  };
-
-  const handleApplyCloudflareDns = async (domainId: string, dryRun: boolean = false) => {
-    try {
-      setApplyingDns(domainId);
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/domains/${domainId}/apply-cloudflare-dns?dryRun=${dryRun}`, {
-        method: 'POST',
-        credentials: "include"
-      });
-      const data = await res.json();
-      if (res.ok) {
-        if (dryRun) {
-          setDnsPreview(data.preview || []);
-        } else {
-          setDnsPreview([]);
-          fetchDomains();
-        }
-      } else {
-        alert(data.error || "Failed to apply DNS");
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setApplyingDns(null);
     }
   };
 
@@ -706,259 +589,7 @@ export default function DeployPage() {
           )}
         </div>
 
-        {/* Custom Domain Section */}
-        <div className="mt-8 space-y-6">
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold text-white">Custom Domain</h2>
-          </div>
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
-            <div className="flex gap-4 items-end mb-6">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-zinc-400 mb-2">Root Domain</label>
-                <input 
-                  type="text" 
-                  placeholder="example.com"
-                  value={rootDomainInput}
-                  onChange={(e) => setRootDomainInput(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-800 bg-black p-3 text-sm text-white focus:border-indigo-500 focus:outline-none"
-                />
-              </div>
-              <button 
-                onClick={handleAddDomain}
-                disabled={!rootDomainInput || addingDomain}
-                className="rounded-lg bg-indigo-500 px-6 py-3 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50 flex items-center gap-2"
-              >
-                {addingDomain && <Loader2 className="h-4 w-4 animate-spin" />}
-                Add Domain
-              </button>
-            </div>
-            
-            {domainSetups.length > 0 && (
-              <div className="space-y-6">
-                {domainSetups.map(domain => (
-                  <div key={domain._id} className="rounded-lg border border-zinc-800 bg-black/40 p-4">
-                    {/* Degraded warning banner */}
-                    {domain.status === 'degraded' && (
-                      <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
-                        <span className="mt-0.5 text-amber-400 text-base">⚠️</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-amber-400">Domain Degraded — DNS Records Missing</p>
-                          <p className="text-xs text-amber-300/80 mt-1">
-                            Your DNS records appear to have been removed. Re-add all the records in the table below to your DNS provider, then click <strong>Verify Again</strong>.
-                          </p>
-                        </div>
-                      </div>
-                    )}
 
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <h3 className="text-md font-medium text-white">{domain.rootDomain}</h3>
-                        <p className="text-xs text-zinc-500 mt-1">
-                          Status:{' '}
-                          <span className={`uppercase font-medium ${
-                            domain.status === 'active' ? 'text-emerald-400' :
-                            domain.status === 'degraded' ? 'text-amber-400' :
-                            domain.status === 'failed' ? 'text-red-400' :
-                            'text-indigo-400'
-                          }`}>{domain.status}</span>
-                        </p>
-                        {domain.degradedAt && domain.status === 'degraded' && (
-                          <p className="text-xs text-zinc-600 mt-0.5">Degraded since {new Date(domain.degradedAt).toLocaleString()}</p>
-                        )}
-                        {domain.lastVerifiedAt && (
-                          <p className="text-xs text-zinc-600 mt-0.5">Last checked: {new Date(domain.lastVerifiedAt).toLocaleString()}</p>
-                        )}
-                      </div>
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={() => handleVerifyDomain(domain._id)}
-                          disabled={verifyingDomain === domain._id}
-                          className={`rounded px-3 py-1 text-xs font-medium disabled:opacity-50 flex items-center gap-2 ${
-                            domain.status === 'degraded'
-                              ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30'
-                              : 'bg-zinc-800 text-white hover:bg-zinc-700'
-                          }`}
-                        >
-                          {verifyingDomain === domain._id && <Loader2 className="h-3 w-3 animate-spin" />}
-                          {domain.status === 'degraded' ? 'Verify Again' : 'Verify DNS'}
-                        </button>
-                        <button 
-                          onClick={() => handleDeleteDomain(domain._id)}
-                          className="rounded border border-red-500/20 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400 hover:bg-red-500/20 flex items-center gap-2"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                    
-                    <div className="grid md:grid-cols-2 gap-4 mb-4">
-                      <div className={`p-3 rounded border ${
-                        domain.frontendVerification === 'verified' && domain.status !== 'degraded'
-                          ? 'bg-emerald-500/5 border-emerald-500/20'
-                          : domain.status === 'degraded' ? 'bg-amber-500/5 border-amber-500/20'
-                          : 'bg-zinc-900 border-zinc-800'
-                      }`}>
-                        <p className="text-xs text-zinc-500 mb-1">Frontend ({domain.frontendProvider || 'Vercel'})</p>
-                        <p className="text-sm text-white">https://{domain.frontendDomain}</p>
-                        <p className="text-sm text-white mt-1">https://{domain.wwwDomain}</p>
-                        <p className={`text-xs mt-2 ${
-                          domain.frontendVerification === 'verified' && domain.status !== 'degraded' ? 'text-emerald-400' :
-                          domain.status === 'degraded' ? 'text-amber-400' : 'text-zinc-500'
-                        }`}>
-                          {domain.status === 'degraded' ? '⚠ DNS missing' : `Verification: ${domain.frontendVerification}`}
-                        </p>
-                      </div>
-                      <div className={`p-3 rounded border ${
-                        domain.backendVerification === 'verified'
-                          ? 'bg-emerald-500/5 border-emerald-500/20'
-                          : 'bg-zinc-900 border-zinc-800'
-                      }`}>
-                        <p className="text-xs text-zinc-500 mb-1">Backend ({domain.backendProvider})</p>
-                        <p className="text-sm text-white">https://{domain.backendDomain}</p>
-                        <p className={`text-xs mt-2 ${
-                          domain.backendVerification === 'verified' ? 'text-emerald-400' : 'text-zinc-500'
-                        }`}>Verification: {domain.backendVerification}</p>
-                        {domain.backendVerification === 'manual_setup_required' && (
-                          <p className="text-xs text-amber-400 mt-1">Manual setup required in {domain.backendProvider} dashboard.</p>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {domain.dnsRecords && domain.dnsRecords.length > 0 && (
-                      <div>
-                        <p className="text-sm font-medium text-zinc-400 mb-2">
-                          {domain.status === 'degraded' ? '⚠ DNS Records to Restore:' : 'DNS Records to Add:'}
-                        </p>
-                        <div className="overflow-x-auto rounded border border-zinc-800">
-                          <table className="w-full text-left text-sm text-zinc-400">
-                            <thead className="bg-zinc-900 text-xs uppercase text-zinc-500">
-                              <tr>
-                                <th className="px-4 py-2">Type</th>
-                                <th className="px-4 py-2">Name</th>
-                                <th className="px-4 py-2">Value</th>
-                                <th className="px-4 py-2">Purpose</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-zinc-800 bg-black/40">
-                              {domain.dnsRecords.map((rec: any, i: number) => {
-                                const rowKey = `${domain._id}-${i}`;
-                                const isCopied = copiedRecord === rowKey;
-                                return (
-                                  <tr key={i} className="group">
-                                    <td className="px-4 py-2.5 font-mono">
-                                      <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-xs">{rec.type}</span>
-                                    </td>
-                                    <td className="px-4 py-2.5 font-mono text-zinc-300">{rec.name}</td>
-                                    <td className="px-4 py-2.5 font-mono text-indigo-300">
-                                      <div className="flex items-center gap-2">
-                                        <span className="break-all">{rec.value}</span>
-                                        <button
-                                          onClick={() => handleCopyRecord(rec.value, rowKey)}
-                                          className={`shrink-0 rounded p-1 transition-colors ${
-                                            isCopied
-                                              ? 'text-emerald-400 bg-emerald-500/10'
-                                              : 'text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 opacity-0 group-hover:opacity-100'
-                                          }`}
-                                          title={isCopied ? 'Copied!' : 'Copy value'}
-                                        >
-                                          {isCopied
-                                            ? <Check className="h-3.5 w-3.5" />
-                                            : <Copy className="h-3.5 w-3.5" />}
-                                        </button>
-                                      </div>
-                                    </td>
-                                    <td className="px-4 py-2.5 capitalize text-zinc-500 text-xs">{rec.purpose?.replace('_', ' ')}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-
-                    {(['pending_dns', 'verifying', 'partially_active', 'degraded', 'failed', 'draft', 'provider_added'].includes(domain.status)) && (
-                      <div className="mt-4 pt-4 border-t border-zinc-800">
-                        <div className="flex items-center justify-between mb-3">
-                          <h4 className="text-sm font-medium text-white">Cloudflare DNS Automation</h4>
-                          {isCloudflareConnected ? (
-                            <span className="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded">Connected</span>
-                          ) : (
-                            <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-1 rounded">Not connected</span>
-                          )}
-                        </div>
-                        
-                        {!isCloudflareConnected ? (
-                          <div className="flex flex-col gap-2">
-                            <div className="flex gap-2 items-center">
-                              <input 
-                                type="password"
-                                placeholder="Cloudflare API Token..."
-                                value={cloudflareKey}
-                                onChange={(e) => setCloudflareKey(e.target.value)}
-                                className="flex-1 rounded border border-zinc-800 bg-black p-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
-                              />
-                              <button
-                                onClick={handleConnectCloudflare}
-                                disabled={!cloudflareKey || savingCloudflareKey}
-                                className="rounded bg-indigo-500 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-600 disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
-                              >
-                                {savingCloudflareKey && <Loader2 className="h-3 w-3 animate-spin" />}
-                                Connect
-                              </button>
-                            </div>
-                            <p className="text-[11px] text-zinc-500 mt-1">
-                              Create a Custom Token in your <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">Cloudflare Profile</a> with these Permissions:
-                              <br />• <strong>Zone</strong> / <strong>Zone</strong> / <strong>Read</strong>
-                              <br />• <strong>Zone</strong> / <strong>DNS</strong> / <strong>Edit</strong>
-                              <br />Set Zone Resources to <strong>Include</strong> / <strong>All zones</strong> (or specific domain).
-                            </p>
-                          </div>
-                        ) : (
-                          <div>
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => handleApplyCloudflareDns(domain._id, true)}
-                                disabled={applyingDns === domain._id}
-                                className="rounded border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs font-medium text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-50 flex items-center gap-2"
-                              >
-                                {applyingDns === domain._id && <Loader2 className="h-3 w-3 animate-spin" />}
-                                Preview Changes
-                              </button>
-                              
-                              {dnsPreview.length > 0 && applyingDns !== domain._id && (
-                                <button
-                                  onClick={() => handleApplyCloudflareDns(domain._id, false)}
-                                  className="rounded bg-indigo-500 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-600 flex items-center gap-2"
-                                >
-                                  Apply DNS Automatically
-                                </button>
-                              )}
-                            </div>
-                            
-                            {dnsPreview.length > 0 && applyingDns !== domain._id && (
-                              <div className="mt-3 space-y-1">
-                                {dnsPreview.map((p, i) => (
-                                  <div key={i} className="text-xs flex gap-2">
-                                    <span className={`px-1.5 py-0.5 rounded capitalize ${p.action === 'create' ? 'bg-green-500/10 text-green-400' : p.action === 'skip' ? 'bg-zinc-800 text-zinc-400' : p.action === 'conflict' ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>
-                                      {p.action}
-                                    </span>
-                                    <span className="text-zinc-300 font-mono">{p.record}</span>
-                                    <span className="text-zinc-500">- {p.reason}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
 
       </div>
 

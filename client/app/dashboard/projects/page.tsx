@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, LayoutGrid, List, Search, GitBranch, CheckCircle2, MoreHorizontal, Plus, Check, CheckCheck } from "lucide-react";
 import { ProjectAvatar } from "@/components/dashboard/ProjectAvatar";
@@ -11,7 +11,7 @@ const ProductionChecklistStatus = ({ project }: { project: any }) => {
   
   if (!project.configuration || (!hasFrontend && !hasBackend)) {
     hasFrontend = true;
-    hasBackend = true;
+    hasBackend = false;
   }
   
   const totalComponents = (hasFrontend ? 1 : 0) + (hasBackend ? 1 : 0);
@@ -89,6 +89,19 @@ const ProductionChecklistStatus = ({ project }: { project: any }) => {
   );
 };
 
+const formatRelativeTime = (dateString: string) => {
+  if (!dateString) return 'just now';
+  const diffMs = Date.now() - new Date(dateString).getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffDays > 0) return `${diffDays}d ago`;
+  if (diffHours > 0) return `${diffHours}h ago`;
+  if (diffMins > 0) return `${diffMins}m ago`;
+  return `just now`;
+};
+
 export default function ProjectsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState([]);
@@ -97,9 +110,31 @@ export default function ProjectsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
+  const lastUpdated = useRef(Date.now());
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
-    return () => clearTimeout(timer);
+    const now = Date.now();
+    const delay = 300;     // Debounce wait time
+    const maxWait = 1000;  // Throttle limit (maximum wait time before forcing a search)
+
+    if (now - lastUpdated.current >= maxWait) {
+      // Throttle condition met: Force update if maxWait elapsed
+      setDebouncedSearch(searchQuery);
+      lastUpdated.current = now;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    } else {
+      // Standard debounce
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        setDebouncedSearch(searchQuery);
+        lastUpdated.current = Date.now();
+      }, delay);
+    }
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, [searchQuery]);
 
   const fetchProjects = useCallback(async () => {
@@ -209,15 +244,12 @@ export default function ProjectsPage() {
                           </div>
                           
                           <div className="flex items-center gap-2">
-                            {(project.status === 'deployed' || ['success', 'completed'].includes(project.latestDeployment?.status)) ? (
-                              <ProductionChecklistStatus project={project} />
-                            ) : (project.status === 'deploying' || ['queued', 'running'].includes(project.latestDeployment?.status)) ? (
+                            {(project.status === 'deploying' || ['queued', 'running'].includes(project.latestDeployment?.status)) ? (
                               <div className="h-6 w-6 rounded-full border border-zinc-700 flex items-center justify-center bg-black" title="Deploying...">
                                 <Loader2 className="h-3 w-3 text-zinc-400 animate-spin" />
                               </div>
                             ) : (
-                              <div className="h-6 w-6 rounded-full border border-zinc-800 border-dashed flex items-center justify-center bg-black" title="Not deployed yet">
-                              </div>
+                              <ProductionChecklistStatus project={project} />
                             )}
                             <button className="h-6 w-6 rounded-full flex items-center justify-center hover:bg-zinc-800 transition-colors text-zinc-400">
                               <MoreHorizontal className="h-4 w-4" />
@@ -253,7 +285,7 @@ export default function ProjectsPage() {
                               <span className="truncate text-sm font-medium text-zinc-500 italic">No deployments yet</span>
                             )}
                             <div className="flex items-center gap-1.5 text-[13px] font-medium text-zinc-400">
-                              <span>{Math.max(1, Math.floor((Date.now() - new Date(project.updatedAt).getTime()) / (1000 * 60 * 60 * 24)))}d ago</span>
+                              <span>{formatRelativeTime(project.updatedAt)}</span>
                               <span>on</span>
                               <span className="flex items-center gap-1 text-zinc-300 font-medium">
                                 <GitBranch className="h-3.5 w-3.5" /> {project.selectedBranch || 'main'}
@@ -295,7 +327,7 @@ export default function ProjectsPage() {
                           <span className="truncate text-[13px] font-medium text-zinc-500 italic">No deployments yet</span>
                         )}
                         <div className="flex items-center gap-1.5 text-[12px] font-medium text-zinc-500">
-                          <span>{Math.max(1, Math.floor((Date.now() - new Date(project.updatedAt).getTime()) / (1000 * 60 * 60 * 24)))}d ago</span>
+                          <span>{formatRelativeTime(project.updatedAt)}</span>
                           <span>on</span>
                           <span className="flex items-center gap-1 text-zinc-400 font-medium">
                             <GitBranch className="h-3 w-3" /> {project.selectedBranch || 'main'}
@@ -316,15 +348,12 @@ export default function ProjectsPage() {
                         </a>
                         
                         <div className="flex items-center gap-3">
-                          {(project.status === 'deployed' || ['success', 'completed'].includes(project.latestDeployment?.status)) ? (
-                            <ProductionChecklistStatus project={project} />
-                          ) : (project.status === 'deploying' || ['queued', 'running'].includes(project.latestDeployment?.status)) ? (
+                          {(project.status === 'deploying' || ['queued', 'running'].includes(project.latestDeployment?.status)) ? (
                             <div className="h-6 w-6 rounded-full border border-zinc-700 flex items-center justify-center bg-black" title="Deploying...">
                               <Loader2 className="h-3 w-3 text-zinc-400 animate-spin" />
                             </div>
                           ) : (
-                            <div className="h-6 w-6 rounded-full border border-zinc-800 border-dashed flex items-center justify-center bg-black" title="Not deployed yet">
-                            </div>
+                            <ProductionChecklistStatus project={project} />
                           )}
                           <button className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-zinc-800 transition-colors text-zinc-400">
                             <MoreHorizontal className="h-4 w-4" />

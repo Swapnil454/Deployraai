@@ -63,7 +63,7 @@ function LiveMonitorWidget({ deployment, primaryDomain }: { deployment: any, pri
   useEffect(() => {
     if (!isDeploymentSuccess) { setHealthStatus('unknown'); return; }
     checkHealth();
-    const interval = setInterval(checkHealth, 30000);
+    const interval = setInterval(checkHealth, 240000);
     return () => clearInterval(interval);
   }, [backendUrl, isDeploymentSuccess]);
 
@@ -209,6 +209,7 @@ export default function DeploymentDetailsPage() {
   const allDomainsToShow = useMemo(() => {
     if (!deployment) return [];
     const applicableCustomDomains = (deployment.customDomains || []).filter((d: any) => {
+      if (d.status !== 'verified') return false;
       if (deployment.type === 'backend') return d.type === 'backend';
       if (deployment.type === 'frontend') return d.type === 'frontend' || d.type === 'www';
       return true;
@@ -494,7 +495,7 @@ export default function DeploymentDetailsPage() {
             {/* Tabs */}
             <div className="flex items-center gap-6">
               <button className="text-white text-[14px] font-medium border-b-2 border-white pb-1.5 -mb-[18px]">Deployment</button>
-              <button className="text-zinc-400 hover:text-zinc-200 text-[14px] font-medium pb-1.5 -mb-[18px] transition-colors" onClick={() => setOpenLogs(true)}>Logs</button>
+              <button className="text-zinc-400 hover:text-zinc-200 text-[14px] font-medium pb-1.5 -mb-[18px] transition-colors" onClick={() => router.push(`/dashboard/logs/${deployment?.projectId?._id || deployment?.projectId}/${deploymentId}`)}>Logs</button>
               <button className="text-zinc-400 hover:text-zinc-200 text-[14px] font-medium pb-1.5 -mb-[18px] transition-colors">Resources</button>
               <button className="text-zinc-400 hover:text-zinc-200 text-[14px] font-medium pb-1.5 -mb-[18px] transition-colors">Source</button>
               <button className="text-zinc-400 hover:text-zinc-200 text-[14px] font-medium pb-1.5 -mb-[18px] transition-colors">Open Graph</button>
@@ -518,7 +519,7 @@ export default function DeploymentDetailsPage() {
                 {copied ? 'Copied' : 'Share'}
               </button>
               
-              <button onClick={() => setOpenLogs(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-800 hover:bg-zinc-900 text-[13px] font-medium text-zinc-300 transition-colors">
+              <button onClick={() => router.push(`/dashboard/logs/${deployment?.projectId?._id || deployment?.projectId}/${deploymentId}`)} className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-800 hover:bg-zinc-900 text-[13px] font-medium text-zinc-300 transition-colors">
                 <List className="h-4 w-4" /> Logs
               </button>
 

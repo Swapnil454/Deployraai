@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Deployment from "../models/Deployment.js";
+import DomainSetup from "../models/DomainSetup.js";
 import Project from "../models/Project.js";
 import ConnectedAccount from "../models/ConnectedAccount.js";
 import { decryptSecret, encryptSecret } from "../utils/encryption.js";
@@ -37,7 +38,8 @@ import {
   getVercelDeployments,
   getVercelProjects,
   getVercelProject,
-  getVercelDeploymentEvents
+  getVercelDeploymentEvents,
+  updateVercelProject
 } from "../services/providers/vercel.service.js";
 import { checkBackendHealth, checkFrontendHealth, checkCors } from "../services/healthCheck.service.js";
 import { sanitizeDeploymentLogs } from "../utils/sanitizeLogs.js";
@@ -149,30 +151,56 @@ export const triggerFrontendDeployment = async (req, res) => {
       { $set: { status: 'failed', errorMessage: 'Superseded', completedAt: new Date() } }
     );
 
-    const deployment = await Deployment.create({
-      userId,
-      projectId,
-      retryOfDeploymentId: req.body?.retryOfDeploymentId || undefined,
-      type: 'frontend',
-      serviceName: 'frontend',
-      platform,
-      status: 'running',
-      source: { repoFullName: project.repoFullName, branch: project.selectedBranch, rootDirectory: project.configuration.frontendRoot }
-    });
+    const frontendPrimary = await DomainSetup.findOne({ projectId, targetService: 'frontend', isPrimary: true, status: 'active' });
+    const backendPrimary = await DomainSetup.findOne({ projectId, targetService: 'backend', isPrimary: true, status: 'active' });
+    const allFrontendDomains = await DomainSetup.find({ projectId, targetService: 'frontend', status: 'active' });
+
+    const corsOrigins = [...new Set(allFrontendDomains.map(d => `https://${d.frontendDomain || d.rootDomain}`))].map(o => o.trim()).filter(Boolean);
+    const domainSnapshot = {
+      frontendPrimaryDomain: frontendPrimary ? (frontendPrimary.frontendDomain || frontendPrimary.rootDomain) : undefined,
+      backendPrimaryDomain: backendPrimary ? (backendPrimary.backendDomain || backendPrimary.rootDomain) : undefined,
+      corsOrigins,
+      apiUrl: backendPrimary ? `https://${backendPrimary.backendDomain || backendPrimary.rootDomain}` : undefined
+    };
+
+    let deployment;
+    if (req.body?.existingDeploymentId) {
+      deployment = await Deployment.findById(req.body.existingDeploymentId);
+      if (deployment) {
+        deployment.status = 'running';
+        deployment.domainSnapshot = domainSnapshot;
+        await deployment.save();
+      }
+    }
+    if (!deployment) {
+      deployment = await Deployment.create({
+        userId,
+        projectId,
+        retryOfDeploymentId: req.body?.retryOfDeploymentId || undefined,
+        type: 'frontend',
+        serviceName: 'frontend',
+        platform,
+        status: 'running',
+        triggerReason: req.body?.triggerReason || 'manual',
+        orchestrationGroupId: req.body?.orchestrationGroupId || undefined,
+        domainSnapshot,
+        source: { repoFullName: project.repoFullName, branch: project.selectedBranch, rootDirectory: project.configuration.frontendRoot }
+      });
+    }
 
     res.status(202).json({ success: true, deploymentId: deployment._id, message: "Deployment started" });
 
     // Auto-inject the known backend URL into frontend env vars
     (async () => {
       const injected = [];
-      // 1. Find the latest successful backend deployment for this project to get its URL
+      // 1. Find the backend URL (prefer primary domain snapshot, fallback to latest backend deployment URL)
       const latestBackend = await Deployment.findOne({
         projectId,
         type: 'backend',
         status: { $in: ['success', 'completed'] }
       }).sort({ createdAt: -1 });
 
-      const backendUrl = latestBackend?.finalSummary?.backendUrl || latestBackend?.deploymentUrl || latestBackend?.providerUrl;
+      const backendUrl = domainSnapshot.apiUrl || latestBackend?.finalSummary?.backendUrl || latestBackend?.deploymentUrl || latestBackend?.providerUrl;
       if (backendUrl) {
         // Find the right env key
         const possibleKeys = ['VITE_API_URL', 'REACT_APP_API_URL', 'NEXT_PUBLIC_API_URL', 'API_URL'];
@@ -184,9 +212,14 @@ export const triggerFrontendDeployment = async (req, res) => {
         injected.push({ key: frontendApiUrlKey, value: backendUrl });
       }
 
+      // 2. Inject the frontend App URL if a primary domain exists
+      if (domainSnapshot.frontendPrimaryDomain) {
+        injected.push({ key: 'NEXT_PUBLIC_APP_URL', value: `https://${domainSnapshot.frontendPrimaryDomain}` });
+      }
+
       const frontendRes = await executeFrontendDeployment(deployment, project, injected);
       
-      const frontendUrl = frontendRes?.url;
+      const frontendUrl = domainSnapshot.frontendPrimaryDomain ? `https://${domainSnapshot.frontendPrimaryDomain}` : frontendRes?.url;
       if (frontendUrl) {
          let backendCorsKey = 'CORS_ORIGIN';
          if (project.configuration.envVariables?.backend) {
@@ -237,6 +270,18 @@ export const triggerBackendDeployment = async (req, res) => {
       { $set: { status: 'failed', errorMessage: 'Superseded', completedAt: new Date() } }
     );
 
+    const frontendPrimary = await DomainSetup.findOne({ projectId, targetService: 'frontend', isPrimary: true, status: 'active' });
+    const backendPrimary = await DomainSetup.findOne({ projectId, targetService: 'backend', isPrimary: true, status: 'active' });
+    const allFrontendDomains = await DomainSetup.find({ projectId, targetService: 'frontend', status: 'active', domainRole: { $in: ['primary', 'alias'] } });
+
+    const corsOrigins = [...new Set(allFrontendDomains.map(d => `https://${d.frontendDomain || d.rootDomain}`))].map(o => o.trim()).filter(Boolean);
+    const domainSnapshot = {
+      frontendPrimaryDomain: frontendPrimary ? (frontendPrimary.frontendDomain || frontendPrimary.rootDomain) : undefined,
+      backendPrimaryDomain: backendPrimary ? (backendPrimary.backendDomain || backendPrimary.rootDomain) : undefined,
+      corsOrigins,
+      apiUrl: backendPrimary ? `https://${backendPrimary.backendDomain || backendPrimary.rootDomain}` : undefined
+    };
+
     const deployment = await Deployment.create({
       userId,
       projectId,
@@ -245,35 +290,50 @@ export const triggerBackendDeployment = async (req, res) => {
       serviceName: 'backend',
       platform,
       status: 'running',
+      triggerReason: req.body?.triggerReason || 'manual',
+      orchestrationGroupId: req.body?.orchestrationGroupId || undefined,
+      domainSnapshot,
       source: { repoFullName: project.repoFullName, branch: project.selectedBranch, rootDirectory: project.configuration.backendRoot }
     });
 
     res.status(202).json({ success: true, deploymentId: deployment._id, message: "Deployment started" });
 
-    // Auto-inject the known frontend URL into backend env vars as CORS_ORIGIN
+    // Auto-inject the frontend CORS origins and backend API URL
     (async () => {
       const injected = [];
-      // Find the latest successful frontend deployment for this project
-      const latestFrontend = await Deployment.findOne({
-        projectId,
-        type: 'frontend',
-        status: { $in: ['success', 'completed'] }
-      }).sort({ createdAt: -1 });
+      
+      // 1. Inject CORS_ORIGINS using the array of all verified frontend domains
+      const possibleKeys = ['CLIENT_URL', 'FRONTEND_URL', 'ORIGIN', 'CORS_ORIGINS', 'CORS_ORIGIN'];
+      let corsKey = 'CORS_ORIGINS';
+      if (project.configuration.envVariables?.backend) {
+        const existingKey = project.configuration.envVariables.backend.find(e => possibleKeys.includes(e.key));
+        if (existingKey) corsKey = existingKey.key;
+      }
+      
+      if (domainSnapshot.corsOrigins.length > 0) {
+        injected.push({ key: corsKey, value: domainSnapshot.corsOrigins.join(',') });
+      } else {
+        // Fallback to latest frontend deployment
+        const latestFrontend = await Deployment.findOne({
+          projectId,
+          type: 'frontend',
+          status: { $in: ['success', 'completed'] }
+        }).sort({ createdAt: -1 });
 
-      const frontendUrl = latestFrontend?.finalSummary?.frontendUrl || latestFrontend?.deploymentUrl;
-      if (frontendUrl) {
-        const possibleKeys = ['CLIENT_URL', 'FRONTEND_URL', 'ORIGIN', 'CORS_ORIGIN'];
-        let corsKey = 'CORS_ORIGIN';
-        if (project.configuration.envVariables?.backend) {
-          const existingKey = project.configuration.envVariables.backend.find(e => possibleKeys.includes(e.key));
-          if (existingKey) corsKey = existingKey.key;
+        const frontendUrl = latestFrontend?.finalSummary?.frontendUrl || latestFrontend?.deploymentUrl;
+        if (frontendUrl) {
+          injected.push({ key: corsKey, value: frontendUrl });
         }
-        injected.push({ key: corsKey, value: frontendUrl });
+      }
+
+      // 2. Inject PUBLIC_API_URL if a primary backend domain exists
+      if (domainSnapshot.backendPrimaryDomain) {
+        injected.push({ key: 'PUBLIC_API_URL', value: `https://${domainSnapshot.backendPrimaryDomain}` });
       }
 
       const backendRes = await executeBackendDeployment(deployment, project, injected);
       
-      const backendUrl = backendRes?.url;
+      const backendUrl = domainSnapshot.backendPrimaryDomain ? `https://${domainSnapshot.backendPrimaryDomain}` : backendRes?.url;
       if (backendUrl) {
          let frontendApiUrlKey = 'NEXT_PUBLIC_API_URL';
          if (project.configuration.envVariables?.frontend) {
@@ -341,6 +401,7 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
          if (injectedEnvVars && injectedEnvVars.length > 0) {
             envVars.push(...injectedEnvVars);
          }
+
         await appendLog('success', 'env_setup', 'Frontend variables prepared');
 
         let providerServiceId = project.configuration.vercelProjectId;
@@ -349,35 +410,48 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
         const safeRepoName = (project.repoName || 'app').toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
         let projectName = `${safeRepoName}-deployra`;
 
+        let installCommandPayload = project.configuration.installCommand;
+
+
         try {
           if (providerServiceId) {
              const previousDeploy = await Deployment.findOne({ projectId, platform: { $in: ['vercel', 'multiple'] }, providerServiceId }).sort({ createdAt: -1 });
              const previousEnvSnapshot = previousDeploy?.configSnapshot?.envSnapshotStr || "";
-             const currentEnvSnapshot = JSON.stringify([...(project.configuration.envVariables?.frontend || []), ...(injectedEnvVars || [])]);
-             const envChanged = previousEnvSnapshot !== currentEnvSnapshot || (injectedEnvVars && injectedEnvVars.length > 0);
+             const currentEnvSnapshot = JSON.stringify(envVars);
+             const envChanged = previousEnvSnapshot !== currentEnvSnapshot;
 
+             await appendLog('info', 'project_update', `Found existing Vercel project (${projectName}). Preparing redeployment...`);
+
+             // Always update env vars and project settings before redeploying
              if (envChanged) {
-               await appendLog('info', 'project_update', `Found existing Vercel project (${projectName}). Updating environment variables...`);
                await updateVercelEnvVars(token, providerServiceId, envVars);
-               
-               await appendLog('info', 'deploy_trigger', 'Environment changed. Triggering redeployment on existing Vercel project...');
-               try {
-                 const deployRes = await triggerVercelDeploy(token, {
-                   name: projectName,
-                   projectName: projectName,
-                   repoFullName: project.repoFullName,
-                   branch: project.selectedBranch
-                 });
-                 deploymentUrl = deployRes.url ? `https://${deployRes.url}` : null;
-                 await appendLog('success', 'deploy_trigger', 'Vercel redeployment started successfully');
-               } catch (deployErr) {
-                 await appendLog('warning', 'deploy_trigger', 'API trigger failed, assuming manual Vercel Git trigger...', { error: deployErr.message });
-               }
-             } else {
-               await appendLog('info', 'project_update', `Found existing Vercel project (${projectName}). Environment variables unchanged.`);
-               await appendLog('info', 'deploy_trigger', 'No configuration changes detected. Fetching latest deployment status...');
-               // We don't trigger a new deployment, we just let the polling loop fetch the latest one
+               await appendLog('info', 'project_update', 'Environment variables updated on Vercel.');
              }
+             
+             // Ensure the installCommand is restored to its original value, clearing any previous build-time injection.
+             await updateVercelProject(token, providerServiceId, { installCommand: installCommandPayload || null });
+             await appendLog('info', 'project_update', 'Build settings synchronized on Vercel.');
+
+
+             // ALWAYS trigger an actual deployment on Vercel
+             await appendLog('info', 'deploy_trigger', 'Triggering redeployment on Vercel...');
+             try {
+               const deployRes = await triggerVercelDeploy(token, {
+                 name: projectName,
+                 projectId: providerServiceId,
+                 repoFullName: project.repoFullName,
+                 branch: project.selectedBranch
+               });
+               if (deployRes.url) {
+                 deploymentUrl = `https://${deployRes.url}`;
+               }
+               await appendLog('success', 'deploy_trigger', 'Vercel redeployment triggered successfully! Build is now running.');
+             } catch (deployErr) {
+               console.error('[DeployAI] Vercel triggerVercelDeploy FAILED:', deployErr.message, '| providerServiceId:', providerServiceId, '| repoFullName:', project.repoFullName, '| branch:', project.selectedBranch);
+               await appendLog('error', 'deploy_trigger', 'Vercel API trigger failed: ' + deployErr.message);
+               // Do not silently continue — surface the error to the user
+             }
+
           } else {
              await appendLog('info', 'project_create', 'Creating new Vercel Project linked to GitHub...');
              try {
@@ -387,7 +461,7 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
                  branch: project.selectedBranch,
                  rootDir: project.configuration.frontendRoot,
                  buildCommand: project.configuration.frontendBuildCommand,
-                 installCommand: project.configuration.installCommand,
+                 installCommand: installCommandPayload,
                  outputDirectory: project.configuration.outputDirectory,
                  envVars
                });
@@ -413,7 +487,7 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
              try {
                const deployRes = await triggerVercelDeploy(token, {
                  name: projectName,
-                 projectName: projectName,
+                 projectId: providerServiceId,
                  repoFullName: project.repoFullName,
                  branch: project.selectedBranch
                });
@@ -436,21 +510,30 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
           let isCompleted = false;
           let finalStatus = 'failed';
           let finalErrorMessage = null;
+          let screenshotUrlForCapture = null;
+          // Record timestamp just before we poll so we only accept NEW deployments
+          const pollStartTime = Date.now() - 30000; // Allow 30s window in case trigger was slightly earlier
           
           for (let i = 0; i < 60; i++) { // Max 5 minutes
             await new Promise(resolve => setTimeout(resolve, 5000));
             try {
               const deploysResp = await getVercelDeployments(token, providerServiceId);
-              if (deploysResp && deploysResp.deployments && deploysResp.deployments.length > 0) {
-                const latest = deploysResp.deployments[0];
-                const status = latest.readyState; // QUEUED, BUILDING, ERROR, INITIALIZING, READY, CANCELED
+              if (deploysResp && deploysResp.deployments) {
+                // Only look at deployments created after we started this deployment job
+                const validDeployments = deploysResp.deployments.filter(d => d.createdAt > pollStartTime);
+                if (validDeployments.length > 0) {
+                  const latest = validDeployments[0];
+                  const status = latest.readyState; // QUEUED, BUILDING, ERROR, INITIALIZING, READY, CANCELED
                 
                 if (status === 'READY') {
                   isCompleted = true;
                   finalStatus = 'completed';
                   await appendLog('success', 'deploy_trigger', 'Vercel deployment is READY and successful!');
                   if (latest.url) {
-                    deploymentUrl = `https://${latest.url}`;
+                    screenshotUrlForCapture = `https://${latest.url}`;
+                    deploymentUrl = deployment.domainSnapshot?.frontendPrimaryDomain 
+                      ? `https://${deployment.domainSnapshot.frontendPrimaryDomain}` 
+                      : `https://${latest.url}`;
                     let currentDashUrl = `https://vercel.com/${user.username}/${projectName}`;
                     if (latest.inspectorUrl) {
                       currentDashUrl = latest.inspectorUrl;
@@ -513,6 +596,7 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
                   break;
                 }
               }
+              }
             } catch (pollErr) {
               console.error("Vercel polling error:", pollErr.message);
             }
@@ -533,6 +617,11 @@ const executeFrontendDeployment = async (deployment, project, injectedEnvVars = 
             });
             
             if (finalStatus === 'completed' && deploymentUrl) {
+               await appendLog('success', '', `==> Your service is live 🎉`);
+               await appendLog('success', '', `==> `);
+               await appendLog('success', '', `==> ///////////////////////////////////////////////////////////`);
+               await appendLog('success', '', `==> `);
+               await appendLog('success', '', `==> Available at your primary URL ${deploymentUrl}`);
                captureDeploymentScreenshot(deployment._id, deploymentUrl).catch(console.error);
             }
           }
@@ -679,14 +768,25 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
 
           // Railway doesn't have a simple poll API; mark as completed immediately after trigger
           // (Railway will actually build asynchronously on their side, which is expected)
+          let railwayUrl = null;
+          if (deployment.domainSnapshot?.backendPrimaryDomain) {
+            railwayUrl = `https://${deployment.domainSnapshot.backendPrimaryDomain}`;
+          }
+
           if (deployment.type !== 'full') {
             await Deployment.findByIdAndUpdate(deployment._id, {
               status: 'completed',
-              completedAt: new Date()
+              completedAt: new Date(),
+              ...(railwayUrl ? { deploymentUrl: railwayUrl, 'finalSummary.backendUrl': railwayUrl } : {})
             });
+            await appendLog('success', '', `==> Your service is live 🎉`);
+            await appendLog('success', '', `==> `);
+            await appendLog('success', '', `==> ///////////////////////////////////////////////////////////`);
+            await appendLog('success', '', `==> `);
+            await appendLog('success', '', `==> Available at your primary URL ${railwayUrl || `https://railway.app/project/${providerProjectId}`}`);
           }
           
-          return { url: null, dashboardUrl: `https://railway.app/project/${providerProjectId}` };
+          return { url: railwayUrl, dashboardUrl: `https://railway.app/project/${providerProjectId}` };
         } else if (platform === 'render') {
           await appendLog('info', 'provider_connection', 'Connecting to Render...');
           const token = await getRenderToken(userId);
@@ -771,18 +871,30 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
           }
           
           // Re-fetch service to get current URL
+          let providerRawUrl = null;
           try {
             const svcDetails = await getRenderService(token, providerServiceId);
             const rawUrl = svcDetails?.serviceDetails?.url || svcDetails?.service?.url || svcDetails?.url;
-            if (rawUrl) pollRenderUrl = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+            if (rawUrl) {
+              providerRawUrl = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+              pollRenderUrl = providerRawUrl;
+            }
+            
+            if (deployment.domainSnapshot?.backendPrimaryDomain) {
+              pollRenderUrl = `https://${deployment.domainSnapshot.backendPrimaryDomain}`;
+            }
           } catch(e) {
             console.warn('Failed to fetch Render service URL after polling:', e.message);
+            if (deployment.domainSnapshot?.backendPrimaryDomain) {
+              pollRenderUrl = `https://${deployment.domainSnapshot.backendPrimaryDomain}`;
+            }
           }
 
           await Deployment.findByIdAndUpdate(deployment._id, {
              providerServiceId,
              providerUrl: `https://dashboard.render.com/web/${providerServiceId}`,
-             providerDashboardUrl: `https://dashboard.render.com/web/${providerServiceId}`
+             providerDashboardUrl: `https://dashboard.render.com/web/${providerServiceId}`,
+             ...(providerRawUrl ? { providerDeploymentUrl: providerRawUrl, 'finalSummary.providerBackendUrl': providerRawUrl } : {})
           });
 
           const isRenderSuccess = finalRenderStatus === 'live' || finalRenderStatus === 'unknown';
@@ -797,9 +909,17 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
               ...(pollRenderUrl ? { deploymentUrl: pollRenderUrl, 'finalSummary.backendUrl': pollRenderUrl } : {})
             });
             if (!isRenderSuccess) throw new Error(renderErrorMsg);
+            
+            if (isRenderSuccess && pollRenderUrl) {
+               await appendLog('success', '', `==> Your service is live 🎉`);
+               await appendLog('success', '', `==> `);
+               await appendLog('success', '', `==> ///////////////////////////////////////////////////////////`);
+               await appendLog('success', '', `==> `);
+               await appendLog('success', '', `==> Available at your primary URL ${pollRenderUrl}`);
+            }
           }
           
-          return { url: pollRenderUrl, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
+          return { url: pollRenderUrl, providerUrl: providerRawUrl, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
         }
       } catch (err) {
         console.error('Background deploy error:', err);
@@ -874,11 +994,13 @@ export const triggerFullDeployment = async (req, res) => {
          let backendDashboardUrl = backendRes?.dashboardUrl;
          
          const DomainSetup = (await import('../models/DomainSetup.js')).default;
-         const domainSetup = await DomainSetup.findOne({ projectId, status: 'active' });
+         const backendPrimary = await DomainSetup.findOne({ projectId, targetService: 'backend', isPrimary: true, status: 'active' });
+         const frontendPrimary = await DomainSetup.findOne({ projectId, targetService: 'frontend', isPrimary: true, status: 'active' });
+         const allFrontendDomains = await DomainSetup.find({ projectId, targetService: 'frontend', status: 'active' });
 
-         if (domainSetup && domainSetup.backendDomain) {
-             backendUrl = `https://${domainSetup.backendDomain}`;
-             await appendLog('info', 'custom_domain', `Overriding backend URL with active custom domain: ${backendUrl}`);
+         if (backendPrimary && (backendPrimary.backendDomain || backendPrimary.rootDomain)) {
+             backendUrl = `https://${backendPrimary.backendDomain || backendPrimary.rootDomain}`;
+             await appendLog('info', 'custom_domain', `Overriding backend URL with active primary domain: ${backendUrl}`);
          } else if (!backendUrl) {
              await appendLog('warning', 'deploying_backend', 'Backend deployed but URL was not returned. Proceeding anyway.');
              backendUrl = "http://unknown-backend-url";
@@ -896,14 +1018,17 @@ export const triggerFullDeployment = async (req, res) => {
          
          await appendLog('info', 'deploying_frontend', `Step 2: Executing Frontend Deployment with ${frontendApiUrlKey} injected`);
          const injectedFrontendEnv = [{ key: frontendApiUrlKey, value: backendUrl }];
+         if (frontendPrimary) {
+           injectedFrontendEnv.push({ key: 'NEXT_PUBLIC_APP_URL', value: `https://${frontendPrimary.frontendDomain || frontendPrimary.rootDomain}` });
+         }
          let frontendRes = await executeFrontendDeployment(deployment, project, injectedFrontendEnv);
          let providerFrontendUrl = frontendRes?.url;
          let frontendUrl = providerFrontendUrl;
          let frontendDashboardUrl = frontendRes?.dashboardUrl;
 
-         if (domainSetup && domainSetup.frontendDomain) {
-             frontendUrl = `https://${domainSetup.frontendDomain}`;
-             await appendLog('info', 'custom_domain', `Overriding frontend URL with active custom domain: ${frontendUrl}`);
+         if (frontendPrimary && (frontendPrimary.frontendDomain || frontendPrimary.rootDomain)) {
+             frontendUrl = `https://${frontendPrimary.frontendDomain || frontendPrimary.rootDomain}`;
+             await appendLog('info', 'custom_domain', `Overriding frontend URL with active primary domain: ${frontendUrl}`);
          } else if (!frontendUrl) {
              await appendLog('warning', 'deploying_frontend', 'Frontend deployed but URL was not returned. Proceeding anyway.');
              frontendUrl = "http://unknown-frontend-url";
@@ -915,13 +1040,19 @@ export const triggerFullDeployment = async (req, res) => {
          // Find the correct Backend ENV key for Frontend URL (e.g., CLIENT_URL, CORS_ORIGIN)
          let backendCorsKey = 'CORS_ORIGIN';
          if (project.configuration.envVariables && project.configuration.envVariables.backend) {
-            const possibleBackendKeys = ['CLIENT_URL', 'FRONTEND_URL', 'ORIGIN', 'CORS_ORIGIN'];
+            const possibleBackendKeys = ['CLIENT_URL', 'FRONTEND_URL', 'ORIGIN', 'CORS_ORIGIN', 'CORS_ORIGINS'];
             const existingBackendKey = project.configuration.envVariables.backend.find(e => possibleBackendKeys.includes(e.key));
             if (existingBackendKey) backendCorsKey = existingBackendKey.key;
          }
 
+         const corsOrigins = [...new Set(allFrontendDomains.map(d => `https://${d.frontendDomain || d.rootDomain}`))].map(o => o.trim()).filter(Boolean);
+         const corsValue = corsOrigins.length > 0 ? corsOrigins.join(',') : frontendUrl;
+
          await appendLog('info', 'updating_backend_cors', `Step 3: Redeploying Backend with ${backendCorsKey} injected`);
-         const injectedBackendEnv = [{ key: backendCorsKey, value: frontendUrl }];
+         const injectedBackendEnv = [{ key: backendCorsKey, value: corsValue }];
+         if (backendPrimary) {
+           injectedBackendEnv.push({ key: 'PUBLIC_API_URL', value: `https://${backendPrimary.backendDomain || backendPrimary.rootDomain}` });
+         }
          await executeBackendDeployment(deployment, project, injectedBackendEnv);
 
          // Sync automatically linked URLs back to Database so Dashboard UI is accurate
@@ -1036,6 +1167,17 @@ export const triggerFullDeployment = async (req, res) => {
          await appendLog(finalStatus === 'success' ? 'success' : 'error', 'checking_full_stack', `Full-stack deployment orchestration completed with status: ${finalStatus}`);
          
          if (finalStatus === 'success') {
+             await appendLog('success', '', `==> Your service is live 🎉`);
+             await appendLog('success', '', `==> `);
+             await appendLog('success', '', `==> ///////////////////////////////////////////////////////////`);
+             await appendLog('success', '', `==> `);
+             if (frontendUrl) {
+                 await appendLog('success', '', `==> Available at your primary URL ${frontendUrl}`);
+             }
+             if (backendUrl) {
+                 await appendLog('success', '', `==> Available at your backend URL ${backendUrl}`);
+             }
+             
              try {
                  await createDefaultMonitors(projectId, frontendUrl, backendUrl);
              } catch (monitorErr) {

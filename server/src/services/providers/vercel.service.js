@@ -75,6 +75,10 @@ export const createVercelProject = async (token, config) => {
   return vercelAPI(token, 'POST', '/v9/projects', payload);
 };
 
+export const updateVercelProject = async (token, projectId, updates) => {
+  return vercelAPI(token, 'PATCH', `/v9/projects/${projectId}`, updates);
+};
+
 export const updateVercelEnvVars = async (token, projectId, envVars) => {
   // Vercel v10 /env?upsert=true will update existing or create new
   if (!envVars || envVars.length === 0) return;
@@ -108,7 +112,7 @@ export const triggerVercelDeploy = async (token, config) => {
 
   const payload = {
     name: config.name,
-    project: config.projectName, // The string ID or name of the project
+    project: config.projectId || config.projectName, // Vercel project ID or name
     target: "production",
     gitSource: {
       type: "github",
@@ -126,7 +130,7 @@ export const triggerVercelDeploy = async (token, config) => {
 
 export const getVercelDeployments = async (token, projectId) => {
   // Fetch latest deployments for the project
-  return vercelAPI(token, 'GET', `/v6/deployments?projectId=${projectId}&limit=1`);
+  return vercelAPI(token, 'GET', `/v6/deployments?projectId=${projectId}&limit=5`);
 };
 
 export const deleteVercelDeployment = async (token, deploymentId) => {
@@ -196,6 +200,11 @@ export const forceVerifyVercelDomain = async (token, projectId, domain) => {
 
 export const removeVercelDomain = async (token, projectId, domain) => {
   const data = await vercelAPI(token, 'DELETE', `/v9/projects/${projectId}/domains/${domain}`);
+  return data;
+};
+
+export const updateVercelDomain = async (token, projectId, domain, options) => {
+  const data = await vercelAPI(token, 'PATCH', `/v9/projects/${projectId}/domains/${domain}`, options);
   return data;
 };
 

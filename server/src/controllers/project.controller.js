@@ -228,6 +228,17 @@ export const getProject = async (req, res) => {
       return res.status(404).json({ error: "Project not found" });
     }
 
+    const Deployment = (await import('../models/Deployment.js')).default;
+    const latestDeployment = await Deployment.findOne({ 
+      projectId: project._id,
+      type: { $in: ['frontend', 'full'] },
+      status: { $in: ['success', 'completed'] }
+    }).sort({ createdAt: -1 }).lean();
+    
+    if (latestDeployment) {
+      project.latestDeployment = latestDeployment;
+    }
+
     // Decrypt values for the frontend as per user request
     if (project.configuration?.envVariables) {
       const safeEnv = (envs) => envs?.map(env => ({
@@ -301,5 +312,233 @@ export const updateProjectConfig = async (req, res) => {
   } catch (error) {
     console.error("Update Config Error:", error.message);
     res.status(500).json({ error: "Failed to save configuration" });
+  }
+};
+
+import crypto from "crypto";
+
+function generateTrackingId() {
+  return `da_${crypto.randomBytes(16).toString("hex")}`;
+}
+
+export const enableAnalytics = async (req, res) => {
+  try {
+    const project = await Project.findOne({
+      _id: req.params.projectId,
+      userId: req.user.userId,
+    });
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    if (!project.analytics?.trackingId) {
+      project.analytics = {
+        enabled: true,
+        trackingId: generateTrackingId(),
+        enabledAt: new Date(),
+      };
+    } else {
+      project.analytics.enabled = true;
+      project.analytics.enabledAt = new Date();
+    }
+
+    await project.save();
+
+    res.json({
+      success: true,
+      trackingId: project.analytics.trackingId,
+    });
+  } catch (error) {
+    console.error("Enable Analytics Error:", error);
+    res.status(500).json({ success: false, message: "Failed to enable analytics" });
+  }
+};
+
+export const disableAnalytics = async (req, res) => {
+  try {
+    const project = await Project.findOne({
+      _id: req.params.projectId,
+      userId: req.user.userId,
+    });
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    if (project.analytics) {
+      project.analytics.enabled = false;
+      await project.save();
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Disable Analytics Error:", error);
+    res.status(500).json({ success: false, message: "Failed to disable analytics" });
+  }
+};
+
+import AnalyticsEvent from "../models/AnalyticsEvent.js";
+
+function getFromDate(range) {
+  const now = new Date();
+  const map = {
+    "24h": 1,
+    "3d": 3,
+    "7d": 7,
+    "30d": 30,
+  };
+  const days = map[range] || 7;
+  now.setDate(now.getDate() - days);
+  return now;
+}
+
+export const getAnalyticsSummary = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { range = "7d", environment = "all" } = req.query;
+
+    const project = await Project.findOne({
+      _id: projectId,
+      userId: req.user.userId,
+    });
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    const fromDate = getFromDate(range);
+
+    const match = {
+      projectId: project._id,
+      timestamp: { $gte: fromDate },
+    };
+
+    if (environment !== "all") {
+      match.environment = environment;
+    }
+
+    const baseMatch = { ...match, eventType: "page_view" };
+
+    const [
+      pageViews,
+      visitorsResult,
+      bounceResult,
+      timeseries,
+      topPages,
+      topReferrers,
+      topHostnames,
+      topCountries,
+      topDevices,
+      topBrowsers,
+      topOS
+    ] = await Promise.all([
+      AnalyticsEvent.countDocuments(baseMatch),
+      
+      AnalyticsEvent.distinct("visitorHash", baseMatch),
+      
+      AnalyticsEvent.aggregate([
+        { $match: baseMatch },
+        { $group: { _id: "$visitorHash", count: { $sum: 1 } } },
+        { $group: { _id: null, totalVisitors: { $sum: 1 }, bouncedVisitors: { $sum: { $cond: [{ $eq: ["$count", 1] }, 1, 0] } } } }
+      ]),
+
+      AnalyticsEvent.aggregate([
+        { $match: baseMatch },
+        { 
+          $group: { 
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$timestamp" } },
+            visitors: { $addToSet: "$visitorHash" },
+            pageViews: { $sum: 1 }
+          } 
+        },
+        { $project: { date: "$_id", visitors: { $size: "$visitors" }, pageViews: 1, _id: 0 } },
+        { $sort: { date: 1 } }
+      ]),
+
+      AnalyticsEvent.aggregate([
+        { $match: baseMatch },
+        { $group: { _id: "$path", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+      ]),
+
+      AnalyticsEvent.aggregate([
+        { $match: { ...baseMatch, referrer: { $ne: null, $ne: "" } } },
+        { $group: { _id: "$referrer", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+      ]),
+
+      AnalyticsEvent.aggregate([
+        { $match: { ...baseMatch, hostname: { $ne: null, $ne: "" } } },
+        { $group: { _id: "$hostname", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+      ]),
+
+      AnalyticsEvent.aggregate([
+        { $match: { ...baseMatch, country: { $ne: null, $ne: "" } } },
+        { $group: { _id: "$country", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+      ]),
+
+      AnalyticsEvent.aggregate([
+        { $match: { ...baseMatch, device: { $ne: null, $ne: "" } } },
+        { $group: { _id: "$device", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+      ]),
+
+      AnalyticsEvent.aggregate([
+        { $match: { ...baseMatch, browser: { $ne: null, $ne: "" } } },
+        { $group: { _id: "$browser", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+      ]),
+
+      AnalyticsEvent.aggregate([
+        { $match: { ...baseMatch, os: { $ne: null, $ne: "" } } },
+        { $group: { _id: "$os", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+      ])
+    ]);
+
+    const visitors = visitorsResult.length;
+    let bounceRate = 0;
+    if (bounceResult.length > 0 && bounceResult[0].totalVisitors > 0) {
+      bounceRate = Math.round((bounceResult[0].bouncedVisitors / bounceResult[0].totalVisitors) * 100);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        pageViews,
+        visitors,
+        bounceRate,
+        timeseries,
+        topPages,
+        topReferrers,
+        topHostnames,
+        topCountries,
+        topDevices,
+        topBrowsers,
+        topOS
+      },
+    });
+  } catch (error) {
+    console.error("Get Analytics Summary Error:", error);
+    res.status(500).json({ success: false, message: "Failed to get analytics summary" });
   }
 };
