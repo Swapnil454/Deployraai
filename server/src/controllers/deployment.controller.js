@@ -28,6 +28,7 @@ import {
   getRenderService
 } from "../services/providers/render.service.js";
 import { createDefaultMonitors } from '../services/monitoring.service.js';
+import { trackAiUsage } from '../utils/aiTracker.js';
 import {
   getVercelToken,
   getVercelUser,
@@ -1683,6 +1684,9 @@ Response MUST match this exact JSON schema:
     };
 
     const result = await generateWithRetry(prompt);
+    
+    await trackAiUsage(req.user.userId, deployment.projectId, 'deployment_analysis');
+
     let jsonText = result.response.text().trim();
     
     if (jsonText.startsWith('```json')) {

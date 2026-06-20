@@ -146,6 +146,8 @@ export const analyzeProject = async (req, res) => {
 };
 
 import Project from "../models/Project.js";
+import Deployment from "../models/Deployment.js";
+import AiUsage from "../models/AiUsage.js";
 import { encryptSecret } from "../utils/encryption.js";
 
 export const createProject = async (req, res) => {
@@ -540,5 +542,176 @@ export const getAnalyticsSummary = async (req, res) => {
   } catch (error) {
     console.error("Get Analytics Summary Error:", error);
     res.status(500).json({ success: false, message: "Failed to get analytics summary" });
+  }
+};
+
+export const getProjectUsage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { range = "current" } = req.query; 
+
+    // Calculate startTime and endTime based on range
+    let startTime;
+    const now = new Date();
+    
+    if (range === "7d") {
+      now.setDate(now.getDate() - 7);
+      startTime = now.toISOString();
+    } else if (range === "30d") {
+      now.setDate(now.getDate() - 30);
+      startTime = now.toISOString();
+    } else {
+      // current billing cycle (approx start of month)
+      now.setDate(1);
+      startTime = now.toISOString();
+    }
+    const endTime = new Date().toISOString();
+
+    const project = await Project.findOne({
+      _id: id,
+      userId: req.user.userId,
+    });
+
+    if (!project) {
+      return res.status(404).json({ success: false, message: "Project not found" });
+    }
+
+    const platform = project.configuration?.backendPlatform;
+
+    if (platform === 'render') {
+      const { getRenderToken, getRenderUsage, getRenderCPU, getRenderRequests } = await import('../services/providers/render.service.js');
+      const token = await getRenderToken(req.user.userId);
+      if (!token) return res.status(400).json({ success: false, message: "Render not connected" });
+      
+      const serviceId = project.configuration.renderServiceId;
+      if (!serviceId) return res.status(400).json({ success: false, message: "No Render service linked" });
+      
+      try {
+        const [bandwidthRes, cpuRes, requestsRes] = await Promise.all([
+          getRenderUsage(token, serviceId, startTime, endTime).catch((err) => ({ error: err.message, usage: [] })),
+          getRenderCPU(token, serviceId, startTime, endTime).catch((err) => ({ error: err.message, usage: [] })),
+          getRenderRequests(token, serviceId, startTime, endTime).catch((err) => ({ error: err.message, usage: [] }))
+        ]);
+
+        return res.json({ 
+          success: true, 
+          platform: 'render', 
+          usage: {
+            bandwidth: bandwidthRes,
+            cpu: cpuRes,
+            requests: requestsRes
+          }
+        });
+      } catch (err) {
+        return res.status(500).json({ success: false, message: "Error fetching Render metrics", error: err.message });
+      }
+
+    } else if (platform === 'railway') {
+      const { getRailwayToken, getRailwayUsage } = await import('../services/providers/railway.service.js');
+      const token = await getRailwayToken(req.user.userId);
+      if (!token) return res.status(400).json({ success: false, message: "Railway not connected" });
+      
+      const railwayProjectId = project.configuration.railwayProjectId;
+      if (!railwayProjectId) return res.status(400).json({ success: false, message: "No Railway project linked" });
+      
+      const usage = await getRailwayUsage(token, railwayProjectId, startTime, endTime);
+      return res.json({ success: true, platform: 'railway', usage });
+
+    } else {
+      return res.status(400).json({ success: false, message: "Project does not have a supported backend platform for usage tracking." });
+    }
+
+  } catch (error) {
+    console.error("Get Project Usage Error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch usage metrics", error: error.message });
+  }
+};
+
+export const getAiUsage = async (req, res) => {
+  try {
+    const { projectId, range = '14d', feature = 'total' } = req.query;
+    
+    let query = { userId: req.user.userId };
+    if (projectId) {
+      query.projectId = projectId;
+    }
+    if (feature && feature !== 'total') {
+      query.feature = feature;
+    }
+
+    // Determine time boundary and grouping
+    let days = 14;
+    let isHourly = false;
+    if (range === '24h') {
+      days = 1;
+      isHourly = true;
+    } else if (range === '3d') days = 3;
+    else if (range === '7d') days = 7;
+    else if (range === '15d') days = 15;
+    else if (range === '30d') days = 30;
+    else if (range === '60d') days = 60;
+    else if (range === 'max') days = 90;
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    
+    // For 24h, we want exactly 24 hours back
+    if (isHourly) {
+      startDate.setTime(Date.now() - 24 * 60 * 60 * 1000);
+    }
+    
+    query.createdAt = { $gte: startDate };
+
+    const usages = await AiUsage.find(query).sort({ createdAt: -1 }).populate('projectId', 'repoName repoFullName');
+    
+    // Calculate chart data map
+    const chartDataMap = {};
+    
+    if (isHourly) {
+      // Initialize last 24 hours
+      for (let i = 23; i >= 0; i--) {
+        const d = new Date();
+        d.setHours(d.getHours() - i, 0, 0, 0); // start of that hour
+        const dateStr = d.toISOString(); // e.g. "2023-10-01T14:00:00.000Z"
+        chartDataMap[dateStr] = { date: dateStr, value: 0 };
+      }
+    } else {
+      // Initialize days
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toISOString().split('T')[0];
+        chartDataMap[dateStr] = { date: dateStr, value: 0 };
+      }
+    }
+
+    let totalUsage = 0;
+
+    usages.forEach(u => {
+      totalUsage += 1;
+      
+      let key = "";
+      if (isHourly) {
+        const d = new Date(u.createdAt);
+        d.setMinutes(0, 0, 0);
+        key = d.toISOString();
+      } else {
+        key = u.createdAt.toISOString().split('T')[0];
+      }
+
+      if (chartDataMap[key] !== undefined) {
+        chartDataMap[key].value += 1;
+      }
+    });
+
+    const chartData = Object.values(chartDataMap);
+    
+    // We only need recentActivity for the 'total' feature to avoid duplicate logs in the UI
+    const recentActivity = feature === 'total' ? usages.slice(0, 10) : [];
+
+    return res.json({ success: true, total: totalUsage, chartData, recentActivity });
+  } catch (error) {
+    console.error("Get AI Usage Error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch AI usage metrics", error: error.message });
   }
 };
