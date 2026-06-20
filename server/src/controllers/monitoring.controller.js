@@ -97,7 +97,19 @@ export const getProjectMonitorSummary = async (req, res) => {
     const project = await Project.findOne({ _id: projectId, userId: req.user.userId });
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    const monitors = await Monitor.find({ projectId });
+    let monitors = await Monitor.find({ projectId });
+    
+    // Auto-create monitors if they don't exist for this project
+    if (monitors.length === 0) {
+      const { createDefaultMonitors } = await import('../services/monitoring.service.js');
+      try {
+        await createDefaultMonitors(projectId);
+        monitors = await Monitor.find({ projectId });
+      } catch (err) {
+        console.error("Failed to auto-create monitors in summary:", err);
+      }
+    }
+
     const summary = {
       frontendUptime: 0,
       backendUptime: 0,

@@ -29,7 +29,6 @@ const vercelAPI = async (token, method, endpoint, body = null) => {
   }
 
   if (!response.ok) {
-    console.error(`[VercelAPI] ${method} ${endpoint} failed with ${response.status}:`, text.substring(0, 500));
     throw new Error(data.error?.message || `Vercel API Error: ${response.status}`);
   }
 
@@ -201,6 +200,11 @@ export const forceVerifyVercelDomain = async (token, projectId, domain) => {
 
 export const removeVercelDomain = async (token, projectId, domain) => {
   const data = await vercelAPI(token, 'DELETE', `/v9/projects/${projectId}/domains/${domain}`);
+  return data;
+};
+
+export const updateVercelDomain = async (token, projectId, domain, options) => {
+  const data = await vercelAPI(token, 'PATCH', `/v9/projects/${projectId}/domains/${domain}`, options);
   return data;
 };
 

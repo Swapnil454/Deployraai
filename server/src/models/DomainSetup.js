@@ -31,6 +31,12 @@ const DomainSetupSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  targetService: {
+    type: String,
+    enum: ["frontend", "backend", "both"],
+    required: true,
+    default: "both"
+  },
   frontendDomain: String,
   wwwDomain: String,
   backendDomain: String,
@@ -53,9 +59,32 @@ const DomainSetupSchema = new mongoose.Schema({
       "partially_active",
       "degraded",   // Was active; DNS records were subsequently removed
       "failed",
+      "removed"
     ],
     default: "draft",
     index: true,
+  },
+
+  isPrimary: {
+    type: Boolean,
+    default: false,
+  },
+  domainRole: {
+    type: String,
+    enum: ["primary", "alias", "redirect"],
+    default: "alias",
+  },
+  redirectTo: {
+    type: String,
+    default: null,
+  },
+  providerRedirectConfigured: {
+    type: Boolean,
+    default: false,
+  },
+  redirectStatusCode: {
+    type: Number,
+    default: 308,
   },
 
   frontendVerification: {
@@ -72,6 +101,22 @@ const DomainSetupSchema = new mongoose.Schema({
   // Health tracking
   consecutiveFailures: { type: Number, default: 0 },
   degradedAt:          { type: Date },
+
+  healthCheck: {
+    status: {
+      type: String,
+      enum: ["unknown", "healthy", "warning", "failed"],
+      default: "unknown"
+    },
+    checkedAt: Date,
+    httpStatus: Number,
+    sslValid: Boolean,
+    dnsResolved: Boolean,
+    redirectValid: Boolean,
+    responseTimeMs: Number,
+    message: String,
+    lastErrorCode: String
+  },
 
   // Redirect tracking
   isRedirect:     { type: Boolean, default: false },
@@ -94,5 +139,11 @@ const DomainSetupSchema = new mongoose.Schema({
 // (checked inside addCustomDomain) for maximum compatibility.
 DomainSetupSchema.index({ rootDomain: 1, status: 1 });          // fast health-cron queries
 DomainSetupSchema.index({ projectId: 1, rootDomain: 1 });       // idempotency lookup
+
+// Ensure only one active primary domain exists per targetService in a project
+DomainSetupSchema.index(
+  { projectId: 1, targetService: 1, isPrimary: 1 },
+  { unique: true, partialFilterExpression: { status: "active", isPrimary: true } }
+);
 
 export default mongoose.model("DomainSetup", DomainSetupSchema);
