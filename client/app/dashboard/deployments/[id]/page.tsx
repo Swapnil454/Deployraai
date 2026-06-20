@@ -63,7 +63,7 @@ function LiveMonitorWidget({ deployment, primaryDomain }: { deployment: any, pri
   useEffect(() => {
     if (!isDeploymentSuccess) { setHealthStatus('unknown'); return; }
     checkHealth();
-    const interval = setInterval(checkHealth, 30000);
+    const interval = setInterval(checkHealth, 240000);
     return () => clearInterval(interval);
   }, [backendUrl, isDeploymentSuccess]);
 

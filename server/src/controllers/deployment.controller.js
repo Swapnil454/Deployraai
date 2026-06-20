@@ -219,7 +219,7 @@ export const triggerFrontendDeployment = async (req, res) => {
 
       const frontendRes = await executeFrontendDeployment(deployment, project, injected);
       
-      const frontendUrl = frontendRes?.url;
+      const frontendUrl = domainSnapshot.frontendPrimaryDomain ? `https://${domainSnapshot.frontendPrimaryDomain}` : frontendRes?.url;
       if (frontendUrl) {
          let backendCorsKey = 'CORS_ORIGIN';
          if (project.configuration.envVariables?.backend) {
@@ -333,7 +333,7 @@ export const triggerBackendDeployment = async (req, res) => {
 
       const backendRes = await executeBackendDeployment(deployment, project, injected);
       
-      const backendUrl = backendRes?.url;
+      const backendUrl = domainSnapshot.backendPrimaryDomain ? `https://${domainSnapshot.backendPrimaryDomain}` : backendRes?.url;
       if (backendUrl) {
          let frontendApiUrlKey = 'NEXT_PUBLIC_API_URL';
          if (project.configuration.envVariables?.frontend) {
@@ -871,10 +871,14 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
           }
           
           // Re-fetch service to get current URL
+          let providerRawUrl = null;
           try {
             const svcDetails = await getRenderService(token, providerServiceId);
             const rawUrl = svcDetails?.serviceDetails?.url || svcDetails?.service?.url || svcDetails?.url;
-            if (rawUrl) pollRenderUrl = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+            if (rawUrl) {
+              providerRawUrl = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+              pollRenderUrl = providerRawUrl;
+            }
             
             if (deployment.domainSnapshot?.backendPrimaryDomain) {
               pollRenderUrl = `https://${deployment.domainSnapshot.backendPrimaryDomain}`;
@@ -889,7 +893,8 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
           await Deployment.findByIdAndUpdate(deployment._id, {
              providerServiceId,
              providerUrl: `https://dashboard.render.com/web/${providerServiceId}`,
-             providerDashboardUrl: `https://dashboard.render.com/web/${providerServiceId}`
+             providerDashboardUrl: `https://dashboard.render.com/web/${providerServiceId}`,
+             ...(providerRawUrl ? { providerDeploymentUrl: providerRawUrl, 'finalSummary.providerBackendUrl': providerRawUrl } : {})
           });
 
           const isRenderSuccess = finalRenderStatus === 'live' || finalRenderStatus === 'unknown';
@@ -914,7 +919,7 @@ const executeBackendDeployment = async (deployment, project, injectedEnvVars = [
             }
           }
           
-          return { url: pollRenderUrl, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
+          return { url: pollRenderUrl, providerUrl: providerRawUrl, dashboardUrl: `https://dashboard.render.com/web/${providerServiceId}` };
         }
       } catch (err) {
         console.error('Background deploy error:', err);

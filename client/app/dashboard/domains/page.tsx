@@ -936,18 +936,20 @@ export default function DomainsPage() {
               The DNS records at your provider must match the following records to verify and connect your domain.
             </p>
           </div>
-          <button 
-            onClick={() => handleVerifyDomain(d.id)}
-            disabled={verifyingDomain === d.id}
-            className={`rounded px-3 py-1.5 text-[13px] font-medium disabled:opacity-50 flex items-center gap-2 ${
-              d.status === 'degraded'
-                ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30'
-                : 'bg-zinc-800 text-white hover:bg-zinc-700'
-            }`}
-          >
-            {verifyingDomain === d.id && <Loader2 className="h-3 w-3 animate-spin" />}
-            {d.status === 'degraded' ? 'Verify Again' : 'Verify DNS'}
-          </button>
+          {d.status !== 'active' && (
+            <button 
+              onClick={() => handleVerifyDomain(d.id)}
+              disabled={verifyingDomain === d.id}
+              className={`rounded px-3 py-1.5 text-[13px] font-medium disabled:opacity-50 flex items-center gap-2 ${
+                d.status === 'degraded'
+                  ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30'
+                  : 'bg-zinc-800 text-white hover:bg-zinc-700'
+              }`}
+            >
+              {verifyingDomain === d.id && <Loader2 className="h-3 w-3 animate-spin" />}
+              {d.status === 'degraded' ? 'Verify Again' : 'Verify DNS'}
+            </button>
+          )}
         </div>
 
         {/* DNS Records Table */}
@@ -1360,7 +1362,7 @@ export default function DomainsPage() {
       return renderEditDomainRow(d);
     }
     const isProvider = d.domain.includes('.vercel.app') || d.domain.includes('.deployai.app');
-    const isValid = ['active', 'partially_active', 'verifying'].includes(d.status) || isProvider;
+    const isValid = ['active', 'partially_active'].includes(d.status) || isProvider;
     const isRedirect = d.domainRole === 'redirect';
     const redirectTarget = d.redirectTo || `www.${d.domain}`;
     
@@ -1420,12 +1422,15 @@ export default function DomainsPage() {
               </div>
               <div className="flex items-center gap-2">
                 {!isValid ? (
-                  <>
+                  d.status === 'verifying' ? (
+                    <span className="inline-flex items-center bg-blue-500/10 text-blue-400 text-[11px] px-2 py-0.5 rounded-full font-medium tracking-wide gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Verifying Configuration
+                    </span>
+                  ) : (
                     <span className="inline-flex items-center bg-red-500/10 text-red-500 text-[11px] px-2 py-0.5 rounded-full font-medium tracking-wide">
                       Invalid Configuration
                     </span>
-                    
-                  </>
+                  )
                 ) : (
                   <span className="text-zinc-400 text-[13px]">
                     Valid Configuration
@@ -1464,15 +1469,17 @@ export default function DomainsPage() {
               </button>
             )}
             
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                router.push(`/dashboard/domains/${d.id}/analytics?projectId=${d.projectId || projectId}&url=${encodeURIComponent(d.domain)}`);
-              }} 
-              className={`px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors shadow-sm whitespace-nowrap shrink-0 bg-black text-zinc-300 border border-zinc-800 hover:text-white hover:border-zinc-700`}
-            >
-              Analytics
-            </button>
+            {isValid && (
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  router.push(`/dashboard/domains/${d.id}/analytics?projectId=${d.projectId || projectId}&url=${encodeURIComponent(d.domain)}`);
+                }} 
+                className={`px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors shadow-sm whitespace-nowrap shrink-0 bg-black text-zinc-300 border border-zinc-800 hover:text-white hover:border-zinc-700`}
+              >
+                Analytics
+              </button>
+            )}
             <button 
               onClick={(e) => {
                 e.stopPropagation();

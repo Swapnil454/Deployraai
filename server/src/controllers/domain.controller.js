@@ -283,10 +283,30 @@ export const addCustomDomain = async (req, res) => {
       } catch (err) {
         console.error("Render add domain error:", err);
         addLog(domainSetup, `Render registration failed: ${err.message}`, "warn");
+        
+        // Extract render-verify if already registered to another user
+        const match = err.message.match(/render-verify-[a-zA-Z0-9]+/);
+        if (match && err.message.includes('another user')) {
+           domainSetup.dnsRecords.push({
+             type: "TXT",
+             name: `render-verify.${backendDomain}`,
+             value: match[0],
+             purpose: "backend_verification"
+           });
+        }
       } finally {
         let renderUrl = latestDeployment?.finalSummary?.backendUrl || "onrender.com";
         renderUrl = renderUrl.replace(/^https?:\/\//, "");
-        domainSetup.dnsRecords.push({ type: "CNAME", name: backendDomain === rootDomain ? "@" : "api", value: renderUrl, purpose: "backend" });
+        
+        let beName = "@";
+        const parts = backendDomain.split('.');
+        if (parts.length > 2 && !['co.uk', 'com.au', 'org.uk'].includes(parts.slice(-2).join('.'))) {
+           beName = parts.slice(0, -2).join('.');
+        } else if (backendDomain !== rootDomain) {
+           beName = "api";
+        }
+
+        domainSetup.dnsRecords.push({ type: "CNAME", name: beName, value: renderUrl, purpose: "backend" });
       }
     } else if (isBackend && project.configuration.backendPlatform === "railway" && backendServiceId) {
       domainSetup.backendVerification = "manual_setup_required";
@@ -438,8 +458,8 @@ export const getAllDomains = async (req, res) => {
           status: { $in: ['success', 'completed'] }
         }).sort({ createdAt: -1 }).lean();
 
-        if (beDep && beDep.finalSummary?.backendUrl) {
-           const beUrl = beDep.finalSummary.backendUrl.replace(/^https?:\/\//, '');
+        if (beDep && (beDep.finalSummary?.providerBackendUrl || beDep.finalSummary?.backendUrl)) {
+           const beUrl = (beDep.finalSummary.providerBackendUrl || beDep.finalSummary.backendUrl).replace(/^https?:\/\//, '');
            if (!existingDomainNames.has(beUrl)) {
                               const beMonitor = allMonitors.find(m => m.projectId.toString() === project._id.toString() && m.type === 'backend');
                const beHealth = beMonitor ? (beMonitor.status === 'online' ? 'Healthy' : (beMonitor.status === 'offline' ? 'Failing' : 'Degraded')) : undefined;
@@ -593,6 +613,29 @@ export const verifyDomainLogic = async (domainSetup, { fromCron = false } = {}) 
                 if (matched) {
                   domainId = matched.id || matched.customDomain?.id;
                   domainSetup.providerBackendDomainId = domainId;
+                } else {
+                  // Try adding it if it was never successfully added (e.g., previously failed)
+                  const { addRenderCustomDomain } = await import("../services/providers/render.service.js");
+                  try {
+                    const rData = await addRenderCustomDomain(token, backendServiceId, domainSetup.backendDomain);
+                    if (rData && rData.id) {
+                      domainId = rData.id;
+                      domainSetup.providerBackendDomainId = domainId;
+                    }
+                  } catch (addErr) {
+                    addLog(domainSetup, `Failed to attach domain to Render: ${addErr.message}`, "error");
+                    const match = addErr.message.match(/render-verify-[a-zA-Z0-9]+/);
+                    if (match && addErr.message.includes('another user')) {
+                      if (!domainSetup.dnsRecords.find(r => r.purpose === 'backend_verification')) {
+                          domainSetup.dnsRecords.push({
+                            type: "TXT",
+                            name: `render-verify.${domainSetup.backendDomain}`,
+                            value: match[0],
+                            purpose: "backend_verification"
+                          });
+                      }
+                    }
+                  }
                 }
               }
             } catch (err) {
@@ -661,6 +704,7 @@ export const verifyDomainLogic = async (domainSetup, { fromCron = false } = {}) 
     const wasDegraded  = prevStatus === "degraded";
 
     domainSetup.status             = "active";
+    domainSetup.dnsRecords.forEach(r => r.status = 'verified');
     await logDomainActivity({ domainSetupId: domainSetup._id, projectId: domainSetup.projectId, userId: domainSetup.userId, action: "dns_verified", status: "success", message: "DNS verification succeeded" });
     domainSetup.consecutiveFailures = 0;
     domainSetup.degradedAt         = undefined;
@@ -670,19 +714,66 @@ export const verifyDomainLogic = async (domainSetup, { fromCron = false } = {}) 
     }
 
     if (!wasActive && !wasDegraded) {
-      // First time going active â€” spin up monitors
+      // First time going active
       try {
         await createDefaultMonitors(domainSetup.projectId);
       } catch (err) {
         console.error("[verifyDomainLogic] Failed to auto-create monitors:", err);
       }
+      
+      // Auto-promote to primary if it's the first domain for this service
+      try {
+        const otherActiveCount = await DomainSetup.countDocuments({
+          projectId: domainSetup.projectId,
+          targetService: domainSetup.targetService,
+          status: 'active',
+          _id: { $ne: domainSetup._id }
+        });
+        
+        if (otherActiveCount === 0) {
+          domainSetup.isPrimary = true;
+          domainSetup.domainRole = "primary";
+          addLog(domainSetup, "First verified domain for this service — automatically promoted to primary.", "info");
+          
+          // Trigger deployment asynchronously to inject env vars
+          (async () => {
+             try {
+                const project = await Project.findById(domainSetup.projectId);
+                if (!project) return;
+                
+                const { triggerFrontendService, triggerBackendService } = await import("../services/deployment.service.js");
+                const hasBackend = project.configuration.backendPlatform !== 'none';
+                const hasFrontend = project.configuration.frontendPlatform !== 'none';
+                
+                if (hasBackend && hasFrontend) {
+                    await triggerBackendService(domainSetup.projectId, domainSetup.userId, "domain_make_primary");
+                    await triggerFrontendService(domainSetup.projectId, domainSetup.userId, "domain_make_primary");
+                } else if (hasBackend) {
+                    await triggerBackendService(domainSetup.projectId, domainSetup.userId, "domain_make_primary");
+                } else if (hasFrontend) {
+                    await triggerFrontendService(domainSetup.projectId, domainSetup.userId, "domain_make_primary");
+                }
+             } catch (deployErr) {
+                console.error("[verifyDomainLogic] Auto-deployment failed:", deployErr);
+             }
+          })();
+        }
+      } catch (err) {
+        console.error("[verifyDomainLogic] Failed to auto-promote domain:", err);
+      }
     }
   } else if (partiallyVerified) {
     domainSetup.status = "partially_active";
+    domainSetup.dnsRecords.forEach(r => {
+      if (r.purpose.startsWith('frontend') && frontendVerified) r.status = 'verified';
+      if (r.purpose.startsWith('backend') && backendVerified) r.status = 'verified';
+      if (r.purpose === 'www' && frontendVerified) r.status = 'verified';
+    });
   } else {
     // Nothing verified
     const wasHealthy = prevStatus === "active" || prevStatus === "partially_active";
     domainSetup.consecutiveFailures = (domainSetup.consecutiveFailures || 0) + 1;
+    domainSetup.dnsRecords.forEach(r => r.status = 'pending');
 
     if (wasHealthy || prevStatus === "degraded") {
       // Was previously working â€” now DNS is gone
@@ -866,33 +957,22 @@ export const deleteDomain = async (req, res) => {
       try {
         if (!isPrimary && domainRole === 'alias') {
           if (targetService === 'frontend') {
-             const reqMock = { params: { projectId }, user: { userId }, body: { triggerReason: "domain_removed_cors_update" } };
-             const resMock = { status: () => resMock, json: () => {} };
-             await triggerBackendDeployment(reqMock, resMock);
+             await triggerBackendService(projectId, userId, "domain_removed_cors_update");
           }
           // Backend alias removal needs no redeploy
         } else if (otherDomainsCount === 0) {
           // Only domain for service removed - redeploy backend first, then frontend
-          const reqMock = { params: { projectId }, user: { userId }, body: { triggerReason: "domain_removed" } };
-          
-          let backendDeploymentId = null;
-          const backendResMock = { 
-            status: () => backendResMock, 
-            json: (data) => { if (data.deploymentId) backendDeploymentId = data.deploymentId; } 
-          };
-          
-          await triggerBackendDeployment(reqMock, backendResMock);
+          const backendDep = await triggerBackendService(projectId, userId, "domain_removed");
 
-          if (backendDeploymentId) {
-            const waitResult = await waitForDeploymentHealthy(backendDeploymentId, 'backend');
+          if (backendDep) {
+            const waitResult = await waitForDeploymentHealthy(backendDep.id, 'backend');
             if (waitResult.status === 'failed') {
               console.error(`Backend deployment orchestration failed after domain removal: ${waitResult.message}`);
               return;
             }
           }
           
-          const frontendResMock = { status: () => frontendResMock, json: () => {} };
-          await triggerFrontendDeployment(reqMock, frontendResMock);
+          await triggerFrontendService(projectId, userId, "domain_removed");
         }
       } catch (err) {
         console.error("Delete domain orchestration error:", err);
@@ -1063,8 +1143,15 @@ export const updateDomain = async (req, res) => {
             newDnsRecords.push({ type: 'CNAME', name: 'www', value: 'cname.vercel-dns.com', purpose: 'www' });
           }
           if (isBe && latestDeployment) {
-            const beName = effectiveService === 'backend' ? '@' : 'api';
-            const beUrl = (latestDeployment.finalSummary?.backendUrl || 'onrender.com').replace(/^https?:\/\//, '');
+            let beName = "@";
+            const beDomain = domainSetup.backendDomain || domainSetup.rootDomain;
+            const parts = beDomain.split('.');
+            if (parts.length > 2 && !['co.uk', 'com.au', 'org.uk'].includes(parts.slice(-2).join('.'))) {
+               beName = parts.slice(0, -2).join('.');
+            } else if (effectiveService !== 'backend') {
+               beName = "api";
+            }
+            const beUrl = (latestDeployment.finalSummary?.providerBackendUrl || latestDeployment.finalSummary?.backendUrl || 'onrender.com').replace(/^https?:\/\//, '');
             if (project.configuration?.backendPlatform === 'render') {
               newDnsRecords.push({ type: 'CNAME', name: beName, value: beUrl, purpose: 'backend' });
             } else if (project.configuration?.backendPlatform === 'railway') {
@@ -1208,6 +1295,19 @@ export const makePrimary = async (req, res) => {
 
     try {
       await domain.save();
+      
+      const Project = (await import('../models/Project.js')).default;
+      const project = await Project.findById(projectId);
+      if (project) {
+        if (!project.domainSnapshot) project.domainSnapshot = {};
+        if (targetService === 'frontend' || targetService === 'both') {
+          project.domainSnapshot.frontendPrimaryDomain = domain.frontendDomain || domain.rootDomain;
+        }
+        if (targetService === 'backend' || targetService === 'both') {
+          project.domainSnapshot.backendPrimaryDomain = domain.backendDomain || domain.rootDomain;
+        }
+        await project.save();
+      }
     } catch (saveErr) {
       if (saveErr.code === 11000) {
          // Duplicate key error - another domain just became primary for this service! Fallback to Alias.
@@ -1702,8 +1802,7 @@ export const checkDomainHealth = async (req, res) => {
     domain.healthCheck = health;
     await domain.save();
 
-    const DomainActivityLog = (await import('../models/DomainActivityLog.js')).default;
-    await DomainActivityLog.create({
+    await logDomainActivity({
       domainSetupId: domain._id,
       projectId: domain.projectId,
       userId,

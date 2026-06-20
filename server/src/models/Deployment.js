@@ -98,6 +98,8 @@ const DeploymentSchema = new mongoose.Schema({
   finalSummary: {
     frontendUrl: { type: String },
     backendUrl: { type: String },
+    providerBackendUrl: { type: String },
+    providerFrontendUrl: { type: String },
     frontendDashboardUrl: { type: String },
     backendDashboardUrl: { type: String },
     status: { type: String },

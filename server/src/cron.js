@@ -30,7 +30,7 @@ export const initCron = () => {
       console.log('[Cron:domains] Running domain health checks...');
       try {
         const domains = await DomainSetup.find({
-          status: { $in: ['active', 'partially_active', 'degraded', 'pending_dns'] },
+          status: { $in: ['active', 'partially_active', 'degraded'] },
         });
 
         console.log(`[Cron:domains] Checking ${domains.length} domain(s)...`);
