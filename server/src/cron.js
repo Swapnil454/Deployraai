@@ -23,7 +23,7 @@ export const initCron = () => {
   }
 
   // ── 2. Domain health — every 5 minutes ────────────────────────────────────
-  // Re-verifies all active/partially_active/degraded domains.
+  // Re-verifies all active/partially_active/degraded/pending_dns domains.
   // Transitions to "degraded" if DNS records are gone, recovers to "active" if they return.
   if (!domainHealthCronJob) {
     domainHealthCronJob = cron.schedule('*/5 * * * *', async () => {

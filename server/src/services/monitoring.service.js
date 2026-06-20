@@ -15,22 +15,26 @@ export const createDefaultMonitors = async (projectId, passedFrontendUrl = null,
   if (!project) throw new Error("Project not found");
 
   const domainSetup = await DomainSetup.findOne({ projectId, status: 'active' }).sort({ createdAt: -1 });
-  const latestDeployment = await Deployment.findOne({ projectId, status: 'success', type: 'full' }).sort({ createdAt: -1 });
+  const latestFrontendDeploy = await Deployment.findOne({ projectId, status: { $in: ['success', 'completed'] }, type: { $in: ['frontend', 'full'] } }).sort({ createdAt: -1 });
+  const latestBackendDeploy = await Deployment.findOne({ projectId, status: { $in: ['success', 'completed'] }, type: { $in: ['backend', 'full'] } }).sort({ createdAt: -1 });
 
   let frontendUrl = passedFrontendUrl;
   let backendUrl = passedBackendUrl;
 
-  if (!frontendUrl && domainSetup) {
-    frontendUrl = `https://${domainSetup.frontendDomain}`;
-  } else if (!frontendUrl && latestDeployment) {
-    frontendUrl = latestDeployment.frontendUrl;
+  if (!frontendUrl && domainSetup && domainSetup.targetService !== 'backend') {
+    frontendUrl = `https://${domainSetup.frontendDomain || domainSetup.rootDomain}`;
+  } else if (!frontendUrl && latestFrontendDeploy) {
+    frontendUrl = latestFrontendDeploy.finalSummary?.frontendUrl || latestFrontendDeploy.frontendUrl;
   }
 
-  if (!backendUrl && domainSetup) {
-    backendUrl = `https://${domainSetup.backendDomain}`;
-  } else if (!backendUrl && latestDeployment) {
-    backendUrl = latestDeployment.backendUrl;
+  if (!backendUrl && domainSetup && domainSetup.targetService !== 'frontend') {
+    backendUrl = `https://${domainSetup.backendDomain || domainSetup.rootDomain}`;
+  } else if (!backendUrl && latestBackendDeploy) {
+    backendUrl = latestBackendDeploy.finalSummary?.backendUrl || latestBackendDeploy.backendUrl;
   }
+  
+  if (frontendUrl && !frontendUrl.startsWith('http')) frontendUrl = `https://${frontendUrl}`;
+  if (backendUrl && !backendUrl.startsWith('http')) backendUrl = `https://${backendUrl}`;
 
   if (!frontendUrl && !backendUrl) {
     return { created: 0, message: "No URLs available to monitor" };

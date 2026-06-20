@@ -25,9 +25,9 @@ export const Header = ({ projects }: { projects: any[] }) => {
   const pathname = usePathname() || "";
   const router = useRouter();
   const params = useParams() as any;
-  
   const searchParams = useSearchParams();
-  const currentProjectId = params?.projectId || params?.id || searchParams?.get('projectId');
+  
+  const currentProjectId = params?.projectId || params?.id;
   const currentProject = currentProjectId ? projects.find((p: any) => p._id === currentProjectId) : null;
   
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
