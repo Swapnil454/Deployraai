@@ -65,7 +65,7 @@ export const pauseMonitor = async (req, res) => {
     const monitor = await Monitor.findOneAndUpdate(
       { _id: monitorId, userId: req.user.userId },
       { isEnabled: false, status: 'paused' },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!monitor) return res.status(404).json({ error: "Monitor not found" });
     res.json({ success: true, monitor });
@@ -81,7 +81,7 @@ export const resumeMonitor = async (req, res) => {
     const monitor = await Monitor.findOneAndUpdate(
       { _id: monitorId, userId: req.user.userId },
       { isEnabled: true, status: 'unknown' },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!monitor) return res.status(404).json({ error: "Monitor not found" });
     res.json({ success: true, monitor });

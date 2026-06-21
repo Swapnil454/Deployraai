@@ -248,3 +248,16 @@ export const validateRailwayToken = async (token) => {
     return false;
   }
 };
+
+export const getRailwayUsage = async (token, projectId, startTime, endTime) => {
+  // Railway's public GraphQL schema does not expose detailed granular network usage
+  // natively in the same way Render does. We return a simulated/placeholder structure
+  // or minimal info if public metrics aren't supported. 
+  // We'll wrap this so the frontend knows how to handle it.
+  
+  return {
+    bandwidth: null,
+    message: "Railway network usage metrics are primarily available via the CLI ('railway metrics') or the Railway Dashboard. Detailed API bandwidth access is currently limited.",
+    projectId
+  };
+};

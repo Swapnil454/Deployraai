@@ -12,6 +12,7 @@ const TITLE_MAP: Record<string, string> = {
   "/dashboard/analytics": "Analytics",
   "/dashboard/domains": "Domains",
   "/dashboard/usages": "Usages",
+  "/dashboard/backend-usage": "Backend Usage",
   "/dashboard/workflows": "Workflows",
   "/dashboard/support": "Support",
   "/dashboard/settings": "Settings",
@@ -26,7 +27,7 @@ export const Header = ({ projects }: { projects: any[] }) => {
   const params = useParams() as any;
   const searchParams = useSearchParams();
   
-  const currentProjectId = params?.projectId || params?.id || searchParams.get('projectId');
+  const currentProjectId = params?.projectId || params?.id || searchParams?.get('projectId');
   const currentProject = currentProjectId ? projects.find((p: any) => p._id === currentProjectId) : null;
   
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
@@ -85,6 +86,14 @@ export const Header = ({ projects }: { projects: any[] }) => {
                       router.push('/dashboard/logs');
                     } else if (pathname.startsWith('/dashboard/domains')) {
                       router.push('/dashboard/domains');
+                    } else if (pathname.startsWith('/dashboard/usages')) {
+                      router.push('/dashboard/usages');
+                    } else if (pathname.startsWith('/dashboard/backend-usage')) {
+                      router.push('/dashboard/backend-usage');
+                    } else if (pathname.startsWith('/dashboard/frontend-usage')) {
+                      router.push('/dashboard/frontend-usage');
+                    } else if (pathname.startsWith('/dashboard/workflows')) {
+                      router.push('/dashboard/workflows');
                     } else {
                       router.push('/dashboard/projects');
                     }
@@ -125,6 +134,14 @@ export const Header = ({ projects }: { projects: any[] }) => {
                       onClick={() => {
                         if (pathname.startsWith('/dashboard/deployments/')) {
                           router.push(`${pathname}?projectId=${p._id}`);
+                        } else if (pathname.startsWith('/dashboard/usages')) {
+                          router.push(`/dashboard/usages?projectId=${p._id}`);
+                        } else if (pathname.startsWith('/dashboard/backend-usage')) {
+                          router.push(`/dashboard/backend-usage?projectId=${p._id}`);
+                        } else if (pathname.startsWith('/dashboard/frontend-usage')) {
+                          router.push(`/dashboard/frontend-usage?projectId=${p._id}`);
+                        } else if (pathname.startsWith('/dashboard/workflows')) {
+                          router.push(`/dashboard/workflows?projectId=${p._id}`);
                         } else if (pathname.startsWith('/dashboard/logs')) {
                           router.push(`/dashboard/logs/${p._id}`);
                         } else if (pathname.startsWith('/dashboard/domains')) {

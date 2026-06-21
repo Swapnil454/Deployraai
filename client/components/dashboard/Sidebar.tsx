@@ -13,6 +13,8 @@ const SIDEBAR_ITEMS = [
   { name: "Analytics", path: "/dashboard/analytics" },
   { name: "Domains", path: "/dashboard/domains" },
   { name: "Usages", path: "/dashboard/usages" },
+  { name: "Backend Usage", path: "/dashboard/backend-usage" },
+  { name: "Frontend Usage", path: "/dashboard/frontend-usage" },
   { name: "Workflows", path: "/dashboard/workflows" },
   { name: "Support", path: "/dashboard/support" },
   { name: "Settings", path: "/dashboard/settings" }

@@ -137,3 +137,27 @@ export const validateRenderToken = async (token) => {
     return false;
   }
 };
+
+export const getRenderUsage = async (token, serviceId, startTime, endTime) => {
+  let endpoint = `/metrics/bandwidth?resource=${serviceId}`;
+  if (startTime) endpoint += `&startTime=${startTime}`;
+  if (endTime) endpoint += `&endTime=${endTime}`;
+  
+  return renderAPI(token, 'GET', endpoint);
+};
+
+export const getRenderCPU = async (token, serviceId, startTime, endTime) => {
+  let endpoint = `/metrics/cpu?resource=${serviceId}&resolutionSeconds=86400`;
+  if (startTime) endpoint += `&startTime=${startTime}`;
+  if (endTime) endpoint += `&endTime=${endTime}`;
+  
+  return renderAPI(token, 'GET', endpoint);
+};
+
+export const getRenderRequests = async (token, serviceId, startTime, endTime) => {
+  let endpoint = `/metrics/http-requests?resource=${serviceId}&resolutionSeconds=86400`;
+  if (startTime) endpoint += `&startTime=${startTime}`;
+  if (endTime) endpoint += `&endTime=${endTime}`;
+  
+  return renderAPI(token, 'GET', endpoint);
+};
