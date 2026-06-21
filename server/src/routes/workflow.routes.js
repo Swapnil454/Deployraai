@@ -35,18 +35,88 @@ router.get("/", requireAuth, async (req, res) => {
 
     if (search) {
       const searchRegex = new RegExp(search, 'i');
+      
+      // Find associated deployments that match the search query (e.g. commit messages)
+      const matchingDeps = await mongoose.model('Deployment').find({
+        projectId,
+        $or: [
+          { 'source.commitMessage': searchRegex },
+          { triggerReason: searchRegex }
+        ]
+      }).select('_id');
+      const matchingDepIds = matchingDeps.map(d => d._id.toString());
+
+      const orClauses = [
+        { workflowName: searchRegex },
+        { 'payload.existingBackendDeploymentId': { $in: matchingDepIds } },
+        { 'payload.existingFrontendDeploymentId': { $in: matchingDepIds } },
+        { 'payload.existingFullDeploymentId': { $in: matchingDepIds } }
+      ];
+      
       if (mongoose.Types.ObjectId.isValid(search) && search.length === 24) {
-        filterQuery.$or = [
-          { workflowName: searchRegex },
-          { _id: search }
-        ];
-      } else {
-        filterQuery.workflowName = searchRegex;
+        orClauses.push({ _id: search });
       }
+      
+      filterQuery.$or = orClauses;
     }
 
     const runs = await WorkflowRun.find(filterQuery).sort({ createdAt: -1 }).limit(50);
-    res.json({ counts, runs });
+
+    const enhancedRuns = await Promise.all(runs.map(async (run) => {
+      const obj = run.toObject();
+      const depId = obj.payload?.existingBackendDeploymentId || obj.payload?.existingFrontendDeploymentId || obj.payload?.existingFullDeploymentId;
+      
+      if (depId) {
+        const dep = await mongoose.model('Deployment').findById(depId).select('source triggerReason projectId');
+        if (dep) {
+          let hasCommitMessage = false;
+          if (dep.source?.commitMessage) {
+            hasCommitMessage = true;
+            if (!obj.payload) obj.payload = {};
+            obj.payload.commitMessage = dep.source.commitMessage;
+          } else {
+            // Eagerly fetch from GitHub if missing
+            try {
+              const proj = await mongoose.model('Project').findById(dep.projectId || obj.projectId).select('repoFullName selectedBranch');
+              if (proj && proj.repoFullName) {
+                const User = mongoose.model('User');
+                const user = await User.findById(req.user?.userId || req.user?._id);
+                let githubToken = process.env.GITHUB_ACCESS_TOKEN;
+                if (user?.githubAccessTokenEncrypted) {
+                  const { decryptSecret } = await import('../utils/encryption.js');
+                  githubToken = decryptSecret(user.githubAccessTokenEncrypted) || githubToken;
+                }
+                const branch = dep.source?.branch || proj.selectedBranch || 'main';
+                let url = `https://api.github.com/repos/${proj.repoFullName}/commits/${branch}`;
+                if (dep.source?.commitSha) url = `https://api.github.com/repos/${proj.repoFullName}/commits/${dep.source.commitSha}`;
+                
+                const ghRes = await fetch(url, { headers: { Authorization: `Bearer ${githubToken}`, Accept: 'application/vnd.github.v3+json' } });
+                if (ghRes.ok) {
+                  const data = await ghRes.json();
+                  const commitMessage = data.commit?.message?.split('\n')[0];
+                  if (commitMessage) {
+                     hasCommitMessage = true;
+                     if (!obj.payload) obj.payload = {};
+                     obj.payload.commitMessage = commitMessage;
+                     await mongoose.model('Deployment').updateOne({ _id: dep._id }, { $set: { 'source.commitMessage': commitMessage, 'source.commitSha': data.sha || dep.source?.commitSha } });
+                  }
+                }
+              }
+            } catch (err) {
+              console.error("Failed to fetch commit message for workflow UI:", err);
+            }
+          }
+          
+          if (!hasCommitMessage && dep.triggerReason && dep.triggerReason !== 'manual') {
+            if (!obj.payload) obj.payload = {};
+            obj.payload.triggerReason = dep.triggerReason;
+          }
+        }
+      }
+      return obj;
+    }));
+
+    res.json({ counts, runs: enhancedRuns });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

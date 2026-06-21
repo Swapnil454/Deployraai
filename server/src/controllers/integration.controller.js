@@ -180,7 +180,7 @@ export const callbackProvider = async (req, res) => {
         accessTokenEncrypted: encryptSecret(accessToken),
         connectedAt: new Date()
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     res.redirect(`${returnTo}?connected=${provider}`);
@@ -245,7 +245,7 @@ export const connectApiKey = async (req, res) => {
         accessTokenEncrypted: encryptSecret(apiKey),
         connectedAt: new Date()
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     res.json({ success: true, message: `Successfully connected ${provider}` });

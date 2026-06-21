@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Link2, Loader2, ExternalLink, Copy, Check } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Link2, Loader2, ExternalLink, Copy, Check, AlertCircle } from "lucide-react";
 
 export default function DeployPage() {
   const router = useRouter();
@@ -30,8 +30,13 @@ export default function DeployPage() {
   const [deploymentLogs, setDeploymentLogs] = useState<any>(null);
   const [deploymentsHistory, setDeploymentsHistory] = useState<any[]>([]);
   const [deploying, setDeploying] = useState(false);
+  const [deployingTarget, setDeployingTarget] = useState<string | null>(null);
 
-
+  const [toast, setToast] = useState<{message: string, type: "success"|"error"} | null>(null);
+  const showToast = (message: string, type: "success"|"error") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const [monitors, setMonitors] = useState<any[]>([]);
   const [checkingMonitorId, setCheckingMonitorId] = useState<string | null>(null);
@@ -73,7 +78,10 @@ export default function DeployPage() {
 
   const fetchDeploymentsHistory = async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/deployments`, { credentials: "include" });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/deployments?t=${Date.now()}`, { 
+        credentials: "include",
+        cache: "no-store"
+      });
       if (res.ok) {
         const data = await res.json();
         setDeploymentsHistory(data);
@@ -85,7 +93,10 @@ export default function DeployPage() {
 
   const fetchMonitors = async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/monitors`, { credentials: "include" });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/monitors?t=${Date.now()}`, { 
+        credentials: "include",
+        cache: "no-store"
+      });
       if (res.ok) {
         const data = await res.json();
         setMonitors(data.monitors || []);
@@ -95,29 +106,59 @@ export default function DeployPage() {
 
   useEffect(() => {
     let interval: any;
-    if (activeDeploymentId) {
-      interval = setInterval(async () => {
-        try {
-          const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/deployments/${activeDeploymentId}`, { credentials: "include" });
-          if (res.ok) {
-            const data = await res.json();
-            setDeploymentLogs(data);
-            if (data.status === 'success' || data.status === 'completed' || data.status === 'failed') {
-               clearInterval(interval);
-               fetchDeploymentsHistory();
-               if (data.status === 'success' || data.status === 'completed') {
-                 fetchMonitors();
-               }
+    
+    const fetchActiveDeployment = async () => {
+      try {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/deployments/${activeDeploymentId}?t=${Date.now()}`, { 
+          credentials: "include",
+          cache: "no-store"
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setDeploymentLogs(data);
+          
+          // Real-time update the history list item so it shows progress!
+          setDeploymentsHistory(prev => {
+            const exists = prev.find((d: any) => d._id === data._id);
+            if (exists) {
+              return prev.map((dep: any) => dep._id === data._id ? data : dep);
+            } else {
+              return [data, ...prev].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
             }
+          });
+
+          if (data.status === 'success' || data.status === 'completed' || data.status === 'failed') {
+             clearInterval(interval);
+             fetchDeploymentsHistory();
+             if (data.status === 'success' || data.status === 'completed') {
+               fetchMonitors();
+             }
           }
-        } catch (e) { console.error(e); }
-      }, 2000);
+        }
+      } catch (e) { console.error(e); }
+    };
+
+    if (activeDeploymentId) {
+      fetchActiveDeployment(); // Fetch immediately on mount or ID change
+      interval = setInterval(fetchActiveDeployment, 2000);
     }
     return () => clearInterval(interval);
   }, [activeDeploymentId]);
 
+  const hasOngoingDeployment = deploymentsHistory.some((dep: any) => dep.status === 'queued' || dep.status === 'running');
+
+  useEffect(() => {
+    if (!activeDeploymentId && hasOngoingDeployment) {
+      const ongoing = deploymentsHistory.find((dep: any) => dep.status === 'queued' || dep.status === 'running');
+      if (ongoing) {
+        setActiveDeploymentId(ongoing._id);
+      }
+    }
+  }, [deploymentsHistory, activeDeploymentId, hasOngoingDeployment]);
+
   const triggerDeployment = async (type: 'frontend' | 'backend' | 'full') => {
     try {
+      setDeployingTarget(type);
       setDeploying(true);
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/deployments/${projectId}/${type}`, {
         method: "POST",
@@ -125,7 +166,16 @@ export default function DeployPage() {
       });
       const data = await res.json();
       if (res.ok && data.deploymentId) {
+        // Optimistically show the deployment card instantly
+        setDeploymentLogs({
+          _id: data.deploymentId,
+          type: type,
+          status: 'queued',
+          logs: [{ timestamp: new Date().toISOString(), message: `Initializing ${type} deployment...`, level: 'info', step: 'deploy_trigger' }]
+        });
         setActiveDeploymentId(data.deploymentId);
+        showToast("Deployment started successfully", "success");
+        fetchDeploymentsHistory(); // Refresh history immediately so the new deployment shows up below
       } else {
         alert(data.error || "Failed to start deployment");
       }
@@ -133,6 +183,7 @@ export default function DeployPage() {
       console.error(e);
       alert("Error starting deployment");
     } finally {
+      setDeployingTarget(null);
       setDeploying(false);
     }
   };
@@ -293,10 +344,9 @@ export default function DeployPage() {
                     </div>
                     <button 
                       onClick={() => triggerDeployment('frontend')}
-                      disabled={!isFrontendConnected || deploying}
+                      disabled={!isFrontendConnected || deploying || hasOngoingDeployment}
                       className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {deploying && !activeDeploymentId ? <Loader2 className="h-4 w-4 animate-spin inline mr-2" /> : null}
                       Deploy Frontend
                     </button>
                   </div>
@@ -318,10 +368,9 @@ export default function DeployPage() {
                     </div>
                     <button 
                       onClick={() => triggerDeployment('backend')}
-                      disabled={!isBackendConnected || deploying}
+                      disabled={!isBackendConnected || deploying || hasOngoingDeployment}
                       className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {deploying && !activeDeploymentId ? <Loader2 className="h-4 w-4 animate-spin inline mr-2" /> : null}
                       Deploy Backend
                     </button>
                   </div>
@@ -341,10 +390,9 @@ export default function DeployPage() {
                       </div>
                       <button 
                         onClick={() => triggerDeployment('full')}
-                        disabled={!isFrontendConnected || !isBackendConnected || deploying}
+                        disabled={!isFrontendConnected || !isBackendConnected || deploying || hasOngoingDeployment}
                         className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {deploying && !activeDeploymentId ? <Loader2 className="h-4 w-4 animate-spin inline mr-2" /> : null}
                         Deploy Full Stack
                       </button>
                     </div>
@@ -421,12 +469,38 @@ export default function DeployPage() {
           </div>
         )}
 
+        {/* Instant Loading Card while POST request is running */}
+        {deploying && !activeDeploymentId && (
+          <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 animate-pulse">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-semibold text-white">Deployment Logs</h2>
+              <span className="text-sm font-medium text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20 capitalize">
+                Current Step: Initializing
+              </span>
+            </div>
+            <div className="flex justify-between items-center mb-4 text-sm">
+              <span className="text-zinc-400 capitalize">{deployingTarget} deployment • Preparing...</span>
+              <div className="flex items-center gap-4">
+                <span className="px-3 py-1 rounded-full text-xs font-medium uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 animate-pulse">
+                  STARTING
+                </span>
+              </div>
+            </div>
+            <div className="bg-black border border-zinc-800 rounded-lg p-4 h-64 overflow-y-auto font-mono text-sm space-y-2">
+               <div className="flex gap-3 text-zinc-500">
+                 <span>[{new Date().toLocaleTimeString()}]</span>
+                 <span className="text-indigo-400">Initiating {deployingTarget} deployment pipeline...</span>
+               </div>
+            </div>
+          </div>
+        )}
+
         {/* Logs Panel */}
         {activeDeploymentId && deploymentLogs && (
           <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-semibold text-white">Deployment Logs</h2>
-              {deploymentLogs.logs.length > 0 && (
+              {deploymentLogs.logs.length > 0 && deploymentLogs.logs[deploymentLogs.logs.length - 1].step && (
                  <span className="text-sm font-medium text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20 capitalize">
                     Current Step: {deploymentLogs.logs[deploymentLogs.logs.length - 1].step.replace(/_/g, ' ')}
                  </span>
@@ -641,6 +715,14 @@ export default function DeployPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed top-6 right-6 px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 text-sm font-medium z-50 transition-all ${toast.type === "success" ? "bg-emerald-500/90 text-white border border-emerald-400" : "bg-red-500/90 text-white border border-red-400"}`}>
+          {toast.type === "success" ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+          {toast.message}
         </div>
       )}
 

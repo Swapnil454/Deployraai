@@ -83,7 +83,7 @@ export const initCron = () => {
                 lockOwner
               }
             },
-            { new: true } // Return the locked document
+            { returnDocument: 'after' } // Return the locked document
           );
 
           if (!run) {

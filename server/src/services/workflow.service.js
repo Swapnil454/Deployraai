@@ -63,12 +63,12 @@ export const triggerWorkflow = async (projectId, name, payload, existingRunId = 
 
   const step = {
     run: async (stepName, fn, options = {}) => {
-      const { maxAttempts = 1, backoff = '30s', timeout } = options;
+      const { maxAttempts = 1, backoff = '30s', timeout, cache = true } = options;
       
       const stepState = run.ledger[stepName] || { attempts: 0 };
       
-      // Deterministic replay: if already completed, return cached result
-      if (stepState.status === 'completed') {
+      // Deterministic replay: if already completed and cache is enabled, return cached result
+      if (cache !== false && stepState.status === 'completed') {
         return stepState.result;
       }
 
