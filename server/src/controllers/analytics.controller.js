@@ -7,6 +7,7 @@ import FixPullRequest from "../models/FixPullRequest.js";
 import { GitHubService } from "../services/providers/github.service.js";
 import { decryptSecret } from "../utils/encryption.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { trackAiUsage } from "../utils/aiTracker.js";
 
 function getVisitorHash(req) {
   const ip =
@@ -238,6 +239,9 @@ CRITICAL: Return ONLY the raw new file content. Do NOT wrap it in markdown forma
     };
 
     const result = await generateWithRetry(prompt);
+    
+    await trackAiUsage(userId, projectId, 'analytics_insight');
+
     let newContent = result.response.text().trim();
     
     if (newContent.startsWith("\`\`\`")) {

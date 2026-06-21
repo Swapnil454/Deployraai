@@ -84,7 +84,7 @@ export const updateBugReportStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    const bugReport = await PlatformBugReport.findByIdAndUpdate(id, { status }, { new: true });
+    const bugReport = await PlatformBugReport.findByIdAndUpdate(id, { status }, { returnDocument: 'after' });
     res.json({ success: true, bugReport });
   } catch (error) {
     res.status(500).json({ error: "Failed to update bug report" });

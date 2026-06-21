@@ -5,6 +5,7 @@ import FixPullRequest from "../models/FixPullRequest.js";
 import { GitHubService } from "../services/providers/github.service.js";
 import { decryptSecret } from "../utils/encryption.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { trackAiUsage } from "../utils/aiTracker.js";
 
 const BACKEND_ENTRY_FILES = [
   "backend/src/app.js",
@@ -224,7 +225,11 @@ Return ONLY the raw new file content. Do NOT wrap it in markdown formatting bloc
       };
 
       const result = await generateWithRetry(prompt);
-        let newContent = result.response.text().trim();
+      
+      // Track AI usage
+      await trackAiUsage(userId, deployment.projectId._id, 'auto_pr_fix');
+
+      let newContent = result.response.text().trim();
         
         if (newContent.startsWith("\`\`\`")) {
            const lines = newContent.split("\n");
