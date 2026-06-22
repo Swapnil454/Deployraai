@@ -20,7 +20,8 @@
     "react-qr-code": "^2.2.0",
     "react-syntax-highlighter": "^16.1.1",
     "recharts": "^3.8.1",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.0",

@@ -6,12 +6,11 @@ const messageSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now }
 });
 
-const supportCaseSchema = new mongoose.Schema({
+const aiSupportCaseSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  title: { type: String, default: 'New Support Case' },
-  status: { type: String, enum: ['open', 'in-progress', 'resolved', 'closed'], default: 'open' },
-  severity: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
+  title: { type: String, default: 'AI Support Session' },
+  status: { type: String, enum: ['open', 'resolved', 'closed'], default: 'open' },
   messages: [messageSchema]
 }, { timestamps: true });
 
-export default mongoose.model('SupportCase', supportCaseSchema);
+export default mongoose.model('AISupportCase', aiSupportCaseSchema);

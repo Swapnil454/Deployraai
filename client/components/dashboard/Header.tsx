@@ -180,11 +180,34 @@ export const Header = ({ projects }: { projects: any[] }) => {
         <div className="absolute left-1/2 -translate-x-1/2 flex items-center h-full">
           <h2 className="text-[14px] font-semibold text-white cursor-pointer px-1 flex items-center gap-2">
             {pathname === "/dashboard/support" || pathname.startsWith("/dashboard/support/") ? (
-              <>
+              <div className="flex items-center gap-2">
                 <span className="text-zinc-100 font-normal">Support</span>
                 <span className="text-zinc-100 font-normal">/</span>
                 <span className="text-white">Cases</span>
-              </>
+                {params?.caseId && (
+                  <>
+                    <span className="text-zinc-100 font-normal">/</span>
+                    <span className="text-zinc-300 font-mono text-[13px]">#{params.caseId}</span>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(params.caseId as string);
+                        const el = document.getElementById('header-copy-icon');
+                        if (el) {
+                          el.innerHTML = '<span class="text-[10px] uppercase text-green-400 font-sans tracking-wide px-1">Copied</span>';
+                          setTimeout(() => {
+                            el.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+                          }, 2000);
+                        }
+                      }} 
+                      className="hover:text-white transition-colors ml-1 p-0.5 rounded-md hover:bg-white/10" 
+                      title="Copy Case ID"
+                      id="header-copy-icon"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                    </button>
+                  </>
+                )}
+              </div>
             ) : (
               currentTitle
             )}

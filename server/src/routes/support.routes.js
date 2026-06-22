@@ -3,34 +3,47 @@ import { requireAuth } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import Project from "../models/Project.js";
 import Deployment from "../models/Deployment.js";
-import SupportCase from "../models/SupportCase.js";
+import HumanSupportCase from "../models/HumanSupportCase.js";
+import AISupportCase from "../models/AISupportCase.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const router = express.Router();
 
-// Get all cases for a user
+// Get all human cases for a user
 router.get("/", requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId || req.user._id;
-    const cases = await SupportCase.find({ userId }).sort({ updatedAt: -1 });
-    res.json(cases);
+    const cases = await HumanSupportCase.find({ userId }).sort({ updatedAt: -1 });
+    // Make sure we inject caseType for UI consistency
+    const formattedCases = cases.map(c => ({ ...c.toObject(), caseType: 'human' }));
+    res.json(formattedCases);
   } catch (error) {
     console.error("Fetch cases error:", error);
     res.status(500).json({ error: "Failed to fetch support cases." });
   }
 });
 
-// Get a specific case
+// Get a specific case (allow admin)
 router.get("/:id", requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId || req.user._id;
-    const supportCase = await SupportCase.findOne({ _id: req.params.id, userId });
+    let supportCase = await HumanSupportCase.findById(req.params.id).populate('userId', 'name githubUsername avatar');
+    let type = 'human';
+
+    if (!supportCase) {
+      supportCase = await AISupportCase.findById(req.params.id).populate('userId', 'name githubUsername avatar');
+      type = 'ai';
+    }
     
     if (!supportCase) {
       return res.status(404).json({ error: "Case not found" });
     }
-    
-    res.json(supportCase);
+
+    const caseUserId = supportCase.userId && supportCase.userId._id ? supportCase.userId._id.toString() : supportCase.userId?.toString();
+    if (caseUserId !== userId.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Unauthorized access to this case." });
+    }
+    res.json({ ...supportCase.toObject(), caseType: type, isAdmin: req.user.role === 'admin' });
   } catch (error) {
     console.error("Fetch case error:", error);
     res.status(500).json({ error: "Failed to fetch support case." });
@@ -41,22 +54,47 @@ router.get("/:id", requireAuth, async (req, res) => {
 router.post("/", requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId || req.user._id;
-    const { title, severity } = req.body;
+    const { title, severity, caseType, issueType, description } = req.body;
 
-    const newCase = new SupportCase({
-      userId,
-      title: title || "New Support Case",
-      severity: severity || "medium",
-      messages: [
-        {
-          role: "model",
-          content: "Hello! I am your AI Support Assistant. I have context about your projects and recent deployments. How can I help you today?"
-        }
-      ]
-    });
+    const type = caseType || 'ai';
+
+    let newCase;
+
+    if (type === 'ai') {
+      newCase = new AISupportCase({
+        userId,
+        title: title || "AI Support Session",
+        messages: [
+          {
+            role: "model",
+            content: "Hello! I am your AI Support Assistant. I have context about your projects and recent deployments. How can I help you today?"
+          }
+        ]
+      });
+    } else {
+      newCase = new HumanSupportCase({
+        userId,
+        title: title || "New Support Case",
+        severity: severity || "medium",
+        issueType: issueType || '',
+        description: description || '',
+        messages: [
+          {
+            role: "user",
+            content: `**Problem Area**\n${issueType || 'General Enquiry'}\n\n**Severity Level**\n${severity || 'Medium'}\n\n**Subject**\n${title || 'Summarize your issue...'}\n\n**Description**\n${description || 'Description from user side'}`
+          }
+        ]
+      });
+    }
 
     await newCase.save();
-    res.json(newCase);
+    
+    const io = req.app.get('io');
+    if (io && type === 'human') {
+      io.emit('admin_new_case', newCase);
+    }
+
+    res.json({ ...newCase.toObject(), caseType: type });
   } catch (error) {
     console.error("Create case error:", error);
     res.status(500).json({ error: "Failed to create support case." });
@@ -78,19 +116,56 @@ router.post("/:id/message", requireAuth, async (req, res) => {
       return res.status(500).json({ error: "Gemini API key is not configured on the server." });
     }
 
-    const supportCase = await SupportCase.findOne({ _id: caseId, userId });
+    let supportCase = await HumanSupportCase.findById(caseId);
+    let type = 'human';
+
+    if (!supportCase) {
+      supportCase = await AISupportCase.findById(caseId);
+      type = 'ai';
+    }
+
     if (!supportCase) {
       return res.status(404).json({ error: "Case not found" });
     }
 
+    if (supportCase.userId.toString() !== userId.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Unauthorized access to this case." });
+    }
+
+    let messageRole = "user";
+    if (supportCase.userId.toString() !== userId.toString() && req.user.role === 'admin') {
+      messageRole = "admin";
+    }
+
     // Add user message to DB
-    supportCase.messages.push({ role: "user", content: message });
+    const newMessage = { role: messageRole, content: message };
+    supportCase.messages.push(newMessage);
     
     // Auto-update title if it's the first user message
-    if (supportCase.title === "New Support Case" && supportCase.messages.length <= 2) {
+    if (type === 'human' && supportCase.title === "New Support Case" && supportCase.messages.length <= 2) {
        supportCase.title = message.length > 50 ? message.substring(0, 50) + "..." : message;
     }
     await supportCase.save();
+
+    const io = req.app.get('io');
+
+    if (type === 'human') {
+      if (io) {
+        io.to(caseId).emit('new_message', {
+          caseId,
+          message: newMessage
+        });
+      }
+      return res.json({ message: "Message sent to support.", case: supportCase });
+    }
+
+    // --- AI Flow Below ---
+    if (io) {
+      io.to(caseId).emit('new_message', {
+        caseId,
+        message: newMessage
+      });
+    }
 
     // 1. Gather User Context
     const user = await User.findById(userId).select("email name provider");
@@ -141,6 +216,28 @@ Respond naturally as an AI assistant. Use markdown for code blocks, bold text, a
     let success = false;
     let lastError = null;
 
+    // Consolidate history to guarantee alternation
+    let contents = [
+      { role: "user", parts: [{ text: contextPrompt }] },
+      { role: "model", parts: [{ text: "Understood. I will act as the support agent and use this context to help the user." }] },
+      { role: "user", parts: [{ text: "Start the conversation." }] }
+    ];
+
+    // supportCase.messages already includes the latest user message
+    for (const msg of supportCase.messages) {
+      const mappedRole = msg.role === 'user' ? 'user' : 'model';
+      if (contents.length > 0 && contents[contents.length - 1].role === mappedRole) {
+          contents[contents.length - 1].parts[0].text += "\n\n" + msg.content;
+      } else {
+          contents.push({ role: mappedRole, parts: [{ text: msg.content }] });
+      }
+    }
+
+    // Gemini expects the last message to be from the user
+    if (contents[contents.length - 1].role !== 'user') {
+      contents.push({ role: 'user', parts: [{ text: 'Please continue.' }] });
+    }
+
     for (const modelName of fallbackModels) {
       if (success) break;
       
@@ -148,19 +245,7 @@ Respond naturally as an AI assistant. Use markdown for code blocks, bold text, a
 
       for (let i = 0; i < 2; i++) {
         try {
-          const chat = model.startChat({
-            history: [
-              { role: "user", parts: [{ text: contextPrompt }] },
-              { role: "model", parts: [{ text: "Understood. I will act as the support agent and use this context to help the user." }] },
-              // Map DB history format to Gemini format (excluding the very last user message which is sent dynamically)
-              ...supportCase.messages.slice(0, -1).map((msg) => ({
-                role: msg.role === 'user' ? 'user' : 'model',
-                parts: [{ text: msg.content }],
-              }))
-            ],
-          });
-
-          result = await chat.sendMessage([{ text: message }]);
+          result = await model.generateContent({ contents });
           success = true;
           break; 
         } catch (err) {
@@ -190,10 +275,121 @@ Respond naturally as an AI assistant. Use markdown for code blocks, bold text, a
     // Return the newly created model message (with its DB generated ID and timestamp)
     const savedModelMessage = supportCase.messages[supportCase.messages.length - 1];
 
+    if (io) {
+      io.to(caseId).emit('new_message', {
+        caseId,
+        message: savedModelMessage
+      });
+    }
+
     res.json({ reply: savedModelMessage });
   } catch (error) {
     console.error("AI Support Chat Error:", error);
     res.status(500).json({ error: "Failed to process chat response.", details: error.message });
+  }
+});
+
+// User update their own case status
+router.patch("/:id/status", requireAuth, async (req, res) => {
+  try {
+    const { status } = req.body;
+    const userId = req.user.userId || req.user._id;
+
+    if (!['open', 'closed'].includes(status)) {
+       return res.status(400).json({ error: "Users can only set status to open or closed." });
+    }
+    
+    const supportCase = await HumanSupportCase.findById(req.params.id);
+    if (!supportCase) {
+      return res.status(404).json({ error: "Case not found." });
+    }
+
+    if (supportCase.userId.toString() !== userId.toString()) {
+      return res.status(403).json({ error: "Unauthorized access to this case." });
+    }
+
+    supportCase.status = status;
+    await supportCase.save();
+    
+    const io = req.app.get('io');
+    if (io) {
+       io.to(req.params.id).emit('case_status_updated', { caseId: req.params.id, status });
+       io.emit('admin_case_updated', supportCase);
+    }
+    
+    res.json({ message: "Status updated.", case: supportCase });
+  } catch (error) {
+    console.error("User update status error:", error);
+    res.status(500).json({ error: "Failed to update case status." });
+  }
+});
+
+// Admin Get all human cases
+router.get("/admin/cases", requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Requires admin role." });
+    }
+    
+    const { status, search } = req.query;
+    let query = {};
+    
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    
+    if (search) {
+       const users = await User.find({ 
+           $or: [ { name: { $regex: search, $options: 'i' } }, { email: { $regex: search, $options: 'i' } } ] 
+       }).select('_id');
+       const userIds = users.map(u => u._id);
+       
+       query.$or = [
+          { title: { $regex: search, $options: 'i' } },
+          { userId: { $in: userIds } }
+       ];
+    }
+
+    const cases = await HumanSupportCase.find(query).populate('userId', 'name email').sort({ updatedAt: -1 });
+    const formattedCases = cases.map(c => ({ ...c.toObject(), caseType: 'human' }));
+    res.json(formattedCases);
+  } catch (error) {
+    console.error("Admin fetch cases error:", error);
+    res.status(500).json({ error: "Failed to fetch admin support cases." });
+  }
+});
+
+// Admin update case status
+router.patch("/admin/cases/:id/status", requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Requires admin role." });
+    }
+    const { status } = req.body;
+    if (!['open', 'in-progress', 'resolved', 'closed'].includes(status)) {
+       return res.status(400).json({ error: "Invalid status." });
+    }
+    
+    const supportCase = await HumanSupportCase.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true }
+    );
+    
+    if (!supportCase) {
+      return res.status(404).json({ error: "Case not found." });
+    }
+    
+    const io = req.app.get('io');
+    if (io) {
+       io.to(req.params.id).emit('case_status_updated', { caseId: req.params.id, status });
+       io.emit('admin_case_updated', supportCase);
+    }
+    
+    res.json({ message: "Status updated.", case: supportCase });
+  } catch (error) {
+    console.error("Admin update status error:", error);
+    res.status(500).json({ error: "Failed to update case status." });
   }
 });
 

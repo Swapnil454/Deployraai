@@ -18,6 +18,13 @@ export default function SupportCasesPage() {
   const [cases, setCases] = useState<SupportCase[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [formData, setFormData] = useState({
+    issueType: 'general',
+    severity: 'medium',
+    title: '',
+    description: ''
+  });
   const router = useRouter();
 
   useEffect(() => {
@@ -39,7 +46,35 @@ export default function SupportCasesPage() {
     }
   };
 
-  const createNewCase = async () => {
+  const handleCreateHumanCase = async () => {
+    if (isCreating || !formData.title || !formData.description) return;
+    setIsCreating(true);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+      const res = await fetch(`${apiUrl}/api/support`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ 
+          caseType: 'human',
+          issueType: formData.issueType,
+          severity: formData.severity,
+          title: formData.title,
+          description: formData.description
+        })
+      });
+      if (res.ok) {
+        const newCase = await res.json();
+        setIsModalOpen(false);
+        router.push(`/dashboard/support/${newCase._id}`);
+      }
+    } catch (err) {
+      console.error(err);
+      setIsCreating(false);
+    }
+  };
+
+  const createAiCase = async () => {
     if (isCreating) return;
     setIsCreating(true);
     try {
@@ -48,7 +83,10 @@ export default function SupportCasesPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ title: "New Support Case", severity: "medium" })
+        body: JSON.stringify({ 
+          caseType: 'ai',
+          title: "AI Support Session"
+        })
       });
       if (res.ok) {
         const newCase = await res.json();
@@ -79,13 +117,22 @@ export default function SupportCasesPage() {
              <SlidersHorizontal className="w-4 h-4 text-zinc-400" />
           </button>
 
-          {/* New Case Button */}
+          {/* Help Button */}
           <button
-            onClick={createNewCase}
+            onClick={createAiCase}
             disabled={isCreating}
             className="flex items-center gap-2 bg-[#0a0a0a] border border-white/10 hover:border-white/20 hover:bg-[#141414] text-white px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors shrink-0 disabled:opacity-50"
           >
-            {isCreating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+            {isCreating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageSquare className="w-3.5 h-3.5" />}
+            Help
+          </button>
+
+          {/* New Case Button */}
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2 bg-[#0a0a0a] border border-white/10 hover:border-white/20 hover:bg-[#141414] text-white px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" />
             New Case
           </button>
         </div>
@@ -117,11 +164,10 @@ export default function SupportCasesPage() {
               Create a new case to get assistance.
             </p>
             <button
-              onClick={createNewCase}
-              disabled={isCreating}
-              className="flex items-center gap-2 bg-transparent border border-white/10 hover:border-white/20 hover:bg-[#141414] text-white px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors disabled:opacity-50"
+              onClick={() => setIsModalOpen(true)}
+              className="flex items-center gap-2 bg-transparent border border-white/10 hover:border-white/20 hover:bg-[#141414] text-white px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors"
             >
-              {isCreating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+              <Plus className="w-3.5 h-3.5" />
               New Case
             </button>
           </div>
@@ -173,6 +219,98 @@ export default function SupportCasesPage() {
           </div>
         )}
       </div>
+
+      {/* New Case Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-xl w-full max-w-2xl shadow-2xl relative my-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b border-white/5">
+              <h2 className="text-[16px] font-semibold text-white tracking-tight">Support Case</h2>
+              <button 
+                onClick={() => setIsModalOpen(false)}
+                className="text-zinc-500 hover:text-white transition-colors p-1"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+              </button>
+            </div>
+            
+            {/* Body */}
+            <div className="p-6 space-y-6">
+              <p className="text-[14px] text-zinc-400">
+                The more detail you can provide, the better we can help you.
+              </p>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[13px] text-zinc-400">Problem Area</label>
+                  <select 
+                    value={formData.issueType}
+                    onChange={(e) => setFormData({...formData, issueType: e.target.value})}
+                    className="w-full bg-transparent border border-white/10 rounded-md p-2 text-[14px] text-white focus:outline-none focus:border-white/20 appearance-none cursor-pointer"
+                  >
+                    <option value="general" className="bg-[#0a0a0a]">General Enquiry</option>
+                    <option value="deployment" className="bg-[#0a0a0a]">Deployment Issue</option>
+                    <option value="billing" className="bg-[#0a0a0a]">Invoice Enquiry</option>
+                    <option value="account" className="bg-[#0a0a0a]">Account Access</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[13px] text-zinc-400">Severity Level</label>
+                  <select 
+                    value={formData.severity}
+                    onChange={(e) => setFormData({...formData, severity: e.target.value})}
+                    className="w-full bg-transparent border border-white/10 rounded-md p-2 text-[14px] text-white focus:outline-none focus:border-white/20 appearance-none cursor-pointer"
+                  >
+                    <option value="low" className="bg-[#0a0a0a]">Severity 3 - General question</option>
+                    <option value="medium" className="bg-[#0a0a0a]">Severity 2 - Production impact, no worka...</option>
+                    <option value="high" className="bg-[#0a0a0a]">Severity 1 - Critical production outage</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[13px] text-zinc-400">Subject</label>
+                <input 
+                  type="text" 
+                  value={formData.title}
+                  onChange={(e) => setFormData({...formData, title: e.target.value})}
+                  className="w-full bg-transparent border border-white/10 rounded-md p-2.5 text-[14px] text-white placeholder-zinc-600 focus:outline-none focus:border-white/20"
+                  placeholder="Summarize your issue..."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[13px] text-zinc-400">Description</label>
+                <textarea 
+                  value={formData.description}
+                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  className="w-full bg-transparent border border-white/10 rounded-md p-3 text-[14px] text-white placeholder-zinc-600 focus:outline-none focus:border-white/20 min-h-[120px] resize-y"
+                  placeholder="Provide as much detail as possible..."
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-5 border-t border-white/5 flex flex-col gap-3">
+              <button 
+                onClick={handleCreateHumanCase}
+                disabled={isCreating || !formData.title || !formData.description}
+                className="w-full bg-white text-black py-2.5 rounded-md text-[14px] font-medium hover:bg-zinc-200 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isCreating && <Loader2 className="w-4 h-4 animate-spin" />}
+                Submit Case
+              </button>
+              <button 
+                onClick={() => setIsModalOpen(false)}
+                className="w-full bg-transparent text-white border border-white/10 py-2.5 rounded-md text-[14px] font-medium hover:bg-[#141414] transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
