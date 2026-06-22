@@ -178,7 +178,17 @@ export const Header = ({ projects }: { projects: any[] }) => {
         
         {/* Center: Dynamic Title */}
         <div className="absolute left-1/2 -translate-x-1/2 flex items-center h-full">
-          <h2 className="text-[14px] font-semibold text-white cursor-pointer px-1">{currentTitle}</h2>
+          <h2 className="text-[14px] font-semibold text-white cursor-pointer px-1 flex items-center gap-2">
+            {pathname === "/dashboard/support" || pathname.startsWith("/dashboard/support/") ? (
+              <>
+                <span className="text-zinc-100 font-normal">Support</span>
+                <span className="text-zinc-100 font-normal">/</span>
+                <span className="text-white">Cases</span>
+              </>
+            ) : (
+              currentTitle
+            )}
+          </h2>
         </div>
 
         {/* Right: Empty spacer to balance flex */}
