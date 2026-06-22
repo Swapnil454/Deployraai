@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Send, Bot, User, Loader2, Copy, Lock, Unlock, ExternalLink, MoreHorizontal, ChevronDown, LifeBuoy, Paperclip, ArrowUp } from "lucide-react";
+import { Send, Bot, User, Loader2, Copy, Lock, Unlock, ExternalLink, MoreHorizontal, ChevronDown, LifeBuoy, Paperclip, ArrowUp, FileText } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -12,8 +12,18 @@ import { io } from "socket.io-client";
 interface ChatMessage {
   id?: string;
   _id?: string;
-  role: "user" | "model" | "admin";
+  role: "user" | "model" | "admin" | "system";
   content: string;
+  attachment?: {
+    url: string;
+    type: string;
+    name: string;
+  };
+  attachments?: {
+    url: string;
+    type: string;
+    name: string;
+  }[];
   timestamp?: string;
 }
 
@@ -22,6 +32,7 @@ interface SupportCase {
   title: string;
   caseType: string;
   status: string;
+  closedByRole?: string;
   severity: string;
   updatedAt: string;
   userId?: {
@@ -40,8 +51,13 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
   const [isAdmin, setIsAdmin] = useState(initialIsAdmin);
   const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [attachments, setAttachments] = useState<{ url: string; type: string; name: string; }[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<{url: string, name: string} | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const scrollToBottom = () => {
     if (scrollContainerRef.current) {
@@ -95,7 +111,13 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
 
       socket.on("case_status_updated", (data) => {
         if (data.caseId === caseId) {
-          setCaseDetails((prev) => prev ? { ...prev, status: data.status, updatedAt: new Date().toISOString() } : null);
+          setCaseDetails((prev) => prev ? { ...prev, status: data.status, closedByRole: data.closedByRole, updatedAt: new Date().toISOString() } : null);
+          if (data.message) {
+            setMessages((prev) => {
+              if (prev.some(m => m._id === data.message._id)) return prev;
+              return [...prev, data.message];
+            });
+          }
         }
       });
 
@@ -126,7 +148,7 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
     setMenuOpen(false);
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-      const endpoint = isAdmin ? `/api/support/admin/cases/${caseId}/status` : `/api/support/cases/${caseId}/status`;
+      const endpoint = isAdmin ? `/api/support/admin/cases/${caseId}/status` : `/api/support/${caseId}/status`;
       const res = await fetch(`${apiUrl}${endpoint}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -134,28 +156,93 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
         body: JSON.stringify({ status: newStatus }),
       });
       if (res.ok) {
-        setCaseDetails((prev) => prev ? { ...prev, status: newStatus, updatedAt: new Date().toISOString() } : null);
+        setCaseDetails((prev) => prev ? { ...prev, status: newStatus, closedByRole: newStatus === 'closed' ? (isAdmin ? 'admin' : 'user') : undefined, updatedAt: new Date().toISOString() } : null);
       }
     } catch (error) {
       console.error("Failed to update status", error);
     }
   };
 
+  const handleDownload = async (url: string, filename: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(blobUrl);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      window.open(url, '_blank');
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    let files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    if (attachments.length + files.length > 5) {
+      files = files.slice(0, 5 - attachments.length);
+    }
+    
+    if (files.length === 0) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setIsUploading(true);
+    const newAttachments = [...attachments];
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await fetch(`${apiUrl}/api/support/upload`, {
+          method: "POST",
+          body: formData,
+          credentials: "include",
+        });
+
+        if (!response.ok) throw new Error("Upload failed");
+        const data = await response.json();
+        newAttachments.push(data);
+      }
+      setAttachments(newAttachments);
+    } catch (err) {
+      console.error("File upload error:", err);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading || caseDetails?.status === 'closed') return;
+    if ((!input.trim() && attachments.length === 0) || isLoading || isUploading || caseDetails?.status === 'closed') return;
 
     const tempId = Date.now().toString();
     const userMessage: ChatMessage = {
       id: tempId,
       role: isAdmin ? "admin" : "user",
-      content: input.trim(),
+      content: input.trim() || "Sent attachments",
+      attachments: attachments.length > 0 ? attachments : undefined,
       timestamp: new Date().toISOString()
     };
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
+    setAttachments([]);
     setIsLoading(true);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -167,6 +254,7 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
         credentials: "include",
         body: JSON.stringify({
           message: userMessage.content,
+          attachments: userMessage.attachments
         }),
       });
 
@@ -330,7 +418,7 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
         className="flex-1 overflow-y-auto px-8 py-6 relative z-10 scroll-smooth flex flex-col"
       >
         <div className="max-w-[800px] space-y-4 w-full mx-auto flex flex-col flex-1 pb-4">
-          <div className="space-y-4 flex-1">
+          <div className="space-y-6 flex-1">
             {messages.map((msg, index) => {
               const currentMsgDate = new Date(msg.timestamp || caseDetails?.updatedAt || new Date()).toDateString();
               const prevMsgDate = index > 0 ? new Date(messages[index - 1].timestamp || caseDetails?.updatedAt || new Date()).toDateString() : null;
@@ -359,17 +447,17 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
               if (msg.role === "admin" || msg.role === "model") {
                 senderName = "Support Agent";
                 senderAvatar = (
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shrink-0">
-                    <Bot className="w-4 h-4 text-white" />
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shrink-0">
+                    <Bot className="w-[18px] h-[18px] text-white" />
                   </div>
                 );
               } else {
                 senderName = caseDetails?.userId?.name || caseDetails?.userId?.githubUsername || "You";
                 senderAvatar = caseDetails?.userId?.avatar ? (
-                  <img src={caseDetails.userId.avatar} alt="User Avatar" className="w-8 h-8 rounded-full shrink-0 object-cover" />
+                  <img src={caseDetails.userId.avatar} alt="User Avatar" className="w-9 h-9 rounded-full shrink-0 object-cover" />
                 ) : (
-                  <div className="w-8 h-8 rounded-full bg-[#1a1a1a] border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
-                    <User className="w-4 h-4 text-zinc-400" />
+                  <div className="w-9 h-9 rounded-full bg-[#1a1a1a] border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
+                    <User className="w-[18px] h-[18px] text-zinc-400" />
                   </div>
                 );
               }
@@ -383,58 +471,144 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
                       </div>
                     </div>
                   )}
-                  <div className={`flex flex-col gap-2 ${isSender ? "items-end" : "items-start"}`}>
-                  
-                  {/* Sender Info (Avatar + Name + Time) */}
-                  <div className={`flex items-start gap-3 ${isSender ? "flex-row-reverse" : "flex-row"}`}>
-                    <div className="shrink-0">
-                      {senderAvatar}
+                  {msg.role === 'system' ? (
+                    <div className="flex justify-center py-1">
+                      <div className="px-4 py-1.5 rounded-full bg-[#1a1a1a] border border-white/5 text-[13px] text-zinc-400 flex items-center gap-2">
+                        {msg.content === 'STATUS_CHANGE:closed' ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                        Status changed to {msg.content === 'STATUS_CHANGE:closed' ? 'Closed' : 'Open'} {(() => {
+                          if (!msg.timestamp) return '';
+                          const date = new Date(msg.timestamp);
+                          const now = new Date();
+                          const isToday = date.toDateString() === now.toDateString();
+                          const yesterday = new Date();
+                          yesterday.setDate(now.getDate() - 1);
+                          const isYesterday = date.toDateString() === yesterday.toDateString();
+                          const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                          
+                          if (isToday) return `today at ${time}`;
+                          if (isYesterday) return `yesterday at ${time}`;
+                          return `on ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at ${time}`;
+                        })()}
+                      </div>
                     </div>
-                    <div className={`flex flex-col ${isSender ? "items-end" : "items-start"}`}>
-                      <span className="text-[14px] font-medium text-zinc-200">
-                        {senderName}
-                      </span>
-                      <span className="text-[12px] font-normal text-zinc-500">
-                        {getFormatTime(msg.timestamp || caseDetails?.updatedAt)}
-                      </span>
+                  ) : (
+                    <div className={`flex flex-col gap-2 ${isSender ? "items-end" : "items-start"}`}>
+                    
+                    {/* Sender Info (Avatar + Name + Time) */}
+                    <div className={`flex items-start gap-3 ${isSender ? "flex-row-reverse" : "flex-row"}`}>
+                      <div className="shrink-0">
+                        {senderAvatar}
+                      </div>
+                      <div className={`flex flex-col ${isSender ? "items-end" : "items-start"}`}>
+                        <span className="text-[15px] font-medium text-zinc-200">
+                          {senderName}
+                        </span>
+                        <span className="text-[13px] font-normal text-zinc-500">
+                          {getFormatTime(msg.timestamp || caseDetails?.updatedAt)}
+                        </span>
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Message Content Area */}
-                  <div className={`w-full max-w-[800px] prose prose-invert text-[16px] font-medium leading-relaxed text-zinc-100 ${isSender ? "text-right" : "text-left"}`}>
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        code({ node, inline, className, children, ...props }: any) {
-                          const match = /language-(\w+)/.exec(className || "");
-                          return !inline && match ? (
-                            <SyntaxHighlighter
-                              style={vscDarkPlus as any}
-                              language={match[1]}
-                              PreTag="div"
-                              className={`rounded-lg !my-4 !bg-[#000000] border border-white/10 text-left ${isSender ? "ml-auto" : ""}`}
-                              {...props}
-                            >
-                              {String(children).replace(/\n$/, "")}
-                            </SyntaxHighlighter>
+                    <div className={`w-full max-w-[900px] flex flex-col gap-2 text-[15px] font-normal leading-relaxed text-zinc-200 ${isSender ? "text-right items-end" : "text-left items-start"}`}>
+                      
+                      {/* Legacy single attachment fallback */}
+                      {msg.attachment && (!msg.attachments || msg.attachments.length === 0) && (
+                        <div className="mb-2 max-w-[280px]">
+                          {msg.attachment.type === 'image' ? (
+                            <img 
+                              src={msg.attachment.url} 
+                              alt="Attachment" 
+                              className="max-w-[280px] max-h-[200px] rounded-lg object-cover cursor-pointer border border-white/10 hover:opacity-90 transition-opacity"
+                              onClick={() => setLightboxImage(msg.attachment ? { url: msg.attachment.url, name: msg.attachment.name } : null)}
+                            />
                           ) : (
-                            <code className="bg-[#1a1a1a] px-1.5 py-0.5 rounded text-indigo-300 border border-white/5" {...props}>
-                              {children}
-                            </code>
-                          );
-                        },
-                        a: ({ node, ...props }) => <a className="text-indigo-400 hover:text-indigo-300 underline underline-offset-4" target="_blank" rel="noopener noreferrer" {...props} />,
-                        p: ({ node, ...props }) => <p className="mb-4 last:mb-0" {...props} />,
-                        ul: ({ node, ...props }) => <ul className={`list-disc mb-4 ${isSender ? 'pr-4 text-right' : 'pl-4 text-left'}`} dir={isSender ? 'rtl' : 'ltr'} {...props} />,
-                        ol: ({ node, ...props }) => <ol className={`list-decimal mb-4 ${isSender ? 'pr-4 text-right' : 'pl-4 text-left'}`} dir={isSender ? 'rtl' : 'ltr'} {...props} />,
-                        li: ({ node, ...props }) => <li className="mb-1" {...props} />,
-                        strong: ({ node, ...props }) => <strong className="font-semibold text-white" {...props} />,
-                      }}
-                    >
-                      {msg.content}
-                    </ReactMarkdown>
+                            <button 
+                              type="button"
+                              onClick={() => handleDownload(msg.attachment!.url, msg.attachment!.name)}
+                              className="flex items-center gap-3 bg-[#1a1a1a] border border-white/10 rounded-lg p-3 hover:bg-white/5 transition-colors text-left max-w-full"
+                            >
+                              <div className="w-10 h-10 rounded bg-[#000000] flex items-center justify-center shrink-0 border border-white/5">
+                                <FileText className="w-5 h-5 text-zinc-400" />
+                              </div>
+                              <div className="flex flex-col overflow-hidden text-left max-w-[180px]">
+                                <span className="text-sm font-medium text-zinc-200 truncate">{msg.attachment.name}</span>
+                                <span className="text-xs text-zinc-500">File Attachment</span>
+                              </div>
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Multiple attachments mapping */}
+                      {msg.attachments && msg.attachments.length > 0 && (
+                        <div className={`flex flex-col gap-2 mb-2 w-full ${isSender ? 'items-end' : 'items-start'}`}>
+                          {msg.attachments.map((att, attIdx) => (
+                            <div key={attIdx} className={att.type === 'image' ? "w-[200px]" : "w-[280px]"}>
+                              {att.type === 'image' ? (
+                                <img 
+                                  src={att.url} 
+                                  alt="Attachment" 
+                                  className="w-full h-[150px] rounded-lg object-cover cursor-pointer border border-white/10 hover:opacity-90 transition-opacity"
+                                  onClick={() => setLightboxImage({ url: att.url, name: att.name })}
+                                />
+                              ) : (
+                                <button 
+                                  type="button"
+                                  onClick={() => handleDownload(att.url, att.name)}
+                                  className="flex items-center gap-3 bg-[#1a1a1a] border border-white/10 rounded-lg p-3 hover:bg-white/5 transition-colors text-left max-w-full w-full"
+                                >
+                                  <div className="w-10 h-10 rounded bg-[#000000] flex items-center justify-center shrink-0 border border-white/5">
+                                    <FileText className="w-5 h-5 text-zinc-400" />
+                                  </div>
+                                  <div className="flex flex-col overflow-hidden text-left flex-1">
+                                    <span className="text-sm font-medium text-zinc-200 truncate">{att.name}</span>
+                                    <span className="text-xs text-zinc-500">File Attachment</span>
+                                  </div>
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {msg.content && msg.content !== "Sent an attachment" && (
+                      <div className="prose prose-invert prose-p:leading-relaxed prose-pre:p-0 prose-pre:bg-transparent max-w-none text-inherit text-left">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                          code({ node, inline, className, children, ...props }: any) {
+                            const match = /language-(\w+)/.exec(className || "");
+                            return !inline && match ? (
+                              <SyntaxHighlighter
+                                style={vscDarkPlus as any}
+                                language={match[1]}
+                                PreTag="div"
+                                className={`rounded-lg !my-4 !bg-[#000000] border border-white/10 text-left`}
+                                {...props}
+                              >
+                                {String(children).replace(/\n$/, "")}
+                              </SyntaxHighlighter>
+                            ) : (
+                              <code className="bg-white/10 rounded px-1.5 py-0.5" {...props}>
+                                {children}
+                              </code>
+                            );
+                          },
+                          a: ({ node, ...props }) => <a className="text-indigo-400 hover:text-indigo-300 underline underline-offset-4" target="_blank" rel="noopener noreferrer" {...props} />,
+                          p: ({ node, ...props }) => <p className="mb-4 last:mb-0" {...props} />,
+                          ul: ({ node, ...props }) => <ul className={`list-disc mb-4 ${isSender ? 'pr-4 text-right' : 'pl-4 text-left'}`} dir={isSender ? 'rtl' : 'ltr'} {...props} />,
+                          ol: ({ node, ...props }) => <ol className={`list-decimal mb-4 ${isSender ? 'pr-4 text-right' : 'pl-4 text-left'}`} dir={isSender ? 'rtl' : 'ltr'} {...props} />,
+                          li: ({ node, ...props }) => <li className="mb-1" {...props} />,
+                          strong: ({ node, ...props }) => <strong className="font-semibold text-white" {...props} />,
+                          }}
+                        >
+                          {msg.content}
+                        </ReactMarkdown>
+                      </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+                  )}
                 </React.Fragment>
               );
             })}
@@ -447,14 +621,7 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
             </div>
           )}
 
-          {/* Status Event Pill */}
-          {caseDetails?.status === 'closed' && (
-            <div className="flex justify-center py-6">
-              <div className="px-4 py-1.5 rounded-full bg-[#1a1a1a] border border-white/5 text-[13px] text-zinc-400 flex items-center gap-2">
-                Status changed to Closed {getTimeAgo(caseDetails.updatedAt).includes('ago') ? getTimeAgo(caseDetails.updatedAt) : 'recently'}
-              </div>
-            </div>
-          )}
+
 
         </div>
       </div>
@@ -479,33 +646,64 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
           ) : (
             <form 
               onSubmit={handleSubmit} 
-              className="border border-white/10 rounded-xl bg-[#0a0a0a] flex flex-col focus-within:border-zinc-500 transition-colors"
+              className="border border-white/10 rounded-xl bg-[#0a0a0a] flex flex-col focus-within:border-zinc-500 transition-colors relative"
             >
+              {attachments.length > 0 && (
+                <div className="px-4 pt-3 pb-1 flex items-center gap-2 flex-wrap">
+                  {attachments.map((att, idx) => (
+                    <div key={idx} className="flex items-center gap-2 bg-[#1a1a1a] border border-white/10 rounded-lg px-3 py-1.5 text-[13px]">
+                      <Paperclip className="w-3.5 h-3.5 text-zinc-400" />
+                      <span className="text-zinc-300 truncate max-w-[150px]">{att.name}</span>
+                      <button type="button" onClick={() => setAttachments(prev => prev.filter((_, i) => i !== idx))} className="ml-2 text-zinc-500 hover:text-zinc-300">
+                        &times;
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {isUploading && (
+                <div className="px-4 pt-3 pb-1 text-[13px] text-zinc-400 flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading file...
+                </div>
+              )}
+              
               <textarea
+                ref={textareaRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  e.target.style.height = 'auto';
+                  e.target.style.height = `${e.target.scrollHeight}px`;
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    if (input.trim() && !isLoading) {
+                    if ((input.trim() || attachments.length > 0) && !isLoading && !isUploading) {
                       handleSubmit(e as any);
                     }
                   }
                 }}
                 placeholder="Send a message..."
-                disabled={isLoading}
-                rows={2}
-                className="w-full bg-transparent border-none text-[15px] text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-0 disabled:opacity-50 px-4 pt-3 pb-0 resize-none"
+                disabled={isLoading || isUploading}
+                rows={1}
+                maxLength={4000}
+                className="w-full bg-transparent border-none text-[15px] text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-0 disabled:opacity-50 px-4 pt-3 pb-3 resize-none min-h-[44px] max-h-[160px] overflow-y-auto"
               />
               
               <div className="flex items-center justify-between px-3 pb-2 pt-0">
-                <button type="button" className="text-zinc-500 hover:text-zinc-300 transition-colors p-1 rounded-lg hover:bg-white/5">
-                  <Paperclip className="w-[18px] h-[18px]" />
-                </button>
+                <input type="file" ref={fileInputRef} hidden multiple onChange={handleFileUpload} disabled={attachments.length >= 5 || isUploading || isLoading} />
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={() => fileInputRef.current?.click()} className="text-zinc-500 hover:text-zinc-300 transition-colors p-1 rounded-lg hover:bg-white/5 disabled:opacity-50" disabled={attachments.length >= 5 || isUploading || isLoading}>
+                    <Paperclip className="w-[18px] h-[18px]" />
+                  </button>
+                  {attachments.length >= 5 && (
+                    <span className="text-[12px] text-amber-500/80 font-medium">Max 5 attachments</span>
+                  )}
+                </div>
                 
                 <button
                   type="submit"
-                  disabled={!input.trim() || isLoading}
+                  disabled={(!input.trim() && attachments.length === 0) || isLoading || isUploading}
                   className="w-8 h-8 rounded-full bg-[#1a1a1a] hover:bg-white/10 border border-white/10 text-zinc-300 flex items-center justify-center transition-all disabled:opacity-50"
                 >
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -518,6 +716,35 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
           )}
         </div>
       </div>
+
+      {/* Fullscreen Lightbox Modal */}
+      {lightboxImage && (
+        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="relative flex flex-col items-end">
+            <div className="flex items-center gap-2 mb-3">
+               <button 
+                 onClick={() => handleDownload(lightboxImage.url, lightboxImage.name)}
+                 className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors border border-white/10 flex items-center justify-center"
+                 title="Download"
+               >
+                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                 </svg>
+               </button>
+               <button 
+                 onClick={() => setLightboxImage(null)}
+                 className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors border border-white/10 flex items-center justify-center"
+                 title="Close"
+               >
+                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                 </svg>
+               </button>
+            </div>
+            <img src={lightboxImage.url} alt="Fullscreen Attachment" className="max-w-[80vw] max-h-[80vh] object-contain rounded-lg shadow-2xl" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

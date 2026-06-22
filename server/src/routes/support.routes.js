@@ -6,8 +6,48 @@ import Deployment from "../models/Deployment.js";
 import HumanSupportCase from "../models/HumanSupportCase.js";
 import AISupportCase from "../models/AISupportCase.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import multer from "multer";
+import { v2 as cloudinary } from "cloudinary";
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 const router = express.Router();
+
+// Upload file to Cloudinary
+router.post("/upload", requireAuth, upload.single('file'), async (req, res) => {
+  try {
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET
+    });
+
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    
+    const isImage = req.file.mimetype.startsWith('image/');
+    const resourceType = isImage ? 'image' : 'raw';
+    
+    const uploadStream = cloudinary.uploader.upload_stream(
+        { folder: 'support_attachments', resource_type: resourceType },
+        (error, result) => {
+            if (error) {
+                console.error("Cloudinary upload error:", error);
+                return res.status(500).json({ error: "Upload failed" });
+            }
+            res.json({
+                url: result.secure_url,
+                type: isImage ? 'image' : 'file',
+                name: req.file.originalname
+            });
+        }
+    );
+    uploadStream.end(req.file.buffer);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server upload error" });
+  }
+});
+
 
 // Get all human cases for a user
 router.get("/", requireAuth, async (req, res) => {
@@ -104,12 +144,12 @@ router.post("/", requireAuth, async (req, res) => {
 // Send a message to a specific case
 router.post("/:id/message", requireAuth, async (req, res) => {
   try {
-    const { message } = req.body;
+    const { message, attachment, attachments } = req.body;
     const userId = req.user.userId || req.user._id;
     const caseId = req.params.id;
 
-    if (!message) {
-      return res.status(400).json({ error: "Message is required." });
+    if (!message && !attachment && (!attachments || attachments.length === 0)) {
+      return res.status(400).json({ error: "Message or attachment is required." });
     }
 
     if (!process.env.GEMINI_API_KEY) {
@@ -138,7 +178,10 @@ router.post("/:id/message", requireAuth, async (req, res) => {
     }
 
     // Add user message to DB
-    const newMessage = { role: messageRole, content: message };
+    const newMessage = { role: messageRole, content: message || "Sent attachments" };
+    if (attachment) newMessage.attachment = attachment;
+    if (attachments && attachments.length > 0) newMessage.attachments = attachments;
+    
     supportCase.messages.push(newMessage);
     
     // Auto-update title if it's the first user message
@@ -308,12 +351,26 @@ router.patch("/:id/status", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "Unauthorized access to this case." });
     }
 
+    if (status === 'closed') {
+      supportCase.closedByRole = 'user';
+    } else if (status === 'open') {
+      supportCase.closedByRole = undefined;
+    }
+    
+    const systemMessage = {
+      role: 'system',
+      content: `STATUS_CHANGE:${status}`,
+      timestamp: new Date()
+    };
+    supportCase.messages.push(systemMessage);
     supportCase.status = status;
     await supportCase.save();
     
     const io = req.app.get('io');
     if (io) {
-       io.to(req.params.id).emit('case_status_updated', { caseId: req.params.id, status });
+       // We need the _id of the message that was just added
+       const addedMessage = supportCase.messages[supportCase.messages.length - 1];
+       io.to(req.params.id).emit('case_status_updated', { caseId: req.params.id, status, closedByRole: supportCase.closedByRole, message: addedMessage });
        io.emit('admin_case_updated', supportCase);
     }
     
@@ -370,9 +427,23 @@ router.patch("/admin/cases/:id/status", requireAuth, async (req, res) => {
        return res.status(400).json({ error: "Invalid status." });
     }
     
+    let updateData = { $set: { status } };
+    if (status === 'closed') {
+      updateData.$set.closedByRole = 'admin';
+    } else if (status === 'open' || status === 'in-progress') {
+      updateData.$unset = { closedByRole: "" };
+    }
+    
+    const systemMessage = {
+      role: 'system',
+      content: `STATUS_CHANGE:${status}`,
+      timestamp: new Date()
+    };
+    updateData.$push = { messages: systemMessage };
+    
     const supportCase = await HumanSupportCase.findByIdAndUpdate(
       req.params.id,
-      { status },
+      updateData,
       { new: true }
     );
     
@@ -382,7 +453,8 @@ router.patch("/admin/cases/:id/status", requireAuth, async (req, res) => {
     
     const io = req.app.get('io');
     if (io) {
-       io.to(req.params.id).emit('case_status_updated', { caseId: req.params.id, status });
+       const addedMessage = supportCase.messages[supportCase.messages.length - 1];
+       io.to(req.params.id).emit('case_status_updated', { caseId: req.params.id, status, closedByRole: supportCase.closedByRole, message: addedMessage });
        io.emit('admin_case_updated', supportCase);
     }
     

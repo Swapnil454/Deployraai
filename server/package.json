@@ -22,6 +22,7 @@
     "firebase-admin": "^14.0.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.7.0",
+    "multer": "^2.2.0",
     "node-cron": "^4.2.1",
     "nodemon": "^3.1.14",
     "puppeteer": "^25.1.0",
