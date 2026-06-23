@@ -3,12 +3,12 @@ import { runAllMonitors } from './services/monitoring.service.js';
 import DomainSetup from './models/DomainSetup.js';
 import { verifyDomainLogic } from './controllers/domain.controller.js';
 
+import WorkflowRun from './models/WorkflowRun.js';
+import { triggerWorkflow } from './services/workflow.service.js';
+
 let monitorCronJob    = null;
 let domainHealthCronJob = null;
 let workflowAwakenerJob = null;
-
-import WorkflowRun from './models/WorkflowRun.js';
-import { triggerWorkflow } from './services/workflow.service.js';
 
 export const initCron = () => {
   if (monitorCronJob && domainHealthCronJob && workflowAwakenerJob) return;
