@@ -24,7 +24,8 @@ const humanSupportCaseSchema = new mongoose.Schema({
   status: { type: String, enum: ['open', 'in-progress', 'resolved', 'closed'], default: 'open' },
   closedByRole: { type: String, enum: ['user', 'admin'] },
   severity: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
-  messages: [messageSchema]
+  messages: [messageSchema],
+  parentCaseId: { type: mongoose.Schema.Types.ObjectId, ref: 'HumanSupportCase', default: null }
 }, { timestamps: true });
 
 export default mongoose.model('HumanSupportCase', humanSupportCaseSchema);

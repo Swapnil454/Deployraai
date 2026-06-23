@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { io } from "socket.io-client";
 
 interface ChatMessage {
@@ -35,6 +36,7 @@ interface SupportCase {
   closedByRole?: string;
   severity: string;
   updatedAt: string;
+  parentCaseId?: string;
   userId?: {
     name?: string;
     githubUsername?: string;
@@ -53,7 +55,9 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
   const [copied, setCopied] = useState(false);
   const [attachments, setAttachments] = useState<{ url: string; type: string; name: string; }[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isCreatingFollowUp, setIsCreatingFollowUp] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<{url: string, name: string} | null>(null);
+  const router = useRouter();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -141,6 +145,23 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
       console.error(err);
     } finally {
       setIsInitializing(false);
+    }
+  };
+
+  const handleCreateFollowUp = async () => {
+    try {
+      setIsCreatingFollowUp(true);
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+      const res = await fetch(`${apiUrl}/api/support/${caseId}/followup`, {
+        method: "POST",
+        credentials: "include"
+      });
+      if (!res.ok) throw new Error("Failed to create follow-up");
+      const data = await res.json();
+      router.push(`/dashboard/support/${data._id}`);
+    } catch (error) {
+      console.error(error);
+      setIsCreatingFollowUp(false);
     }
   };
 
@@ -384,8 +405,12 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
 
               {menuOpen && (
                 <div className="absolute right-0 top-full mt-2 w-48 bg-[#0a0a0a] border border-white/10 rounded-xl shadow-2xl py-1 z-50 overflow-hidden">
-                  <button className="w-full px-4 py-2.5 text-left text-[13px] text-zinc-300 hover:bg-white/5 flex items-center justify-between transition-colors">
-                    Create Follow-Up
+                  <button 
+                    onClick={handleCreateFollowUp}
+                    disabled={isCreatingFollowUp}
+                    className="w-full px-4 py-2.5 text-left text-[13px] text-zinc-300 hover:bg-white/5 flex items-center justify-between transition-colors disabled:opacity-50"
+                  >
+                    {isCreatingFollowUp ? 'Creating...' : 'Create Follow-Up'}
                     <ExternalLink className="w-3.5 h-3.5 text-zinc-500" />
                   </button>
                   {caseDetails?.status === 'closed' ? (
@@ -419,6 +444,16 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
       >
         <div className="max-w-[800px] space-y-4 w-full mx-auto flex flex-col flex-1 pb-4">
           <div className="space-y-6 flex-1">
+            {caseDetails?.parentCaseId && (
+              <div className="flex justify-center mb-8">
+                <Link href={`${isAdmin ? '/admin' : '/dashboard'}/support/${caseDetails.parentCaseId}`} className="px-4 py-2 bg-[#1a1a1a] hover:bg-[#222222] border border-white/10 rounded-full flex items-center gap-2 transition-colors group shadow-md">
+                  <ExternalLink className="w-4 h-4 text-indigo-400 group-hover:text-indigo-300" />
+                  <span className="text-[13px] text-zinc-300 font-medium">
+                    This case is a follow-up to Case <span className="text-white">#{caseDetails.parentCaseId}</span>
+                  </span>
+                </Link>
+              </div>
+            )}
             {messages.map((msg, index) => {
               const currentMsgDate = new Date(msg.timestamp || caseDetails?.updatedAt || new Date()).toDateString();
               const prevMsgDate = index > 0 ? new Date(messages[index - 1].timestamp || caseDetails?.updatedAt || new Date()).toDateString() : null;
@@ -474,8 +509,17 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
                   {msg.role === 'system' ? (
                     <div className="flex justify-center py-1">
                       <div className="px-4 py-1.5 rounded-full bg-[#1a1a1a] border border-white/5 text-[13px] text-zinc-400 flex items-center gap-2">
-                        {msg.content === 'STATUS_CHANGE:closed' ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                        Status changed to {msg.content === 'STATUS_CHANGE:closed' ? 'Closed' : 'Open'} {(() => {
+                        {msg.content.startsWith('STATUS_CHANGE:followup_created') ? (
+                          <React.Fragment>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            Follow-up case created: <Link href={`${isAdmin ? '/admin' : '/dashboard'}/support/${msg.content.split(':')[2]}`} className="text-indigo-400 hover:underline">#{msg.content.split(':')[2]}</Link>
+                          </React.Fragment>
+                        ) : (
+                          <React.Fragment>
+                            {msg.content === 'STATUS_CHANGE:closed' ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                            Status changed to {msg.content === 'STATUS_CHANGE:closed' ? 'Closed' : 'Open'}
+                          </React.Fragment>
+                        )} {(() => {
                           if (!msg.timestamp) return '';
                           const date = new Date(msg.timestamp);
                           const now = new Date();
@@ -525,14 +569,14 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
                             <button 
                               type="button"
                               onClick={() => handleDownload(msg.attachment!.url, msg.attachment!.name)}
-                              className="flex items-center gap-3 bg-[#1a1a1a] border border-white/10 rounded-lg p-3 hover:bg-white/5 transition-colors text-left max-w-full"
+                              className="flex items-center gap-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg p-3 transition-colors text-left max-w-full shadow-md"
                             >
-                              <div className="w-10 h-10 rounded bg-[#000000] flex items-center justify-center shrink-0 border border-white/5">
-                                <FileText className="w-5 h-5 text-zinc-400" />
+                              <div className="w-10 h-10 rounded bg-zinc-900 flex items-center justify-center shrink-0 border border-white/5">
+                                <FileText className="w-5 h-5 text-zinc-300" />
                               </div>
                               <div className="flex flex-col overflow-hidden text-left max-w-[180px]">
-                                <span className="text-sm font-medium text-zinc-200 truncate">{msg.attachment.name}</span>
-                                <span className="text-xs text-zinc-500">File Attachment</span>
+                                <span className="text-sm font-medium text-zinc-100 truncate">{msg.attachment.name}</span>
+                                <span className="text-xs text-zinc-400">File Attachment</span>
                               </div>
                             </button>
                           )}
@@ -555,14 +599,14 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
                                 <button 
                                   type="button"
                                   onClick={() => handleDownload(att.url, att.name)}
-                                  className="flex items-center gap-3 bg-[#1a1a1a] border border-white/10 rounded-lg p-3 hover:bg-white/5 transition-colors text-left max-w-full w-full"
+                                  className="flex items-center gap-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg p-3 transition-colors text-left max-w-full w-full shadow-md"
                                 >
-                                  <div className="w-10 h-10 rounded bg-[#000000] flex items-center justify-center shrink-0 border border-white/5">
-                                    <FileText className="w-5 h-5 text-zinc-400" />
+                                  <div className="w-10 h-10 rounded bg-zinc-900 flex items-center justify-center shrink-0 border border-white/5">
+                                    <FileText className="w-5 h-5 text-zinc-300" />
                                   </div>
                                   <div className="flex flex-col overflow-hidden text-left flex-1">
-                                    <span className="text-sm font-medium text-zinc-200 truncate">{att.name}</span>
-                                    <span className="text-xs text-zinc-500">File Attachment</span>
+                                    <span className="text-sm font-medium text-zinc-100 truncate">{att.name}</span>
+                                    <span className="text-xs text-zinc-400">File Attachment</span>
                                   </div>
                                 </button>
                               )}
@@ -572,39 +616,79 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
                       )}
 
                       {msg.content && msg.content !== "Sent an attachment" && (
-                      <div className="prose prose-invert prose-p:leading-relaxed prose-pre:p-0 prose-pre:bg-transparent max-w-none text-inherit text-left">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                          code({ node, inline, className, children, ...props }: any) {
-                            const match = /language-(\w+)/.exec(className || "");
-                            return !inline && match ? (
-                              <SyntaxHighlighter
-                                style={vscDarkPlus as any}
-                                language={match[1]}
-                                PreTag="div"
-                                className={`rounded-lg !my-4 !bg-[#000000] border border-white/10 text-left`}
-                                {...props}
-                              >
-                                {String(children).replace(/\n$/, "")}
-                              </SyntaxHighlighter>
-                            ) : (
-                              <code className="bg-white/10 rounded px-1.5 py-0.5" {...props}>
-                                {children}
-                              </code>
-                            );
-                          },
-                          a: ({ node, ...props }) => <a className="text-indigo-400 hover:text-indigo-300 underline underline-offset-4" target="_blank" rel="noopener noreferrer" {...props} />,
-                          p: ({ node, ...props }) => <p className="mb-4 last:mb-0" {...props} />,
-                          ul: ({ node, ...props }) => <ul className={`list-disc mb-4 ${isSender ? 'pr-4 text-right' : 'pl-4 text-left'}`} dir={isSender ? 'rtl' : 'ltr'} {...props} />,
-                          ol: ({ node, ...props }) => <ol className={`list-decimal mb-4 ${isSender ? 'pr-4 text-right' : 'pl-4 text-left'}`} dir={isSender ? 'rtl' : 'ltr'} {...props} />,
-                          li: ({ node, ...props }) => <li className="mb-1" {...props} />,
-                          strong: ({ node, ...props }) => <strong className="font-semibold text-white" {...props} />,
-                          }}
-                        >
-                          {msg.content}
-                        </ReactMarkdown>
-                      </div>
+                        index === 0 && msg.role === 'user' && msg.content.startsWith("**Problem Area**") ? (() => {
+                          const parts = msg.content.split('\n\n');
+                          const problemArea = parts[0]?.split('\n')[1] || 'General';
+                          const severity = parts[1]?.split('\n')[1] || 'Medium';
+                          const subject = parts[2]?.split('\n')[1] || 'No subject';
+                          const description = parts.slice(3).join('\n\n').replace('**Description**\n', '') || '';
+                          
+                          return (
+                            <div className="bg-[#111111] border border-white/10 rounded-lg p-4 mt-1 w-full max-w-[460px]">
+                              <div className="flex items-center gap-2 mb-3 pb-3 border-b border-white/5">
+                                  <LifeBuoy className="w-4 h-4 text-indigo-400" />
+                                  <h3 className="font-medium text-[13px] text-white">Support Request Details</h3>
+                              </div>
+                              <div className="grid grid-cols-2 gap-y-3 gap-x-4 mb-3 text-left">
+                                  <div>
+                                    <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-0.5">Problem Area</p>
+                                    <p className="text-[13px] text-zinc-200 capitalize">{problemArea}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-0.5">Severity Level</p>
+                                    <div className="flex items-center gap-1.5">
+                                       <span className={`w-1.5 h-1.5 rounded-full ${severity.toLowerCase() === 'high' ? 'bg-red-500' : severity.toLowerCase() === 'medium' ? 'bg-orange-500' : 'bg-blue-500'}`}></span>
+                                       <p className="text-[13px] text-zinc-200 capitalize">{severity}</p>
+                                    </div>
+                                  </div>
+                                  <div className="col-span-2">
+                                    <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-0.5">Subject</p>
+                                    <p className="text-[13px] text-zinc-200 font-medium">{subject}</p>
+                                  </div>
+                              </div>
+                              <div className="pt-3 border-t border-white/5 text-left">
+                                  <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1">Description</p>
+                                  <div className="text-[13px] text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                                    {description}
+                                  </div>
+                              </div>
+                            </div>
+                          );
+                        })() : (
+                          <div className="prose prose-invert prose-p:leading-relaxed prose-pre:p-0 prose-pre:bg-transparent max-w-none text-inherit text-left">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                              code({ node, inline, className, children, ...props }: any) {
+                                const match = /language-(\w+)/.exec(className || "");
+                                return !inline && match ? (
+                                  <SyntaxHighlighter
+                                    style={vscDarkPlus as any}
+                                    language={match[1]}
+                                    PreTag="div"
+                                    className={`rounded-lg !my-4 !bg-[#000000] border border-white/10 text-left`}
+                                    {...props}
+                                  >
+                                    {String(children).replace(/\n$/, "")}
+                                  </SyntaxHighlighter>
+                                ) : (
+                                  <code className="bg-white/10 rounded px-1.5 py-0.5" {...props}>
+                                    {children}
+                                  </code>
+                                );
+                              },
+                              a: ({ node, ...props }) => <a className="text-indigo-400 hover:text-indigo-300 underline underline-offset-4" target="_blank" rel="noopener noreferrer" {...props} />,
+                              p: ({ node, ...props }) => <p className="mb-4 last:mb-0" {...props} />,
+                              ul: ({ node, ...props }) => <ul className={`list-disc mb-4 ${isSender ? 'pr-4 text-right' : 'pl-4 text-left'}`} dir={isSender ? 'rtl' : 'ltr'} {...props} />,
+                              ol: ({ node, ...props }) => <ol className={`list-decimal mb-4 ${isSender ? 'pr-4 text-right' : 'pl-4 text-left'}`} dir={isSender ? 'rtl' : 'ltr'} {...props} />,
+                              li: ({ node, ...props }) => <li className="mb-1" {...props} />,
+                              strong: ({ node, ...props }) => <strong className="font-semibold text-white" {...props} />,
+                              }}
+                            >
+                              {msg.content}
+                            </ReactMarkdown>
+                          </div>
+                        )
                       )}
                     </div>
                   </div>
@@ -633,8 +717,13 @@ export default function SupportChat({ caseId, initialIsAdmin }: { caseId: string
             <div className="border border-white/10 rounded-xl p-6 bg-[#050505]">
               <div className="flex items-center justify-between mb-4">
                 <span className="text-[14px] text-zinc-300">Need further help with this case?</span>
-                <button className="px-4 py-2 bg-white hover:bg-zinc-200 transition-colors text-black text-[13px] font-medium rounded-lg">
-                  Create Follow-Up
+                <button 
+                  onClick={handleCreateFollowUp}
+                  disabled={isCreatingFollowUp}
+                  className="px-4 py-2 bg-white hover:bg-zinc-200 transition-colors text-black text-[13px] font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isCreatingFollowUp && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {isCreatingFollowUp ? 'Creating...' : 'Create Follow-Up'}
                 </button>
               </div>
               <div className="relative opacity-30 pointer-events-none mt-6">

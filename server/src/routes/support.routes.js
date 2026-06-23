@@ -141,6 +141,60 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
+// Create a follow-up case
+router.post("/:id/followup", requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId || req.user._id;
+    const oldCaseId = req.params.id;
+
+    const oldCase = await HumanSupportCase.findById(oldCaseId);
+    if (!oldCase) {
+      return res.status(404).json({ error: "Original case not found." });
+    }
+
+    if (oldCase.status !== 'closed') {
+      oldCase.status = 'closed';
+      oldCase.messages.push({
+        role: 'system',
+        content: 'STATUS_CHANGE:closed'
+      });
+    }
+
+    const newCase = new HumanSupportCase({
+      userId,
+      title: `Follow-up to: ${oldCase.title}`,
+      severity: oldCase.severity,
+      issueType: oldCase.issueType,
+      description: oldCase.description,
+      parentCaseId: oldCase._id,
+      messages: [
+        {
+          role: "user",
+          content: `**Problem Area**\n${oldCase.issueType || 'General Enquiry'}\n\n**Severity Level**\n${oldCase.severity || 'Medium'}\n\n**Subject**\nFollow-up to: ${oldCase.title}\n\n**Description**\nThis case is a follow-up to Case #${oldCaseId}.\n\nPrevious Description:\n${oldCase.description || ''}`
+        }
+      ]
+    });
+
+    await newCase.save();
+
+    oldCase.messages.push({
+      role: 'system',
+      content: `STATUS_CHANGE:followup_created:${newCase._id}`
+    });
+    await oldCase.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('admin_new_case', newCase);
+    }
+
+    res.json({ ...newCase.toObject(), caseType: 'human' });
+  } catch (error) {
+    console.error("Create follow-up error:", error);
+    res.status(500).json({ error: "Failed to create follow-up case." });
+  }
+});
+
 // Send a message to a specific case
 router.post("/:id/message", requireAuth, async (req, res) => {
   try {
