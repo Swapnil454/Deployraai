@@ -318,9 +318,18 @@ export const updateProjectConfig = async (req, res) => {
 };
 
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 
-function generateTrackingId() {
-  return `da_${crypto.randomBytes(16).toString("hex")}`;
+function generateProjectToken(projectId) {
+  if (!process.env.INGESTOR_JWT_SECRET) {
+    console.warn("WARNING: INGESTOR_JWT_SECRET not set, falling back to secure random hex");
+    return `da_${crypto.randomBytes(16).toString("hex")}`;
+  }
+  return jwt.sign(
+    { projectId, type: 'ingestor', iat: Math.floor(Date.now() / 1000) },
+    process.env.INGESTOR_JWT_SECRET,
+    { expiresIn: '90d' }
+  );
 }
 
 export const enableAnalytics = async (req, res) => {
@@ -340,7 +349,7 @@ export const enableAnalytics = async (req, res) => {
     if (!project.analytics?.trackingId) {
       project.analytics = {
         enabled: true,
-        trackingId: generateTrackingId(),
+        trackingId: generateProjectToken(project._id.toString()),
         enabledAt: new Date(),
       };
     } else {

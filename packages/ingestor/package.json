@@ -9,7 +9,10 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@fastify/rate-limit": "^11.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "fastify": "^4.26.2",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.11.3"
   },
   "devDependencies": {

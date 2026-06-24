@@ -1,17 +1,25 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 
+import jwt from 'jsonwebtoken';
+
 export async function validateProjectToken(req: FastifyRequest, reply: FastifyReply) {
-  // Placeholder for token validation
-  // Expecting token in Authorization header
   const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    reply.status(401).send({ error: 'Missing Authorization header' });
+  if (!authHeader?.startsWith('Bearer ')) {
+    reply.status(401).send({ error: 'Missing or invalid Authorization header' });
     return;
   }
-  
-  // Attach auth context
-  (req as any).auth = {
-    projectId: 'demo-project-id',
-    deployId: 'demo-deploy-id'
-  };
+
+  try {
+    const token = authHeader.slice(7);
+    const payload = jwt.verify(token, process.env.INGESTOR_JWT_SECRET || 'secret') as any;
+    
+    // Attach auth context
+    (req as any).auth = {
+      projectId: payload.projectId,
+      deployId: 'dynamic-deploy-id' // Could be extracted from headers if SDK passes it
+    };
+  } catch (err) {
+    reply.status(401).send({ error: 'Invalid or expired token' });
+    return;
+  }
 }

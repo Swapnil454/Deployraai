@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { metricsRouter } from './routes/metrics.js';
 import { logsRouter } from './routes/logs.js';
 import { tracesRouter } from './routes/traces.js';
@@ -7,6 +8,14 @@ import { logsStreamRouter } from './routes/logs-stream.js';
 const app = Fastify({
   logger: true,
   trustProxy: true,
+});
+
+app.register(rateLimit, {
+  max: 60,
+  timeWindow: '1 minute',
+  keyGenerator: (req) => {
+    return req.ip; // Analytics API rate limit per IP
+  }
 });
 
 // Routes

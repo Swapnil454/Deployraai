@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { tracesRouter } from './routes/traces.js';
 import { logsRouter } from './routes/logs.js';
 import { edgeSpansRouter } from './routes/edge-spans.js';
@@ -7,6 +8,16 @@ const app = Fastify({
   logger: true,
   // Trust X-Forwarded-For — ingestor is behind a load balancer
   trustProxy: true,
+});
+
+app.register(rateLimit, {
+  max: 1000,
+  timeWindow: '1 second',
+  keyGenerator: (req) => {
+    // If authenticated via token, rate limit by token (project ID)
+    // Otherwise rate limit by IP
+    return (req as any).auth?.projectId || req.ip;
+  }
 });
 
 // Routes

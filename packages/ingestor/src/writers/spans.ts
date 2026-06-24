@@ -16,6 +16,17 @@ export interface SpanRecord {
   events: any[];
 }
 
+const REDACTED_KEYS = ['password', 'token', 'secret', 'api_key', 'authorization'];
+
+function sanitizeAttributes(attrs: Record<string, any>) {
+  if (!attrs) return {};
+  return Object.fromEntries(
+    Object.entries(attrs).filter(([key]) =>
+      !REDACTED_KEYS.some(k => key.toLowerCase().includes(k))
+    )
+  );
+}
+
 class SpanWriter {
   private buffer: SpanRecord[] = [];
   private flushTimer: NodeJS.Timeout | null = null;
@@ -54,7 +65,7 @@ class SpanWriter {
     const params = batch.flatMap(s => [
       s.projectId, s.deployId, s.traceId, s.spanId, s.parentSpanId,
       s.name, s.startTime, s.endTime, s.durationMs, s.statusCode,
-      JSON.stringify(s.attributes)
+      JSON.stringify(sanitizeAttributes(s.attributes))
     ]);
 
     await db.query(`
