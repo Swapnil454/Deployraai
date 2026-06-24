@@ -13,10 +13,10 @@ export default function ErrorsPage() {
   useEffect(() => {
     const fetchErrors = async () => {
       try {
-        const ANALYTICS_API_URL = "http://localhost:4318";
-        // Query logs for 'error' level
+        const ANALYTICS_API_URL = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api/observability` : "http://localhost:5000/api/observability";
+        
         const res = await fetch(`${ANALYTICS_API_URL}/logs?projectId=${projectId}&level=error&limit=50`, {
-          headers: { 'Authorization': 'Bearer demo-token' }
+          credentials: "include"
         });
         if (res.ok) {
           const data = await res.json();

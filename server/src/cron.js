@@ -9,9 +9,37 @@ import { triggerWorkflow } from './services/workflow.service.js';
 let monitorCronJob    = null;
 let domainHealthCronJob = null;
 let workflowAwakenerJob = null;
+let dataRetentionCronJob = null;
 
 export const initCron = () => {
-  if (monitorCronJob && domainHealthCronJob && workflowAwakenerJob) return;
+  if (monitorCronJob && domainHealthCronJob && workflowAwakenerJob && dataRetentionCronJob) return;
+
+  // ── 0. Data Retention Cleanup — every day at 00:00 ─────────────────────────
+  if (!dataRetentionCronJob) {
+    dataRetentionCronJob = cron.schedule('0 0 * * *', async () => {
+      console.log('[Cron:data-retention] Running 30-day data cleanup...');
+      try {
+        const INGESTOR_API_URL = process.env.INGESTOR_API_URL || 'http://localhost:4317';
+        const ADMIN_SECRET = process.env.ADMIN_SECRET || 'dev-admin-secret';
+        
+        // Using dynamic import of node-fetch if global fetch is not available, 
+        // but Node 18+ has global fetch so we'll use that.
+        const res = await fetch(`${INGESTOR_API_URL}/admin/cleanup`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${ADMIN_SECRET}` }
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          console.log(`[Cron:data-retention] Cleanup success: ${data.spansDeleted} spans, ${data.logsDeleted} logs deleted.`);
+        } else {
+          console.error(`[Cron:data-retention] Cleanup failed with status ${res.status}`);
+        }
+      } catch (error) {
+        console.error('[Cron:data-retention] Error:', error);
+      }
+    });
+  }
 
   // ── 1. Uptime monitor — every 5 minutes ───────────────────────────────────
   if (!monitorCronJob) {

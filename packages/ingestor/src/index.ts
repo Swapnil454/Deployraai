@@ -3,6 +3,7 @@ import rateLimit from '@fastify/rate-limit';
 import { tracesRouter } from './routes/traces.js';
 import { logsRouter } from './routes/logs.js';
 import { edgeSpansRouter } from './routes/edge-spans.js';
+import { adminRouter } from './routes/admin.js';
 
 const app = Fastify({
   logger: true,
@@ -24,6 +25,7 @@ app.register(rateLimit, {
 app.register(tracesRouter, { prefix: '/v1/traces' });
 app.register(logsRouter, { prefix: '/logs' });
 app.register(edgeSpansRouter, { prefix: '/v1/edge-spans' });
+app.register(adminRouter, { prefix: '/admin' });
 
 // Health check — used by load balancer
 app.get('/health', async () => ({ status: 'ok', ts: Date.now() }));

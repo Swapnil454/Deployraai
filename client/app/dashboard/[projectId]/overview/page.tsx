@@ -11,20 +11,30 @@ export default function OverviewPage() {
   const [loading, setLoading] = useState(true);
   const [metrics, setMetrics] = useState<any>(null);
   const [timeseries, setTimeseries] = useState<any[]>([]);
+  const [timeRange, setTimeRange] = useState('24h');
 
   useEffect(() => {
     const fetchMetrics = async () => {
       try {
         setLoading(true);
-        // Note: Using hardcoded URL for demo, should be process.env.NEXT_PUBLIC_ANALYTICS_API_URL
-        const ANALYTICS_API_URL = "http://localhost:4318";
+        const ANALYTICS_API_URL = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api/observability` : "http://localhost:5000/api/observability";
         
-        // Use a dummy token for now since we haven't wired up full auth
-        const headers = { 'Authorization': 'Bearer demo-token' };
+        let fromDate = new Date();
+        let interval = '1h';
+        if (timeRange === '1h') {
+          fromDate = new Date(Date.now() - 60 * 60 * 1000);
+          interval = '1m';
+        } else if (timeRange === '24h') {
+          fromDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          interval = '1h';
+        } else if (timeRange === '7d') {
+          fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+          interval = '1d';
+        }
 
         const [overviewRes, timeseriesRes] = await Promise.all([
-          fetch(`${ANALYTICS_API_URL}/metrics/overview?projectId=${projectId}`, { headers }),
-          fetch(`${ANALYTICS_API_URL}/metrics/timeseries?projectId=${projectId}&interval=1h`, { headers })
+          fetch(`${ANALYTICS_API_URL}/metrics/overview?projectId=${projectId}&from=${fromDate.toISOString()}`, { credentials: "include" }),
+          fetch(`${ANALYTICS_API_URL}/metrics/timeseries?projectId=${projectId}&interval=${interval}&from=${fromDate.toISOString()}`, { credentials: "include" })
         ]);
 
         if (overviewRes.ok) setMetrics(await overviewRes.json());
@@ -37,9 +47,9 @@ export default function OverviewPage() {
     };
 
     fetchMetrics();
-  }, [projectId]);
+  }, [projectId, timeRange]);
 
-  if (loading) {
+  if (loading && !metrics) {
     return (
       <div className="flex justify-center items-center h-[50vh]">
         <Loader2 className="h-8 w-8 animate-spin text-zinc-500" />
@@ -59,7 +69,18 @@ export default function OverviewPage() {
   return (
     <div className="w-full flex flex-col min-h-full bg-black text-white p-8">
       <div className="max-w-[1440px] w-full mx-auto">
-        <h1 className="text-2xl font-bold mb-6">Overview</h1>
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold">Overview</h1>
+          <select 
+            value={timeRange} 
+            onChange={e => setTimeRange(e.target.value)}
+            className="bg-[#0a0a0a] border border-zinc-800 text-sm rounded-md px-3 py-1.5 focus:outline-none focus:border-zinc-500"
+          >
+            <option value="1h">Last 1 Hour</option>
+            <option value="24h">Last 24 Hours</option>
+            <option value="7d">Last 7 Days</option>
+          </select>
+        </div>
 
         {/* Metric Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">

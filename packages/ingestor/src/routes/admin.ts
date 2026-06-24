@@ -1,0 +1,40 @@
+import { FastifyPluginAsync } from 'fastify';
+import { db } from '../db.js';
+
+export const adminRouter: FastifyPluginAsync = async (app) => {
+  app.post('/cleanup', async (req, reply) => {
+    // Basic protection
+    const token = req.headers.authorization;
+    if (token !== `Bearer ${process.env.ADMIN_SECRET || 'dev-admin-secret'}`) {
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
+
+    try {
+      // Delete data older than 30 days
+      const result = await db.query(`
+        WITH deleted_spans AS (
+          DELETE FROM spans
+          WHERE start_time < NOW() - INTERVAL '30 days'
+          RETURNING 1
+        ),
+        deleted_logs AS (
+          DELETE FROM logs
+          WHERE timestamp < NOW() - INTERVAL '30 days'
+          RETURNING 1
+        )
+        SELECT 
+          (SELECT count(*) FROM deleted_spans) as spans_deleted,
+          (SELECT count(*) FROM deleted_logs) as logs_deleted
+      `);
+
+      return {
+        success: true,
+        spansDeleted: result.rows[0].spans_deleted,
+        logsDeleted: result.rows[0].logs_deleted
+      };
+    } catch (err) {
+      req.log.error({ err }, 'Cleanup failed');
+      return reply.status(500).send({ error: 'Cleanup failed' });
+    }
+  });
+};

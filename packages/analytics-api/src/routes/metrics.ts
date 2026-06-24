@@ -2,6 +2,20 @@ import { FastifyPluginAsync } from 'fastify';
 import { db } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 
+// Simple in-memory cache
+const cache = new Map<string, { data: any, expiresAt: number }>();
+const CACHE_TTL_MS = 30 * 1000; // 30 seconds
+
+async function withCache<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  const cached = cache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+  const data = await fetcher();
+  cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+  return data;
+}
+
 export const metricsRouter: FastifyPluginAsync = async (app) => {
 
   // GET /metrics/overview?projectId=xxx&from=ISO&to=ISO
@@ -10,7 +24,10 @@ export const metricsRouter: FastifyPluginAsync = async (app) => {
     const fromDate = new Date(from ?? Date.now() - 24 * 60 * 60 * 1000);
     const toDate = new Date(to ?? Date.now());
 
-    const [requests, errors, latency, uptime] = await Promise.all([
+    const cacheKey = `overview:${projectId}:${from}:${to}`;
+
+    return withCache(cacheKey, async () => {
+      const [requests, errors, latency, uptime] = await Promise.all([
       // Total requests
       db.query<{ count: string }>(`
         SELECT SUM(request_count)::text as count
@@ -43,12 +60,13 @@ export const metricsRouter: FastifyPluginAsync = async (app) => {
       `, [projectId, fromDate, toDate]),
     ]);
 
-    return {
-      totalRequests: parseInt(requests.rows[0]?.count ?? '0'),
-      errorRate: parseFloat(errors.rows[0]?.error_rate ?? '0'),
-      p99LatencyMs: parseFloat(latency.rows[0]?.p99 ?? '0'),
-      uptime: parseFloat(uptime.rows[0]?.uptime ?? '100'),
-    };
+      return {
+        totalRequests: parseInt(requests.rows[0]?.count ?? '0'),
+        errorRate: parseFloat(errors.rows[0]?.error_rate ?? '0'),
+        p99LatencyMs: parseFloat(latency.rows[0]?.p99 ?? '0'),
+        uptime: parseFloat(uptime.rows[0]?.uptime ?? '100'),
+      };
+    });
   });
 
   // GET /metrics/timeseries?projectId=xxx&metric=requests&interval=1h
@@ -59,44 +77,51 @@ export const metricsRouter: FastifyPluginAsync = async (app) => {
 
     // Map interval to Postgres date_trunc
     const trunc = { '1m': 'minute', '5m': 'minute', '1h': 'hour', '1d': 'day' }[interval as string] ?? 'hour';
+    const cacheKey = `timeseries:${projectId}:${metric}:${interval}:${from}:${to}`;
 
-    const rows = await db.query(`
-      SELECT
-        date_trunc($1, bucket) as time,
-        SUM(request_count) as requests,
-        SUM(error_count) as errors,
-        ROUND(100.0 * SUM(error_count) / NULLIF(SUM(request_count), 0), 2) as error_rate,
-        MAX(p99_duration_ms) as p99_ms,
-        ROUND(SUM(total_duration_ms)::numeric / NULLIF(SUM(request_count), 0), 0) as avg_ms
-      FROM metrics_minutely
-      WHERE project_id = $2 AND bucket BETWEEN $3 AND $4
-      GROUP BY 1
-      ORDER BY 1
-    `, [trunc, projectId, fromDate, toDate]);
+    return withCache(cacheKey, async () => {
+      const rows = await db.query(`
+        SELECT
+          date_trunc($1, bucket) as time,
+          SUM(request_count) as requests,
+          SUM(error_count) as errors,
+          ROUND(100.0 * SUM(error_count) / NULLIF(SUM(request_count), 0), 2) as error_rate,
+          MAX(p99_duration_ms) as p99_ms,
+          ROUND(SUM(total_duration_ms)::numeric / NULLIF(SUM(request_count), 0), 0) as avg_ms
+        FROM metrics_minutely
+        WHERE project_id = $2 AND bucket BETWEEN $3 AND $4
+        GROUP BY 1
+        ORDER BY 1
+      `, [trunc, projectId, fromDate, toDate]);
 
-    return rows.rows;
+      return rows.rows;
+    });
   });
 
   // GET /metrics/routes?projectId=xxx — slowest + most erroring routes
   app.get('/routes', { preHandler: requireAuth }, async (req, reply) => {
     const { projectId } = req.query as any;
 
-    const rows = await db.query(`
-      SELECT
-        route,
-        method,
-        SUM(request_count) as total_requests,
-        SUM(error_count) as total_errors,
-        ROUND(100.0 * SUM(error_count) / NULLIF(SUM(request_count), 0), 2) as error_rate,
-        MAX(p99_duration_ms) as p99_ms,
-        ROUND(SUM(total_duration_ms)::numeric / NULLIF(SUM(request_count), 0), 0) as avg_ms
-      FROM metrics_minutely
-      WHERE project_id = $1 AND bucket >= NOW() - INTERVAL '24 hours'
-      GROUP BY route, method
-      ORDER BY total_requests DESC
-      LIMIT 20
-    `, [projectId]);
+    const cacheKey = `routes:${projectId}`;
 
-    return rows.rows;
+    return withCache(cacheKey, async () => {
+      const rows = await db.query(`
+        SELECT
+          route,
+          method,
+          SUM(request_count) as total_requests,
+          SUM(error_count) as total_errors,
+          ROUND(100.0 * SUM(error_count) / NULLIF(SUM(request_count), 0), 2) as error_rate,
+          MAX(p99_duration_ms) as p99_ms,
+          ROUND(SUM(total_duration_ms)::numeric / NULLIF(SUM(request_count), 0), 0) as avg_ms
+        FROM metrics_minutely
+        WHERE project_id = $1 AND bucket >= NOW() - INTERVAL '24 hours'
+        GROUP BY route, method
+        ORDER BY total_requests DESC
+        LIMIT 20
+      `, [projectId]);
+
+      return rows.rows;
+    });
   });
 };
