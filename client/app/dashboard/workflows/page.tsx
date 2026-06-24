@@ -107,14 +107,14 @@ const InfographicTimelineNode = ({ event, index, isLast }: { event: any, index: 
 
   const Info = (
     <div 
-      className={`absolute flex flex-col items-center text-center w-[160px] ${!isTop ? 'justify-end' : ''}`} 
+      className={`absolute flex flex-col items-center text-center w-[130px] px-1 ${!isTop ? 'justify-end' : ''}`} 
       style={{ 
         top: infoY,
-        left: 10, // 180/2 - 80
+        left: 25, // 180/2 - 130/2
         height: 90
       }}
     >
-      <span className="text-[10px] font-bold text-zinc-200 uppercase mb-1 whitespace-nowrap overflow-hidden text-ellipsis w-full" title={event.label || event.stepName}>
+      <span className="text-[9px] leading-[1.2] font-bold text-zinc-200 uppercase mb-1 line-clamp-2 w-full break-all" title={event.label || event.stepName}>
         {event.label || event.stepName}
       </span>
       <span className={`text-[9px] font-bold px-2 py-[1px] rounded-full ${textColorClass} ${badgeBgClass}`}>

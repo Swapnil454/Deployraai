@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Loader2, LayoutDashboard, Users, Rocket, Bug, Activity, Server, ArrowLeft } from "lucide-react";
+import { Loader2, LayoutDashboard, Users, Rocket, Bug, Activity, Server, ArrowLeft, Headset } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
@@ -51,6 +51,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { href: "/admin/bug-reports", label: "Bug Reports", icon: Bug },
     { href: "/admin/monitors", label: "Monitors", icon: Activity },
     { href: "/admin/providers", label: "Providers", icon: Server },
+    { href: "/admin/support", label: "Support", icon: Headset },
   ];
 
   return (
