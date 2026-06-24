@@ -1,7 +1,24 @@
 {
   "name": "@swapnil454/tracepilot",
-  "version": "0.1.0",
-  "description": "Observability SDK for YourPlatform deployments",
+  "version": "0.1.2",
+  "description": "Zero-config OpenTelemetry auto-instrumentation for Next.js and Express",
+  "keywords": [
+    "opentelemetry",
+    "observability",
+    "tracing",
+    "apm",
+    "nextjs",
+    "express"
+  ],
+  "author": "Swapnil",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/swapnil454/AI_Agents.git"
+  },
+  "bugs": {
+    "url": "https://github.com/swapnil454/AI_Agents/issues"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
