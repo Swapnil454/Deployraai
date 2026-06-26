@@ -2,77 +2,52 @@ import React from 'react';
 import { render, waitFor, act } from '@testing-library/react';
 import { TracePilotProvider, ErrorBoundary } from '../src/react/index';
 
-// Keep a reference to restore originals
-const originalError = console.error;
-const originalFetch = global.fetch;
+const mockExport = jest.fn((spans, callback) => callback({ code: 0 }));
 
-beforeAll(() => {
-  // Silence React's error output for this test
-  console.error = jest.fn();
-
-  // Provide a safe fetch mock for all tests in this file
-  global.fetch = jest.fn().mockResolvedValue({
-    ok: true,
-    status: 200,
-    // If your code reads response.json(), provide it
-    json: async () => ({})
-  }) as unknown as typeof fetch;
-
-  // OpenTelemetry browser exporter uses XHR, not fetch.
-  // We bridge XHR back to global.fetch so the test assertions work perfectly.
-  global.XMLHttpRequest = class {
-    _method = '';
-    _url = '';
-    _headers: any = {};
-    readyState = 4;
-    status = 200;
-    onreadystatechange: any = null;
-
-    open(method: string, url: string) {
-      this._method = method;
-      this._url = url;
-    }
-
-    setRequestHeader(key: string, value: string) {
-      this._headers[key] = value;
-    }
-
-    send(body: any) {
-      global.fetch(this._url, {
-        method: this._method,
-        headers: this._headers,
-        body
-      });
-      if (this.onreadystatechange) {
-        this.onreadystatechange();
-      }
-    }
-  } as any;
+jest.mock('@opentelemetry/exporter-trace-otlp-http', () => {
+  return {
+    OTLPTraceExporter: jest.fn().mockImplementation((config) => {
+      return {
+        export: mockExport,
+        shutdown: jest.fn(() => Promise.resolve()),
+        forceFlush: jest.fn(() => Promise.resolve()),
+      };
+    })
+  };
 });
-
-afterAll(() => {
-  console.error = originalError;
-  global.fetch = originalFetch;
-});
-
-afterEach(() => {
-  // Clear any recorded calls between tests
-  if ((global.fetch as jest.Mock)?.mockClear) {
-    (global.fetch as jest.Mock).mockClear();
-  }
-});
-
-const BuggyComponent = () => {
-  throw new Error("Component render crashed!");
-  return <div>Unreachable</div>;
-};
 
 describe('React SDK - ErrorBoundary', () => {
+  afterEach(() => {
+    mockExport.mockClear();
+    jest.clearAllMocks();
+  });
+
   it('catches crashes and sends telemetry', async () => {
-    const { unmount, findByTestId } = render(
+    // Suppress console.error for the intentional crash
+    const originalError = console.error;
+    console.error = jest.fn();
+
+    const TestComponent = ({ crash }: { crash?: boolean }) => {
+      if (crash) throw new Error("Component render crashed!");
+      return <div data-testid="healthy">Healthy</div>;
+    };
+
+    const { unmount, findByTestId, rerender } = render(
       <TracePilotProvider token="test-token" ingestorUrl="http://localhost:4318/v1/traces">
         <ErrorBoundary fallback={<div data-testid="error-fallback">Fallback UI</div>}>
-          <BuggyComponent />
+          <TestComponent crash={false} />
+        </ErrorBoundary>
+      </TracePilotProvider>
+    );
+
+    // Wait for initial mount to finish so TracePilotProvider registers the tracer
+    await findByTestId('healthy');
+
+    // Now trigger the crash
+    rerender(
+      <TracePilotProvider token="test-token" ingestorUrl="http://localhost:4318/v1/traces">
+        <ErrorBoundary fallback={<div data-testid="error-fallback">Fallback UI</div>}>
+          <TestComponent crash={true} />
         </ErrorBoundary>
       </TracePilotProvider>
     );
@@ -85,17 +60,17 @@ describe('React SDK - ErrorBoundary', () => {
       unmount();
     });
 
-    // Wait for the telemetry fetch to have been invoked
+    // Wait for the telemetry exporter to have been invoked
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalled();
-    }, { timeout: 5000 });
+      expect(mockExport).toHaveBeenCalled();
+    }, { timeout: 2000 });
 
-    const [url, requestOptions] = (global.fetch as jest.Mock).mock.calls[0];
-    expect(url).toBe("http://localhost:4318/v1/traces");
-    expect(requestOptions.method).toBe('POST');
-    expect(requestOptions.headers['x-tracepilot-project-id']).toBe('test-token');
+    const spans = mockExport.mock.calls[0][0];
+    expect(spans).toBeDefined();
+    expect(spans.length).toBe(1);
+    expect(spans[0].name).toBe('React Component Crash');
+    expect(spans[0].status.message).toBe('Component render crashed!');
 
-    const payload = JSON.parse(requestOptions.body);
-    expect(payload.resourceSpans).toBeDefined();
+    console.error = originalError;
   });
 });
