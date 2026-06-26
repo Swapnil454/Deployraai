@@ -161,3 +161,18 @@ CREATE TABLE IF NOT EXISTS service_level_objectives (
 );
 
 CREATE INDEX slo_project ON service_level_objectives(project_id);
+
+-- Source Maps for JS Deobfuscation
+CREATE TABLE IF NOT EXISTS sourcemaps (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id  UUID NOT NULL REFERENCES projects(id),
+  deploy_id   TEXT NOT NULL,
+  file_name   TEXT NOT NULL,
+  source_url  TEXT,
+  size_bytes  BIGINT,
+  map_content TEXT NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (project_id, deploy_id, file_name)
+);
+
+CREATE INDEX sourcemaps_project_deploy ON sourcemaps(project_id, deploy_id);
