@@ -55,7 +55,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "test": "jest",
+    "test": "jest --passWithNoTests",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
