@@ -35,7 +35,7 @@ def init():
     # Configure OTLP HTTP Exporter
     exporter = OTLPSpanExporter(
         endpoint=f"{ingestor_url}/v1/traces",
-        headers={"Authorization": f"Bearer {project_id}"}
+        headers={"x-tracepilot-project-id": project_id}
     )
     
     # Use BatchSpanProcessor for performance

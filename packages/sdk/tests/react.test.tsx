@@ -1,3 +1,4 @@
+import React from 'react';
 import { render, waitFor, act } from '@testing-library/react';
 import { TracePilotProvider, ErrorBoundary } from '../src/react/index';
 
