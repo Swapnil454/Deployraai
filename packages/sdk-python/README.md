@@ -1,7 +1,7 @@
 # TracePilot Python SDK
 
-![PyPI version](https://badge.fury.io/py/tracepilot.svg)
-![Python Versions](https://img.shields.io/pypi/pyversions/tracepilot.svg)
+![PyPI version](https://badge.fury.io/py/swapnil-tracepilot.svg)
+![Python Versions](https://img.shields.io/pypi/pyversions/swapnil-tracepilot.svg)
 ![License](https://img.shields.io/github/license/swapnil454/tracepilot)
 
 The official TracePilot SDK for Python. TracePilot provides zero-configuration distributed tracing, performance metrics, and global crash reporting for your Python applications. 
@@ -17,9 +17,9 @@ This SDK is built on top of OpenTelemetry, meaning it provides industry-standard
 Install the package via pip or poetry:
 
 ```bash
-pip install tracepilot
+pip install swapnil-tracepilot
 # or
-poetry add tracepilot
+poetry add swapnil-tracepilot
 ```
 
 ### 2. Initialization
