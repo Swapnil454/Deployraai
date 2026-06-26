@@ -54,7 +54,7 @@ jobs:
 
       - name: Install Dependencies
         working-directory: packages/sdk-python
-        run: poetry install --no-interaction --no-root
+        run: poetry install --no-interaction
 
       - name: Run Tests
         working-directory: packages/sdk-python

@@ -11,7 +11,8 @@
     "declarationMap": true,
     "baseUrl": ".",
     "jsx": "react",
-    "paths": {}
+    "paths": {},
+    "isolatedModules": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
