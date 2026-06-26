@@ -1,6 +1,6 @@
 {
   "name": "@swapnil454/tracepilot",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Zero-config OpenTelemetry auto-instrumentation for Next.js and Express",
   "keywords": [
     "opentelemetry",

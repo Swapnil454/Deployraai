@@ -1,8 +1,10 @@
 name: Validate Go SDK Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "sdk-go-v*"
+      - "packages/sdk-go/v*"
 
 jobs:
   validate-go-sdk:
@@ -25,8 +27,7 @@ jobs:
         run: go mod download
 
       - name: Format check
-        run: |
-          test -z "$(gofmt -l .)"
+        run: test -z "$(gofmt -l .)"
 
       - name: Run tests
         run: go test ./...
