@@ -31,3 +31,27 @@ export const decryptSecret = (text) => {
   decrypted = Buffer.concat([decrypted, decipher.final()]);
   return decrypted.toString();
 };
+
+const CREDENTIAL_KEY = process.env.CREDENTIAL_ENCRYPTION_KEY 
+  ? Buffer.from(process.env.CREDENTIAL_ENCRYPTION_KEY, 'hex')
+  : crypto.randomBytes(32); // fallback if missing, though will break across restarts
+
+export const encrypt = (plaintext) => {
+  if (!plaintext) return null;
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-gcm', CREDENTIAL_KEY, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
+};
+
+export const decrypt = (ciphertext) => {
+  if (!ciphertext) return null;
+  const [ivHex, tagHex, encHex] = ciphertext.split(':');
+  const iv = Buffer.from(ivHex, 'hex');
+  const tag = Buffer.from(tagHex, 'hex');
+  const enc = Buffer.from(encHex, 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', CREDENTIAL_KEY, iv);
+  decipher.setAuthTag(tag);
+  return decipher.update(enc) + decipher.final('utf8');
+};

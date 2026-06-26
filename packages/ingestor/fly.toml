@@ -1,0 +1,22 @@
+app = "tracepilot-ingestor"
+primary_region = "iad"
+
+[build]
+  dockerfile = "../../Dockerfile.ingestor"
+
+[env]
+  PORT = "8080"
+  NODE_ENV = "production"
+  # DATABASE_URL and REDIS_URL will be set via `fly secrets set`
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 2
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 1000
+    soft_limit = 800

@@ -4,6 +4,10 @@ import React, { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { Loader2, Activity, AlertTriangle, Clock, Server } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
+import GridLayout from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
+import { CustomWidget } from "../../../../components/CustomWidget";
 
 export default function OverviewPage() {
   const params = useParams();
@@ -12,6 +16,28 @@ export default function OverviewPage() {
   const [metrics, setMetrics] = useState<any>(null);
   const [timeseries, setTimeseries] = useState<any[]>([]);
   const [timeRange, setTimeRange] = useState('24h');
+  
+  // Custom Widgets State
+  const [customLayout, setCustomLayout] = useState([
+    { i: 'custom-1', x: 0, y: 0, w: 4, h: 6 },
+    { i: 'custom-2', x: 4, y: 0, w: 8, h: 6 }
+  ]);
+  const customWidgetsConfig = {
+    'custom-1': {
+      title: "Errors by Route",
+      dimensions: ["http_route"],
+      metrics: ["count()"],
+      chartType: "bar" as const,
+      timeRange: { from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), to: new Date().toISOString() }
+    },
+    'custom-2': {
+      title: "Average Latency",
+      dimensions: ["http_route"],
+      metrics: ["avg(duration_ms)"],
+      chartType: "line" as const,
+      timeRange: { from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), to: new Date().toISOString() }
+    }
+  };
 
   useEffect(() => {
     const fetchMetrics = async () => {
@@ -152,6 +178,39 @@ export default function OverviewPage() {
               </ResponsiveContainer>
             )}
           </div>
+        </div>
+        {/* Custom Dashboard Grid */}
+        <div className="mt-12">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-bold">Custom Widgets</h2>
+            <button className="bg-zinc-800 hover:bg-zinc-700 text-sm px-4 py-2 rounded-md transition-colors">
+              Add Widget
+            </button>
+          </div>
+          
+          {/* @ts-ignore: types are mismatching with the react-grid-layout package version */}
+          {React.createElement(GridLayout as any, {
+            className: "layout",
+            layout: customLayout,
+            cols: 12,
+            rowHeight: 50,
+            width: 1376,
+            onLayoutChange: (newLayout: any) => setCustomLayout(newLayout),
+            draggableHandle: ".drag-handle"
+          }, customLayout.map(l => {
+            const widgetConfig = customWidgetsConfig[l.i as keyof typeof customWidgetsConfig];
+            if (!widgetConfig) return <div key={l.i}></div>;
+            return (
+              <div key={l.i} className="bg-[#0a0a0a] border border-zinc-800 rounded-xl flex flex-col overflow-hidden">
+                <div className="drag-handle bg-zinc-900/50 border-b border-zinc-800 px-4 py-2 flex items-center justify-between cursor-move">
+                  <span className="text-sm font-medium">{widgetConfig.title}</span>
+                </div>
+                <div className="flex-1 p-4 min-h-0">
+                  <CustomWidget projectId={projectId} config={widgetConfig} />
+                </div>
+              </div>
+            );
+          }))}
         </div>
       </div>
     </div>

@@ -264,6 +264,54 @@ export const getProject = async (req, res) => {
   }
 };
 
+export const disconnectProject = async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    const project = await Project.findOne({ _id: projectId, userId: req.user.userId });
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // Clean up Vercel log drain
+    if (project.configuration?.vercelLogDrainId && project.configuration?.vercelToken) {
+      try {
+        await axios.delete(
+          `https://api.vercel.com/v1/integrations/log-drains/${project.configuration.vercelLogDrainId}`,
+          { headers: { Authorization: `Bearer ${decryptSecret(project.configuration.vercelToken)}` } }
+        );
+      } catch (err) {
+        console.error("Failed to delete Vercel log drain", err.message);
+      }
+    }
+
+    // Clean up Railway log drain
+    if (project.configuration?.railwayLogDrainId && project.configuration?.railwayToken) {
+      try {
+        await axios.post(
+          'https://backboard.railway.app/graphql/v2',
+          { query: `mutation { logDrainDelete(id: "${project.configuration.railwayLogDrainId}") }` },
+          { headers: { Authorization: `Bearer ${decryptSecret(project.configuration.railwayToken)}` } }
+        );
+      } catch (err) {
+        console.error("Failed to delete Railway log drain", err.message);
+      }
+    }
+
+    // Stop Render poller
+    try {
+      // In a real microservice arch, the server would hit the ingestor over HTTP to stop the poller.
+      // We will leave this comment as an integration point, but if they are the same process, we'd import it.
+      await axios.delete(`${process.env.INGESTOR_URL || 'http://localhost:3002'}/internal/pollers/render/${projectId}`).catch(()=> {});
+    } catch(err) {}
+
+    await Project.findByIdAndDelete(projectId);
+    res.json({ success: true, message: "Project disconnected and drains cleaned up" });
+  } catch (error) {
+    console.error("Disconnect Project Error:", error.message);
+    res.status(500).json({ error: "Failed to disconnect project" });
+  }
+};
+
 export const updateProjectConfig = async (req, res) => {
   try {
     const { configuration } = req.body;
@@ -392,6 +440,50 @@ export const disableAnalytics = async (req, res) => {
   } catch (error) {
     console.error("Disable Analytics Error:", error);
     res.status(500).json({ success: false, message: "Failed to disable analytics" });
+  }
+};
+
+import { nanoid } from 'nanoid';
+
+export const enableStatusPage = async (req, res) => {
+  try {
+    const project = await Project.findOne({
+      _id: req.params.projectId,
+      userId: req.user.userId,
+    });
+
+    if (!project) {
+      return res.status(404).json({ success: false, message: "Project not found" });
+    }
+
+    if (!project.slug) {
+      project.slug = `${project.repoName.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${nanoid(6)}`;
+    }
+    project.statusPageEnabled = true;
+    await project.save();
+
+    res.json({ success: true, slug: project.slug });
+  } catch (error) {
+    console.error("Enable Status Page Error:", error);
+    res.status(500).json({ success: false, message: "Failed to enable status page" });
+  }
+};
+
+export const disableStatusPage = async (req, res) => {
+  try {
+    const project = await Project.findOne({
+      _id: req.params.projectId,
+      userId: req.user.userId,
+    });
+
+    if (!project) return res.status(404).json({ success: false, message: "Project not found" });
+
+    project.statusPageEnabled = false;
+    await project.save();
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to disable status page" });
   }
 };
 

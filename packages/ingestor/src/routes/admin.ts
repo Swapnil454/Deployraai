@@ -1,11 +1,20 @@
 import { FastifyPluginAsync } from 'fastify';
 import { db } from '../db.js';
+import crypto from 'crypto';
 
 export const adminRouter: FastifyPluginAsync = async (app) => {
   app.post('/cleanup', async (req, reply) => {
     // Basic protection
-    const token = req.headers.authorization;
-    if (token !== `Bearer ${process.env.ADMIN_SECRET || 'dev-admin-secret'}`) {
+    const token = req.headers.authorization || '';
+    const expected = `Bearer ${process.env.ADMIN_SECRET || 'dev-admin-secret'}`;
+    
+    try {
+      const tokenBuf = Buffer.from(token);
+      const expectedBuf = Buffer.from(expected);
+      if (tokenBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(tokenBuf, expectedBuf)) {
+        return reply.status(401).send({ error: 'Unauthorized' });
+      }
+    } catch(e) {
       return reply.status(401).send({ error: 'Unauthorized' });
     }
 

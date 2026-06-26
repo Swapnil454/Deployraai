@@ -18,7 +18,15 @@ export function verifyWebhookSecret(platform: 'vercel' | 'netlify') {
         return;
       }
       const expected = crypto.createHmac('sha1', secret).update(rawBody).digest('hex');
-      if (signature !== expected) {
+      
+      try {
+        const sigBuf = Buffer.from(signature);
+        const expBuf = Buffer.from(expected);
+        if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+          reply.status(401).send({ error: 'Invalid Vercel signature' });
+          return;
+        }
+      } catch(e) {
         reply.status(401).send({ error: 'Invalid Vercel signature' });
         return;
       }
@@ -29,7 +37,14 @@ export function verifyWebhookSecret(platform: 'vercel' | 'netlify') {
         return;
       }
       const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-      if (signature !== expected) {
+      try {
+        const sigBuf = Buffer.from(signature);
+        const expBuf = Buffer.from(expected);
+        if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+          reply.status(401).send({ error: 'Invalid Netlify signature' });
+          return;
+        }
+      } catch(e) {
         reply.status(401).send({ error: 'Invalid Netlify signature' });
         return;
       }

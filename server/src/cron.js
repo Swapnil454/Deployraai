@@ -1,9 +1,13 @@
 import cron from 'node-cron';
+import pg from 'pg';
 import { runAllMonitors } from './services/monitoring.service.js';
 import DomainSetup from './models/DomainSetup.js';
 import { verifyDomainLogic } from './controllers/domain.controller.js';
 
 import WorkflowRun from './models/WorkflowRun.js';
+
+const { Pool } = pg;
+const db = new Pool({ connectionString: process.env.DATABASE_URL });
 import { triggerWorkflow } from './services/workflow.service.js';
 
 let monitorCronJob    = null;
@@ -134,5 +138,54 @@ export const initCron = () => {
     });
   }
 
-  console.log('[Cron] Initialized schedulers: monitors (*/5 min), domain-health (*/5 min), workflows (* * * * *)');
+  // ── 4. SLO Burn Rate Daily — every day at 00:00 ────────────────────────────
+  cron.schedule('0 0 * * *', async () => {
+    try {
+      console.log('[Cron:slo] Running daily SLO burn rate calculations...');
+      const slos = await db.query('SELECT * FROM service_level_objectives');
+
+      for (const slo of slos.rows) {
+        const windowStart = new Date();
+        windowStart.setDate(windowStart.getDate() - slo.window_days);
+
+        // Count good minutes vs total minutes in the window
+        const result = await db.query(`
+          SELECT
+            COUNT(*) FILTER (
+              WHERE CASE
+                WHEN $3 = 'availability' THEN
+                  -- good = no errors in this minute
+                  (error_count::float / NULLIF(request_count, 0)) < 0.001
+                WHEN $3 = 'latency_p99' THEN
+                  p99_duration_ms < $4
+              END
+            ) as good_minutes,
+            COUNT(*) as total_minutes
+          FROM metrics_minutely
+          WHERE project_id = $1 AND bucket >= $2
+        `, [slo.project_id, windowStart, slo.metric, slo.latency_ms]);
+
+        const { good_minutes, total_minutes } = result.rows[0];
+        const error_budget_total = total_minutes * (1 - slo.target_pct / 100);
+        const bad_minutes = total_minutes - good_minutes;
+        const budget_consumed = (bad_minutes / error_budget_total) * 100;
+        const burn_rate = bad_minutes / (total_minutes * (1 - slo.target_pct / 100));
+
+        await db.query(`
+          INSERT INTO slo_burn_rate_daily (slo_id, day, good_minutes, total_minutes, budget_consumed, burn_rate)
+          VALUES ($1, CURRENT_DATE, $2, $3, $4, $5)
+          ON CONFLICT (slo_id, day) DO UPDATE SET
+            good_minutes = EXCLUDED.good_minutes,
+            total_minutes = EXCLUDED.total_minutes,
+            budget_consumed = EXCLUDED.budget_consumed,
+            burn_rate = EXCLUDED.burn_rate
+        `, [slo.id, good_minutes, total_minutes, budget_consumed, burn_rate]);
+      }
+      console.log('[Cron:slo] Finished SLO calculations.');
+    } catch (error) {
+      console.error('[Cron:slo] Fatal error in SLO calculations:', error);
+    }
+  });
+
+  console.log('[Cron] Initialized schedulers: monitors (*/5 min), domain-health (*/5 min), workflows (* * * * *), slo (0 0 * * *)');
 };
