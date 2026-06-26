@@ -3,6 +3,9 @@ import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import { getAuth } from "../config/firebaseAdmin.js";
 import { encryptSecret } from "../utils/encryption.js";
+import Stripe from "stripe";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_mock');
 
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 const COOKIE_NAME = process.env.COOKIE_NAME || "deployai_token";
@@ -67,6 +70,18 @@ export const firebaseLogin = async (req, res) => {
           email: email
         }]
       });
+      
+      try {
+        const customer = await stripe.customers.create({
+          email: user.email,
+          name: user.name,
+          metadata: { userId: user._id.toString() },
+        });
+        user.stripeCustomerId = customer.id;
+        await user.save();
+      } catch (err) {
+        console.error("Stripe customer creation failed:", err);
+      }
     }
 
     // 5. Issue the standard DeployAI JWT
@@ -199,6 +214,18 @@ export const githubCallback = async (req, res) => {
         githubTokenLastUpdatedAt: new Date(),
         githubConnected: true
       });
+      
+      try {
+        const customer = await stripe.customers.create({
+          email: user.email,
+          name: user.name,
+          metadata: { userId: user._id.toString() },
+        });
+        user.stripeCustomerId = customer.id;
+        await user.save();
+      } catch (err) {
+        console.error("Stripe customer creation failed:", err);
+      }
     }
 
     const jwtPayload = { userId: user._id, role: user.role };

@@ -261,3 +261,58 @@ export const getRailwayUsage = async (token, projectId, startTime, endTime) => {
     projectId
   };
 };
+
+export const streamRailwayLogs = async (token, projectId, environmentId, serviceId, onLogReceived) => {
+  // Poll Railway's GraphQL API every 15 seconds using the last seen timestamp as the cursor.
+  // This prevents rate limiting and avoids duplicate logs.
+  
+  let lastSeenTimestamp = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // Start from 5 mins ago
+
+  const poll = async () => {
+    const query = `
+      query getLogs($environmentId: String!, $serviceId: String!, $startDate: String, $limit: Int) {
+        serviceLogs(environmentId: $environmentId, serviceId: $serviceId, startDate: $startDate, limit: $limit) {
+          timestamp
+          message
+          severity
+        }
+      }
+    `;
+
+    try {
+      const data = await railwayGraphQL(token, query, { 
+        environmentId, 
+        serviceId, 
+        startDate: lastSeenTimestamp, 
+        limit: 500 
+      });
+      
+      const logs = data.serviceLogs || [];
+      
+      // Sort chronologically
+      logs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+      for (const log of logs) {
+        // Skip exactly identical timestamps to avoid the off-by-one duplicate issue if Railway inclusive-filters
+        if (log.timestamp === lastSeenTimestamp) continue;
+        
+        if (onLogReceived) {
+          onLogReceived({
+            timestamp: log.timestamp,
+            message: log.message,
+            severity: log.severity
+          });
+        }
+        lastSeenTimestamp = log.timestamp;
+      }
+    } catch (error) {
+      console.error('Failed to fetch Railway logs', error);
+    }
+
+    // Schedule next poll
+    setTimeout(poll, 15000);
+  };
+
+  // Start polling
+  poll();
+};

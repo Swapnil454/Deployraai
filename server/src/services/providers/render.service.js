@@ -161,3 +161,32 @@ export const getRenderRequests = async (token, serviceId, startTime, endTime) =>
   
   return renderAPI(token, 'GET', endpoint);
 };
+
+export const streamRenderLogs = async (token, serviceId, onLogReceived) => {
+  const url = process.env.RENDER_API_URL || 'https://api.render.com/v1';
+  const response = await fetch(`${url}/services/${serviceId}/logs?tail=true`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  // Async generator or callback pattern for log streaming
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const lines = decoder.decode(value).split('\n').filter(Boolean);
+    for (const line of lines) {
+      try {
+        const logEntry = JSON.parse(line);
+        if (onLogReceived) onLogReceived(logEntry);
+      } catch {
+        // Fallback for raw text lines
+        if (onLogReceived) onLogReceived({ text: line });
+      }
+    }
+  }
+};
+

@@ -1,0 +1,35 @@
+name: Validate Go SDK Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  validate-go-sdk:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: packages/sdk-go
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Format check
+        run: |
+          test -z "$(gofmt -l .)"
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build Go SDK
+        run: go build ./...

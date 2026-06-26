@@ -330,10 +330,10 @@ export default function DomainsPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-2 items-start">
-                          <span className={`px-2 py-0.5 rounded text-[11px] font-medium uppercase tracking-wider ${
-                            d.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' :
-                            d.status === 'failed' ? 'bg-red-500/10 text-red-400' :
-                            'bg-amber-500/10 text-amber-400'
+                          <span className={`inline-flex items-center justify-center px-2 py-[2px] leading-none rounded text-[11px] font-semibold uppercase tracking-wider ${
+                            d.status === 'active' ? 'bg-emerald-500 text-white' :
+                            d.status === 'failed' ? 'bg-red-500 text-white' :
+                            'bg-amber-500 text-black'
                           }`}>
                             {d.status}
                           </span>
@@ -473,7 +473,7 @@ export default function DomainsPage() {
                 <div className="mt-4 space-y-1.5 bg-black border border-zinc-800 rounded-lg p-3">
                   {dnsPreview.map((p, i) => (
                     <div key={i} className="text-[12px] flex items-center gap-3">
-                      <span className={`px-2 py-0.5 rounded text-[11px] font-medium uppercase tracking-wider ${p.action === 'create' ? 'bg-emerald-500/10 text-emerald-400' : p.action === 'skip' ? 'bg-zinc-800 text-zinc-400' : p.action === 'conflict' ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>
+                      <span className={`inline-flex items-center justify-center px-2 py-[2px] leading-none rounded text-[11px] font-semibold uppercase tracking-wider ${p.action === 'create' ? 'bg-emerald-500 text-white' : p.action === 'skip' ? 'bg-zinc-700 text-white' : p.action === 'conflict' ? 'bg-amber-500 text-black' : 'bg-red-500 text-white'}`}>
                         {p.action}
                       </span>
                       <span className="font-mono text-zinc-300">{p.type}</span>
@@ -1201,11 +1201,11 @@ export default function DomainsPage() {
                         )}
                       </div>
                       <div className="text-[11px] text-zinc-500 flex flex-col items-end whitespace-nowrap mt-0.5">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider mb-1 ${
-                          log.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
-                          log.status === 'error' ? 'bg-red-500/10 text-red-400' :
-                          log.status === 'warning' ? 'bg-amber-500/10 text-amber-400' :
-                          'bg-blue-500/10 text-blue-400'
+                        <span className={`inline-flex items-center justify-center px-1.5 py-[2px] leading-none rounded text-[10px] font-semibold uppercase tracking-wider mb-1 ${
+                          log.status === 'success' ? 'bg-emerald-500 text-white' :
+                          log.status === 'error' ? 'bg-red-500 text-white' :
+                          log.status === 'warning' ? 'bg-amber-500 text-black' :
+                          'bg-[#0070F3] text-white'
                         }`}>
                           {log.status}
                         </span>
@@ -1369,21 +1369,28 @@ export default function DomainsPage() {
     const renderHealthBadge = (healthCheck: any) => {
       const isString = typeof healthCheck === 'string';
       const status = isString ? healthCheck.toLowerCase() : healthCheck?.status;
-      const checkedAgo = !isString && healthCheck?.checkedAt ? Math.round((Date.now() - new Date(healthCheck.checkedAt).getTime()) / 60000) : null;
-      const checkedText = checkedAgo !== null ? (checkedAgo === 0 ? 'just now' : `${checkedAgo}m ago`) : '';
+      let checkedText = '';
+      if (!isString && healthCheck?.checkedAt) {
+        const mins = Math.round((Date.now() - new Date(healthCheck.checkedAt).getTime()) / 60000);
+        if (mins === 0) checkedText = 'just now';
+        else if (mins < 60) checkedText = `${mins}m ago`;
+        else if (mins < 1440) checkedText = `${Math.floor(mins / 60)}h ago`;
+        else if (mins < 525600) checkedText = `${Math.floor(mins / 1440)}d ago`;
+        else checkedText = `${Math.floor(mins / 525600)}y ago`;
+      }
 
       if (!status || status === 'unknown') {
         return (
           <div className="flex items-center gap-2">
-            <span className="bg-zinc-800 text-zinc-400 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title="Health not checked yet">Not Checked</span>
+            <span className="bg-zinc-700 text-white text-[10px] inline-flex items-center justify-center px-1.5 pt-[3px] pb-[2px] leading-none rounded-full font-semibold uppercase tracking-wide" title="Health not checked yet">Not Checked</span>
           </div>
         );
       }
       return (
         <div className="flex items-center gap-2">
-          {status === 'healthy' && <span className="bg-emerald-500/10 text-emerald-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={!isString ? healthCheck.message : 'Healthy'}>Healthy</span>}
-          {(status === 'warning' || status === 'degraded') && <span className="bg-yellow-500/10 text-yellow-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={!isString ? healthCheck.message : 'Warning'}>Warning</span>}
-          {(status === 'failed' || status === 'failing') && <span className="bg-red-500/10 text-red-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" title={!isString ? healthCheck.message : 'Failed'}>Failed</span>}
+          {status === 'healthy' && <span className="bg-emerald-500 text-white text-[10px] inline-flex items-center justify-center px-1.5 pt-[3px] pb-[2px] leading-none rounded-full font-semibold uppercase tracking-wide" title={!isString ? healthCheck.message : 'Healthy'}>Healthy</span>}
+          {(status === 'warning' || status === 'degraded') && <span className="bg-amber-500 text-black text-[10px] inline-flex items-center justify-center px-1.5 pt-[3px] pb-[2px] leading-none rounded-full font-semibold uppercase tracking-wide" title={!isString ? healthCheck.message : 'Warning'}>Warning</span>}
+          {(status === 'failed' || status === 'failing') && <span className="bg-red-500 text-white text-[10px] inline-flex items-center justify-center px-1.5 pt-[3px] pb-[2px] leading-none rounded-full font-semibold uppercase tracking-wide" title={!isString ? healthCheck.message : 'Failed'}>Failed</span>}
           {!isString && checkedText && <span className="text-[10px] text-zinc-500">checked {checkedText}</span>}
         </div>
       );
@@ -1412,27 +1419,23 @@ export default function DomainsPage() {
                   {d.domain}
                 </span>
                 {d.domainRole === 'primary' && (
-                  <span className="bg-emerald-500/10 text-emerald-500 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide">Primary</span>
+                  <span className="bg-emerald-500 text-white text-[10px] inline-flex items-center justify-center px-1.5 pt-[3px] pb-[2px] leading-none rounded-full font-semibold uppercase tracking-wide">Primary</span>
                 )}
                 {d.domainRole === 'alias' && (
-                  <span className="bg-zinc-800 text-zinc-400 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide">Alias</span>
+                  <span className="bg-zinc-700 text-white text-[10px] inline-flex items-center justify-center px-1.5 pt-[3px] pb-[2px] leading-none rounded-full font-semibold uppercase tracking-wide">Alias</span>
                 )}
                 {d.domainRole === 'redirect' && (
-                  <span className="bg-blue-500/10 text-blue-400 text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide">Redirect</span>
-                )}
-                {renderHealthBadge(d.healthCheck)}
-                {checkingDomainId === d.id && (
-                  <span className="text-[10px] text-zinc-500 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin"/> Checking...</span>
+                  <span className="bg-[#0070F3] text-white text-[10px] inline-flex items-center justify-center px-1.5 pt-[3px] pb-[2px] leading-none rounded-full font-semibold uppercase tracking-wide">Redirect</span>
                 )}
               </div>
               <div className="flex items-center gap-2">
                 {!isValid ? (
                   d.status === 'verifying' ? (
-                    <span className="inline-flex items-center bg-blue-500/10 text-blue-400 text-[11px] px-2 py-0.5 rounded-full font-medium tracking-wide gap-1">
-                      <Loader2 className="w-3 h-3 animate-spin" /> Verifying Configuration
+                    <span className="inline-flex items-center text-[#0070F3] text-[13px] gap-1.5 font-medium">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Verifying Configuration
                     </span>
                   ) : (
-                    <span className="inline-flex items-center bg-red-500/10 text-red-500 text-[11px] px-2 py-0.5 rounded-full font-medium tracking-wide">
+                    <span className="text-red-500 text-[13px] font-medium">
                       Invalid Configuration
                     </span>
                   )
@@ -1445,8 +1448,8 @@ export default function DomainsPage() {
             </div>
           </div>
 
-          {/* Middle Section: Environment / Redirect */}
-          <div className="flex items-center text-[13px] text-zinc-400 flex-1 px-4 min-w-[200px]">
+          {/* Middle Section: Environment / Redirect & Health */}
+          <div className="flex items-center justify-between text-[13px] text-zinc-400 flex-1 px-4 min-w-[200px]">
             {isRedirect ? (
               <div className="flex items-center gap-2">
                 <CornerDownRight className="h-4 w-4 text-zinc-500" />
@@ -1459,6 +1462,13 @@ export default function DomainsPage() {
                 <span>Production</span>
               </div>
             )}
+
+            <div className="flex flex-col items-end gap-1">
+              {renderHealthBadge(d.healthCheck)}
+              {checkingDomainId === d.id && (
+                <span className="text-[10px] text-zinc-500 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin"/> Checking...</span>
+              )}
+            </div>
           </div>
 
           {/* Right Section: Buttons */}

@@ -216,3 +216,17 @@ export const validateVercelToken = async (token) => {
     return false;
   }
 };
+
+export const registerVercelLogDrain = async (token, vercelProjectId, internalProjectId, webhookSecret, ingestorUrl) => {
+  const payload = {
+    name: `Tracepilot — ${internalProjectId}`,
+    type: 'ndjson',
+    url: `${ingestorUrl}/logs/vercel/${internalProjectId}`,
+    secret: webhookSecret,
+    projectIds: [vercelProjectId],
+    deliveryFormat: 'ndjson',
+  };
+
+  return vercelAPI(token, 'POST', '/v1/integrations/log-drains', payload);
+};
+

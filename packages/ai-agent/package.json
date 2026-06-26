@@ -1,0 +1,24 @@
+{
+  "name": "@swapnil454/ai-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Agent for Auto-Fix PRs",
+  "main": "dist/context-builder.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node-dev src/context-builder.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.18.0",
+    "@octokit/rest": "^22.0.1",
+    "fastify": "^4.29.1",
+    "ioredis": "^5.11.1",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "@types/pg": "^8.11.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.0"
+  }
+}

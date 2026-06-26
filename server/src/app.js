@@ -13,6 +13,8 @@ import domainRoutes from "./routes/domain.routes.js";
 import monitoringRoutes from "./routes/monitoring.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import workflowRoutes from "./routes/workflow.routes.js";
+import supportRoutes from "./routes/support.routes.js";
+import observabilityRoutes from "./routes/observability.routes.js";
 import "./workflows/index.js"; // Register workflows
 
 const app = express();
@@ -45,6 +47,8 @@ app.use("/api", domainRoutes);
 app.use("/api", monitoringRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/projects/:projectId/workflows", workflowRoutes);
+app.use("/api/support", supportRoutes);
+app.use("/api/observability", observabilityRoutes);
 
 // Analytics routes need open CORS since they're called from arbitrary user websites
 app.use("/api/analytics", (req, res, next) => {

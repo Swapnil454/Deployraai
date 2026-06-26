@@ -2,6 +2,8 @@ import app from "./app.js";
 import connect from "./connect.js";
 import dotenv from "dotenv";
 import { initCron } from "./cron.js";
+import http from "http";
+import { Server } from "socket.io";
 
 dotenv.config({ override: true });
 
@@ -24,7 +26,32 @@ connect(process.env.MONGO_URI)
     .then(() => {
         console.log(` MongoDB Connected`);
 
-        const server = app.listen(PORT, HOST, () => {
+        const server = http.createServer(app);
+        
+        const io = new Server(server, {
+          cors: {
+            origin: process.env.CLIENT_URL || "http://localhost:3000",
+            credentials: true
+          }
+        });
+
+        // Make io accessible in routes via req.app.get('io')
+        app.set('io', io);
+
+        io.on("connection", (socket) => {
+          console.log(`[Socket] Client connected: ${socket.id}`);
+          
+          socket.on("join_case", (caseId) => {
+            socket.join(caseId);
+            console.log(`[Socket] ${socket.id} joined case room ${caseId}`);
+          });
+
+          socket.on("disconnect", () => {
+            console.log(`[Socket] Client disconnected: ${socket.id}`);
+          });
+        });
+
+        server.listen(PORT, HOST, () => {
             console.log(`Server started successfully at http://${HOST}:${PORT}`);
             initCron();
         });

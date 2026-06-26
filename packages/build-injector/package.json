@@ -1,0 +1,17 @@
+{
+  "name": "@swapnil454/build-injector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Injects observability SDK into user repositories before deployment",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "dev": "tsup src/index.ts --format cjs,esm --watch"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.2",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  }
+}
