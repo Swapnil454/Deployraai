@@ -21,3 +21,4 @@ tracepilot = "tracepilot.instrument:main"
 
 [tool.poetry.group.dev.dependencies]
 responses = "^0.23.3"
+pytest = "^8.0.0"
