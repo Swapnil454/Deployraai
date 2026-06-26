@@ -29,7 +29,7 @@ const verifyProjectOwnership = async (req, res, next) => {
 };
 
 // Catch-all proxy route
-router.all('/*', verifyProjectOwnership, async (req, res) => {
+router.use('/', verifyProjectOwnership, async (req, res) => {
   try {
     const targetUrl = `${ANALYTICS_API_URL}${req.path}`;
     

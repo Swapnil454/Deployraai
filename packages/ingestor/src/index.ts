@@ -36,6 +36,9 @@ app.register(logsRouter, { prefix: '/logs' });
 app.register(edgeSpansRouter, { prefix: '/v1/edge-spans' });
 app.register(adminRouter, { prefix: '/admin' });
 
+import { sourcemapsRouter } from './routes/sourcemaps.js';
+app.register(sourcemapsRouter, { prefix: '/v1/sourcemaps' });
+
 // Health check — used by load balancer
 app.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
 

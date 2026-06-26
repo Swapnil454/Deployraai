@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS spans (
   status_code     SMALLINT NOT NULL DEFAULT 0,
   attributes      JSONB NOT NULL DEFAULT '{}',
   events          JSONB NOT NULL DEFAULT '[]',
+  fingerprint     TEXT,
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -62,6 +63,7 @@ CREATE INDEX spans_project_time ON spans (project_id, start_time DESC);
 CREATE INDEX spans_trace ON spans (trace_id);
 CREATE INDEX spans_status ON spans (project_id, status_code) WHERE status_code = 2;
 CREATE INDEX spans_attrs ON spans USING GIN (attributes);
+CREATE INDEX spans_project_fingerprint_time_idx ON spans (project_id, fingerprint, created_at DESC);
 
 -- Logs — one row per log line from the drain
 CREATE TABLE IF NOT EXISTS logs (
@@ -117,25 +119,46 @@ CREATE INDEX synthetic_project_time ON synthetic_checks (project_id, checked_at 
 -- Alert rules defined by the user
 CREATE TABLE IF NOT EXISTS alert_rules (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id  UUID NOT NULL REFERENCES projects(id),
-  metric      TEXT NOT NULL, -- 'error_rate'|'p99_latency'|'uptime'
-  operator    TEXT NOT NULL, -- 'gt'|'lt'
-  threshold   NUMERIC NOT NULL,
-  window_mins INTEGER NOT NULL DEFAULT 5,
-  channels    JSONB NOT NULL DEFAULT '[]', -- [{type:'slack', url:'...'}, ...]
+  project_id  UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
   enabled     BOOLEAN DEFAULT TRUE,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
+  event_type  TEXT NOT NULL DEFAULT 'exception',
+  severity    TEXT NOT NULL DEFAULT 'any',
+  threshold   INTEGER NOT NULL DEFAULT 1,
+  window_minutes INTEGER NOT NULL DEFAULT 5,
+  cooldown_minutes INTEGER NOT NULL DEFAULT 15,
+  route_type  TEXT NOT NULL DEFAULT 'dashboard',
+  route_target TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  CHECK (threshold > 0),
+  CHECK (window_minutes > 0),
+  CHECK (cooldown_minutes >= 0),
+  CHECK (route_type IN ('dashboard', 'email', 'slack_webhook', 'webhook'))
 );
 
+CREATE INDEX alert_rules_project_enabled_idx ON alert_rules(project_id, enabled);
+
 -- Alert firings to prevent duplicate notifications
-CREATE TABLE IF NOT EXISTS alert_firings (
-  id           BIGSERIAL PRIMARY KEY,
-  rule_id      UUID NOT NULL REFERENCES alert_rules(id),
-  project_id   UUID NOT NULL REFERENCES projects(id),
-  metric_value NUMERIC NOT NULL,
-  fired_at     TIMESTAMPTZ DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS alert_events (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  rule_id      UUID REFERENCES alert_rules(id) ON DELETE SET NULL,
+  fingerprint  TEXT,
+  title        TEXT NOT NULL,
+  message      TEXT NOT NULL,
+  severity     TEXT NOT NULL,
+  route_type   TEXT NOT NULL,
+  route_target TEXT,
+  status       TEXT DEFAULT 'queued',
+  error_message TEXT,
+  triggered_at TIMESTAMPTZ DEFAULT NOW(),
+  delivered_at TIMESTAMPTZ,
+  CHECK (status IN ('queued', 'sent', 'failed', 'suppressed'))
 );
-CREATE INDEX alert_firings_rule_time ON alert_firings (rule_id, fired_at DESC);
+
+CREATE INDEX alert_events_project_rule_time_idx ON alert_events(project_id, rule_id, triggered_at DESC);
+CREATE INDEX alert_events_fingerprint_time_idx ON alert_events(fingerprint, triggered_at DESC);
 
 -- Custom Dashboards layout persistence
 CREATE TABLE IF NOT EXISTS custom_dashboards (
@@ -149,18 +172,52 @@ CREATE TABLE IF NOT EXISTS custom_dashboards (
 
 CREATE INDEX custom_dashboards_project ON custom_dashboards (project_id);
 
--- Service Level Objectives
-CREATE TABLE IF NOT EXISTS service_level_objectives (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  metric          TEXT NOT NULL, -- 'uptime', 'success_rate', 'latency'
-  target_percent  NUMERIC NOT NULL, -- e.g., 99.9
-  window_days     INTEGER NOT NULL DEFAULT 30,
-  created_at      TIMESTAMPTZ DEFAULT NOW(),
-  updated_at      TIMESTAMPTZ DEFAULT NOW()
+-- Status Pages (Step 4)
+CREATE TABLE IF NOT EXISTS status_pages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+
+  enabled BOOLEAN DEFAULT FALSE,
+  slug TEXT UNIQUE,
+  title TEXT,
+  description TEXT,
+
+  show_uptime_history BOOLEAN DEFAULT TRUE,
+  show_incidents BOOLEAN DEFAULT TRUE,
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+  UNIQUE(project_id)
 );
 
-CREATE INDEX slo_project ON service_level_objectives(project_id);
+CREATE INDEX IF NOT EXISTS status_pages_project_idx ON status_pages(project_id);
+CREATE INDEX IF NOT EXISTS status_pages_slug_idx ON status_pages(slug);
+
+-- Service Level Objectives (Step 4)
+CREATE TABLE IF NOT EXISTS service_level_objectives (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  target_percentage NUMERIC(5,2) NOT NULL,
+  window_days INTEGER NOT NULL DEFAULT 30,
+
+  metric_source TEXT NOT NULL DEFAULT 'synthetic_checks',
+  latency_threshold_ms INTEGER,
+
+  enabled BOOLEAN DEFAULT TRUE,
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+  CHECK (type IN ('uptime', 'success_rate', 'latency')),
+  CHECK (target_percentage > 0 AND target_percentage <= 100),
+  CHECK (window_days > 0)
+);
+
+CREATE INDEX IF NOT EXISTS slos_project_enabled_idx ON service_level_objectives(project_id, enabled);
 
 -- Source Maps for JS Deobfuscation
 CREATE TABLE IF NOT EXISTS sourcemaps (
@@ -176,3 +233,89 @@ CREATE TABLE IF NOT EXISTS sourcemaps (
 );
 
 CREATE INDEX sourcemaps_project_deploy ON sourcemaps(project_id, deploy_id);
+
+-- Issues (Step 3)
+CREATE TABLE IF NOT EXISTS issues (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+
+  fingerprint TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT,
+  exception_type TEXT,
+  severity TEXT NOT NULL DEFAULT 'error',
+
+  status TEXT NOT NULL DEFAULT 'open',
+  assignee_id UUID,
+
+  first_seen_at TIMESTAMPTZ DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+  status_changed_at TIMESTAMPTZ DEFAULT NOW(),
+  resolved_at TIMESTAMPTZ,
+  ignored_at TIMESTAMPTZ,
+
+  event_count INTEGER DEFAULT 1,
+  affected_users INTEGER DEFAULT 0,
+
+  latest_stacktrace TEXT,
+  latest_deobfuscated_stacktrace TEXT,
+  latest_span_id TEXT,
+  latest_trace_id TEXT,
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+  UNIQUE(project_id, fingerprint),
+
+  CHECK (status IN ('open', 'resolved', 'ignored', 'regressed')),
+  CHECK (severity IN ('info', 'warning', 'error', 'critical'))
+);
+
+CREATE TABLE IF NOT EXISTS issue_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  issue_id UUID NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+
+  span_id TEXT,
+  trace_id TEXT,
+  user_id TEXT,
+  environment TEXT,
+  release TEXT,
+  deploy_id TEXT,
+
+  message TEXT,
+  stacktrace TEXT,
+  deobfuscated_stacktrace TEXT,
+
+  occurred_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS issue_comments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  issue_id UUID NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  user_id UUID,
+  body TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE alert_events
+ADD COLUMN IF NOT EXISTS issue_id UUID REFERENCES issues(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS issues_project_status_idx ON issues(project_id, status, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS issues_project_fingerprint_idx ON issues(project_id, fingerprint);
+CREATE INDEX IF NOT EXISTS issue_events_issue_time_idx ON issue_events(issue_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS issue_events_project_time_idx ON issue_events(project_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS issue_comments_issue_time_idx ON issue_comments(issue_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS alert_events_issue_id_idx ON alert_events(issue_id);
+
+-- Step 6: AI Root Cause Analysis
+
+CREATE TABLE IF NOT EXISTS issue_analysis (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  issue_id UUID NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  analysis_text TEXT NOT NULL,
+  suggested_fix TEXT NOT NULL,
+  fix_pr_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(issue_id)
+);

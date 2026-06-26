@@ -3,6 +3,8 @@ import { validateProjectToken } from '../middleware/auth.js';
 import { parseOTLPSpans } from '../parsers/otlp.js';
 import { spanWriter } from '../writers/spans.js';
 import { deobfuscateStackTrace, looksMinified } from '../utils/deobfuscate.js';
+import { evaluateAlertsForSpan } from '../services/alertEvaluator.js';
+import { upsertIssueFromSpan } from '../services/issueService.js';
 
 export const tracesRouter: FastifyPluginAsync = async (app) => {
   app.post('/', {
@@ -44,6 +46,19 @@ export const tracesRouter: FastifyPluginAsync = async (app) => {
     enrichedSpansPromise.then(enrichedSpans => {
       spanWriter.write(enrichedSpans).catch(err => {
         req.log.error({ err }, 'Failed to write spans');
+      });
+
+      // Fire and forget issue & alert evaluation
+      enrichedSpans.forEach(span => {
+        void upsertIssueFromSpan(span)
+          .then((issue) => {
+            if (issue) {
+              return evaluateAlertsForSpan(span, issue);
+            }
+          })
+          .catch((err) => {
+            req.log.error({ err }, 'Issue and alert pipeline failed');
+          });
       });
     }).catch(err => {
       // In case Promise.all fails entirely, though it shouldn't due to the catch above

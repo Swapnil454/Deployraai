@@ -9,7 +9,7 @@ import { ChevronsUpDown, LogOut } from "lucide-react";
 const SIDEBAR_ITEMS = [
   { name: "Projects", path: "/dashboard/projects" },
   { name: "Deployments", path: "" }, // Folder
-  { name: "Logs", path: "/dashboard/logs" },
+  { name: "Observability", path: "" }, // Folder
   { name: "Analytics", path: "/dashboard/analytics" },
   { name: "Domains", path: "/dashboard/domains" },
   { name: "Usages", path: "/dashboard/usages" },
@@ -26,6 +26,14 @@ const DEPLOYMENT_SUBPAGES = [
   { name: "Fullstack", path: "/dashboard/deployments/fullstack" }
 ];
 
+const OBSERVABILITY_SUBPAGES = [
+  { name: "Logs", path: "/dashboard/logs" },
+  { name: "Issues", path: "/dashboard/issues" },
+  { name: "Incidents", path: "/dashboard/incidents" },
+  { name: "Status Pages", path: "/dashboard/status-pages" },
+  { name: "SLOs", path: "/dashboard/slos" }
+];
+
 export const Sidebar = ({ user }: { user: any }) => {
   const pathname = usePathname() || "";
   const router = useRouter();
@@ -33,6 +41,15 @@ export const Sidebar = ({ user }: { user: any }) => {
   // Keep accordion open if we are inside a deployment subpage
   const isDeploymentsActive = pathname.startsWith("/dashboard/deployments");
   const [isDeploymentsExpanded, setIsDeploymentsExpanded] = useState(isDeploymentsActive);
+
+  // Keep accordion open if we are inside an observability subpage
+  const isObservabilityActive = 
+    pathname.startsWith("/dashboard/logs") || 
+    pathname.startsWith("/dashboard/issues") ||
+    pathname.startsWith("/dashboard/incidents") ||
+    pathname.startsWith("/dashboard/status-pages") ||
+    pathname.startsWith("/dashboard/slos");
+  const [isObservabilityExpanded, setIsObservabilityExpanded] = useState(isObservabilityActive);
 
   const handleLogout = async () => {
     try {
@@ -82,6 +99,46 @@ export const Sidebar = ({ user }: { user: any }) => {
                   <div className="flex flex-col ml-3 pl-3 border-l border-zinc-800/60 mt-1 mb-2 space-y-0.5">
                     {DEPLOYMENT_SUBPAGES.map(sub => {
                       const isActive = pathname === sub.path;
+                      return (
+                        <Link
+                          key={sub.name}
+                          href={sub.path}
+                          className={`w-full flex items-center px-3 py-1.5 text-sm rounded-md transition-colors ${
+                            isActive 
+                              ? 'bg-zinc-800/80 text-white font-medium' 
+                              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
+                          }`}
+                        >
+                          {sub.name}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          if (item.name === "Observability") {
+            return (
+              <div key={item.name}>
+                <button
+                  onClick={() => setIsObservabilityExpanded(!isObservabilityExpanded)}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-sm rounded-md transition-colors ${
+                    isObservabilityActive
+                      ? 'bg-zinc-800/50 text-white font-medium' 
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
+                  }`}
+                >
+                  <span>{item.name}</span>
+                  <ChevronsUpDown className={`h-3 w-3 text-zinc-500 transition-transform ${isObservabilityExpanded ? 'rotate-180' : ''}`} />
+                </button>
+                
+                {isObservabilityExpanded && (
+                  <div className="flex flex-col ml-3 pl-3 border-l border-zinc-800/60 mt-1 mb-2 space-y-0.5">
+                    {OBSERVABILITY_SUBPAGES.map(sub => {
+                      // Need to match exactly or match the nested paths for observability
+                      const isActive = pathname.startsWith(sub.path);
                       return (
                         <Link
                           key={sub.name}

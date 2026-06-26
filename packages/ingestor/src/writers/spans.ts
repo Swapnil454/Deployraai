@@ -159,6 +159,29 @@ class SpanWriter {
           occurrence_count = error_groups.occurrence_count + EXCLUDED.occurrence_count
       `, egParams);
     }
+
+    // Also insert to Postgres spans table for alerting threshold checks
+    const pgParams: any[] = [];
+    const pgValues: string[] = [];
+    batch.forEach((s, i) => {
+      pgParams.push(
+        s.projectId, s.deployId, s.traceId, s.spanId, s.parentSpanId || null, 
+        s.name, s.startTime, s.endTime, s.durationMs, s.statusCode, 
+        sanitizeAttributes(s.attributes), JSON.stringify(s.events), s.attributes['error.fingerprint'] || null
+      );
+      const offset = i * 13;
+      pgValues.push(`($${offset+1}, $${offset+2}, $${offset+3}, $${offset+4}, $${offset+5}, $${offset+6}, $${offset+7}, $${offset+8}, $${offset+9}, $${offset+10}, $${offset+11}, $${offset+12}, $${offset+13})`);
+    });
+
+    if (pgValues.length > 0) {
+      await db.query(`
+        INSERT INTO spans (
+          project_id, deploy_id, trace_id, span_id, parent_span_id,
+          name, start_time, end_time, duration_ms, status_code, attributes, events, fingerprint
+        ) VALUES ${pgValues.join(',')}
+        ON CONFLICT (span_id) DO NOTHING
+      `, pgParams);
+    }
   }
 }
 

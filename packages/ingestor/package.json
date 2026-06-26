@@ -17,11 +17,15 @@
     "fastify": "^4.26.2",
     "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.3",
-    "pg": "^8.11.3"
+    "lru-cache": "^5.1.1",
+    "pg": "^8.11.3",
+    "source-map": "^0.6.1"
   },
   "devDependencies": {
+    "@types/lru-cache": "^7.10.9",
     "@types/node": "^20.11.24",
     "@types/pg": "^8.11.2",
+    "@types/source-map": "^0.5.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.0"
   }

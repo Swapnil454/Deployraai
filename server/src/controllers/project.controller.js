@@ -170,6 +170,16 @@ export const createProject = async (req, res) => {
       status: 'analyzed'
     });
 
+    try {
+      const { pool } = await import('../config/postgres.js');
+      await pool.query(`
+        INSERT INTO alert_rules (project_id, name, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type)
+        VALUES ($1, 'Critical frontend errors', 'exception', 'critical', 1, 5, 15, 'dashboard')
+      `, [project._id.toString()]);
+    } catch (err) {
+      console.error("Failed to create default alert rule:", err.message);
+    }
+
     res.status(201).json({ projectId: project._id });
   } catch (error) {
     console.error("Create Project Error:", error.message);
