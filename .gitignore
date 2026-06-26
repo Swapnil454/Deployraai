@@ -52,15 +52,7 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Test files
-test*.js
-test*.ts
-*.test.js
-*.test.ts
-*.spec.js
-*.spec.ts
-tests/
-__tests__/
+
 
 # NPM Credentials
 .npmrc
