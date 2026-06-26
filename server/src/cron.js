@@ -5,6 +5,10 @@ import DomainSetup from './models/DomainSetup.js';
 import { verifyDomainLogic } from './controllers/domain.controller.js';
 
 import WorkflowRun from './models/WorkflowRun.js';
+import Project from './models/Project.js';
+import Stripe from 'stripe';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_mock');
 
 const { Pool } = pg;
 const db = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -187,5 +191,40 @@ export const initCron = () => {
     }
   });
 
-  console.log('[Cron] Initialized schedulers: monitors (*/5 min), domain-health (*/5 min), workflows (* * * * *), slo (0 0 * * *)');
+  // ── 5. Billing Aggregator — every day at 01:00 ─────────────────────────────
+  cron.schedule('0 1 * * *', async () => {
+    try {
+      console.log('[Cron:billing] Running daily billing aggregator...');
+      const projects = await Project.find({ 
+        stripeSubscriptionItemId: { $exists: true },
+        billingStatus: 'active'
+      });
+
+      for (const project of projects) {
+        const result = await db.query(`
+          SELECT COUNT(*) as span_count FROM spans
+          WHERE project_id = $1
+            AND start_time >= date_trunc('day', NOW() - INTERVAL '1 day')
+            AND start_time < date_trunc('day', NOW())
+        `, [project._id]);
+
+        const spanCount = parseInt(result.rows[0].span_count);
+        if (spanCount === 0) continue;
+
+        await stripe.subscriptionItems.createUsageRecord(
+          project.stripeSubscriptionItemId,
+          {
+            quantity: spanCount,
+            timestamp: Math.floor(Date.now() / 1000),
+            action: 'increment',
+          }
+        );
+      }
+      console.log('[Cron:billing] Finished billing aggregator.');
+    } catch (error) {
+      console.error('[Cron:billing] Fatal error in billing aggregator:', error);
+    }
+  });
+
+  console.log('[Cron] Initialized schedulers: monitors (*/5 min), domain-health (*/5 min), workflows (* * * * *), slo (0 0 * * *), billing (0 1 * * *)');
 };
