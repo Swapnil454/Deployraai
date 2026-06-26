@@ -3,6 +3,9 @@ name = "swapnil-tracepilot"
 version = "0.1.0"
 description = "TracePilot OpenTelemetry SDK for Python"
 authors = ["TracePilot Team <support@tracepilot.ai>"]
+packages = [
+    { include = "tracepilot" }
+]
 
 [tool.poetry.dependencies]
 python = "^3.9"

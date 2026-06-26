@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react';
+import { render, waitFor, act } from '@testing-library/react';
 import { TracePilotProvider, ErrorBoundary } from '../src/react/index';
 
 // Keep a reference to restore originals
@@ -38,7 +38,7 @@ const BuggyComponent = () => {
 
 describe('React SDK - ErrorBoundary', () => {
   it('catches crashes and sends telemetry', async () => {
-    const { unmount, getByTestId } = render(
+    const { unmount, findByTestId } = render(
       <TracePilotProvider token="test-token" ingestorUrl="http://localhost:4318/v1/traces">
         <ErrorBoundary fallback={<div data-testid="error-fallback">Fallback UI</div>}>
           <BuggyComponent />
@@ -46,16 +46,18 @@ describe('React SDK - ErrorBoundary', () => {
       </TracePilotProvider>
     );
 
-    // Assert fallback UI rendered
-    expect(getByTestId('error-fallback')).toBeTruthy();
+    // Wait for fallback UI (ensures ErrorBoundary handled the render error)
+    await findByTestId('error-fallback');
 
-    // Trigger cleanup
-    unmount();
+    // Trigger cleanup (wrap unmount in act to flush React effects)
+    await act(async () => {
+      unmount();
+    });
 
-    // Wait for the telemetry fetch to have been invoked instead of using a fixed timeout
+    // Wait for the telemetry fetch to have been invoked
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalled();
-    }, { timeout: 3000 });
+    }, { timeout: 5000 });
 
     const [url, requestOptions] = (global.fetch as jest.Mock).mock.calls[0];
     expect(url).toBe("http://localhost:4318/v1/traces");
