@@ -11,11 +11,11 @@ export interface SDKConfig {
 export function loadConfig(): SDKConfig {
   // These env vars are injected by your platform at deploy time.
   // The user never sets these manually.
-  const projectId = process.env.YOURPLATFORM_PROJECT_ID;
-  const token = process.env.YOURPLATFORM_TOKEN;
-  const collectorUrl = process.env.YOURPLATFORM_COLLECTOR_URL;
+  const projectId = process.env.TRACEPILOT_PROJECT_ID ?? '';
+  const token = process.env.TRACEPILOT_TOKEN;
+  const collectorUrl = process.env.TRACEPILOT_INGESTOR_URL || 'https://ingestor.deployai.in';
 
-  if (!projectId || !token || !collectorUrl) {
+  if (!token) {
     // SDK is silently disabled if not deployed via your platform.
     // This means local dev works fine with zero errors.
     return {

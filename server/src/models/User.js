@@ -24,7 +24,11 @@ const UserSchema = new mongoose.Schema({
   // Encrypted Credentials
   githubAccessTokenEncrypted: { type: String },
   githubScopes: { type: [String], default: [] },
-  githubTokenLastUpdatedAt: { type: Date }
+  githubTokenLastUpdatedAt: { type: Date },
+
+  // Billing
+  stripeCustomerId: { type: String, sparse: true, unique: true },
+  billingStatus: { type: String, enum: ['active', 'suspended', 'past_due'], default: 'active' }
 }, {
   timestamps: true
 });

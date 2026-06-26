@@ -5,6 +5,35 @@ const anthropicClient = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || 'dummy_key',
 });
 
+export async function buildFingerprintContext(projectId: string, fingerprint: string) {
+  const group = await db.query(`
+    SELECT exception_type, sample_stack_trace, first_seen, last_seen, occurrence_count
+    FROM error_groups
+    WHERE project_id = $1 AND fingerprint = $2
+  `, [projectId, fingerprint]);
+
+  if (group.rowCount === 0) return null;
+
+  // Get recent error logs containing this fingerprint (we attached it to span, but logs may correlate by traceId or time. We'll just fetch recent error logs near the last_seen time, or if we link fingerprint to logs later, use that).
+  // For now, fetch recent errors in the project.
+  const errorLogs = await db.query(`
+    SELECT timestamp, message
+    FROM logs
+    WHERE project_id = $1 AND level = 'error'
+    ORDER BY timestamp DESC
+    LIMIT 20
+  `, [projectId]);
+
+  return {
+    exceptionType: group.rows[0].exception_type,
+    stackTrace: group.rows[0].sample_stack_trace,
+    occurrenceCount: group.rows[0].occurrence_count,
+    firstSeen: group.rows[0].first_seen,
+    lastSeen: group.rows[0].last_seen,
+    errorLogs: errorLogs.rows,
+  };
+}
+
 export async function buildErrorContext(projectId: string, deployId: string) {
   const [errorSpans, errorLogs, affectedRoutes] = await Promise.all([
     // Get all ERROR spans from this deploy

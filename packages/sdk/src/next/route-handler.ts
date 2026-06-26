@@ -5,8 +5,12 @@ type Handler = (req: NextRequest, ctx?: any) => Promise<NextResponse>;
 
 export function withRouteObservability(handler: Handler): Handler {
   return async (req: NextRequest, ctx?: any): Promise<NextResponse> => {
-    const pathname = req.nextUrl.pathname;
+    const pathname = req.nextUrl?.pathname || new URL(req.url).pathname;
     const method = req.method;
+
+    if (!process.env.TRACEPILOT_TOKEN) {
+      return handler(req, ctx);
+    }
 
     return withSpan(`${method} ${pathname}`, async (span) => {
       span?.setAttributes({

@@ -37,6 +37,29 @@ export const logsRouter: FastifyPluginAsync = async (app) => {
     logWriter.write(logs).catch(() => {});
     reply.status(202).send();
   });
+
+  // Railway log drain
+  app.post('/railway/:projectId', {
+    preHandler: verifyRailwayWebhook,
+  }, async (req, reply) => {
+    const { projectId } = req.params as { projectId: string };
+    const payload = req.body as any[];
+
+    const logs = payload.map(line => ({
+      projectId,
+      source: 'railway',
+      timestamp: new Date(line.timestamp),
+      message: line.message,
+      level: detectLogLevel(line.message),
+      requestId: null,
+      region: line.attributes?.region ?? 'unknown',
+      deployId: line.attributes?.deploymentId ?? 'unknown',
+      raw: line,
+    }));
+
+    logWriter.write(logs).catch(() => {});
+    reply.status(202).send();
+  });
 };
 
 function detectLogLevel(message: string): 'error' | 'warn' | 'info' | 'debug' {
@@ -52,3 +75,51 @@ function normalizeNetlifyLogs(payload: any, projectId: string) {
   // Stub for Netlify normalization
   return [];
 }
+
+// --- Railway Integration ---
+
+export async function registerRailwayLogDrain(
+  railwayToken: string,
+  serviceId: string,
+  environmentId: string,
+  internalProjectId: string
+) {
+  const res = await fetch('https://backboard.railway.app/graphql/v2', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${railwayToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: `
+        mutation CreateLogDrain($input: LogDrainCreateInput!) {
+          logDrainCreate(input: $input) { id }
+        }
+      `,
+      variables: {
+        input: {
+          serviceId,
+          environmentId,
+          url: `https://ingestor.yourplatform.com/logs/railway/${internalProjectId}`,
+          token: process.env.RAILWAY_WEBHOOK_SECRET,
+        },
+      },
+    }),
+  });
+
+  const data = await res.json();
+  return data.data?.logDrainCreate?.id;
+}
+
+import crypto from 'crypto';
+
+async function verifyRailwayWebhook(req: any, reply: any) {
+  const auth = req.headers['authorization'];
+  const secret = Buffer.from(process.env.RAILWAY_WEBHOOK_SECRET ?? '');
+  const incoming = Buffer.from(auth?.replace('Bearer ', '') ?? '');
+
+  if (secret.length === 0 || !crypto.timingSafeEqual(secret, incoming)) {
+    return reply.status(401).send({ error: 'Invalid Railway webhook secret' });
+  }
+}
+

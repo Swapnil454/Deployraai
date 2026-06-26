@@ -12,9 +12,11 @@ export function initExpressObservability() {
 
 // Express middleware — add with app.use(observabilityMiddleware())
 export function observabilityMiddleware(): RequestHandler {
-  const tracer = trace.getTracer('@yourplatform/sdk');
-
   return (req: Request, res: Response, next: NextFunction) => {
+    if (!process.env.TRACEPILOT_TOKEN) {
+      return next();
+    }
+    const tracer = trace.getTracer('@swapnil454/tracepilot');
     const span = tracer.startSpan(`${req.method} ${req.path}`, {
       attributes: {
         'http.method': req.method,

@@ -24,6 +24,17 @@ const ProjectSchema = new mongoose.Schema({
     default: 'analyzed' 
   },
 
+  slug: {
+    type: String,
+    unique: true,
+    sparse: true, // null until user enables status page
+  },
+  
+  statusPageEnabled: {
+    type: Boolean,
+    default: false
+  },
+
   analytics: {
     enabled: {
       type: Boolean,

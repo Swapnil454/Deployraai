@@ -1,12 +1,43 @@
--- Projects table (reference — main app owns this, ingestor just reads it)
-CREATE TABLE IF NOT EXISTS projects (
+-- Teams & RBAC
+CREATE TABLE IF NOT EXISTS teams (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id     UUID NOT NULL,
   name        TEXT NOT NULL,
-  platform    TEXT NOT NULL, -- 'vercel' | 'netlify' | 'render' | 'railway'
-  token_hash  TEXT NOT NULL, -- bcrypt hash of the project token
+  owner_id    TEXT NOT NULL,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS team_members (
+  team_id     UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  user_id     TEXT NOT NULL,
+  role        TEXT NOT NULL DEFAULT 'member',
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (team_id, user_id)
+);
+
+-- Projects table
+CREATE TABLE IF NOT EXISTS projects (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_id     UUID REFERENCES teams(id),
+  user_id     TEXT, -- Legacy column
+  name        TEXT NOT NULL,
+  platform    TEXT NOT NULL,
+  token_hash  TEXT NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Error Groups — Fingerprinting AI cache and deploy diff
+CREATE TABLE IF NOT EXISTS error_groups (
+  fingerprint         TEXT PRIMARY KEY,
+  project_id          UUID NOT NULL REFERENCES projects(id),
+  exception_type      TEXT NOT NULL,
+  sample_stack_trace  TEXT NOT NULL,
+  deploy_id           TEXT NOT NULL,
+  first_seen          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  occurrence_count    INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX error_groups_project_last_seen ON error_groups (project_id, last_seen DESC);
 
 -- Spans — one row per OTEL span
 CREATE TABLE IF NOT EXISTS spans (
@@ -105,3 +136,28 @@ CREATE TABLE IF NOT EXISTS alert_firings (
   fired_at     TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX alert_firings_rule_time ON alert_firings (rule_id, fired_at DESC);
+
+-- Custom Dashboards layout persistence
+CREATE TABLE IF NOT EXISTS custom_dashboards (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id  UUID NOT NULL REFERENCES projects(id),
+  layout_json JSONB NOT NULL DEFAULT '[]',
+  widgets_json JSONB NOT NULL DEFAULT '[]',
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX custom_dashboards_project ON custom_dashboards (project_id);
+
+-- Service Level Objectives
+CREATE TABLE IF NOT EXISTS service_level_objectives (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  metric          TEXT NOT NULL, -- 'uptime', 'success_rate', 'latency'
+  target_percent  NUMERIC NOT NULL, -- e.g., 99.9
+  window_days     INTEGER NOT NULL DEFAULT 30,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX slo_project ON service_level_objectives(project_id);

@@ -2,6 +2,7 @@
   "name": "ai_agents-monorepo",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "npm@10.2.4",
   "workspaces": [
     "client",
     "server",

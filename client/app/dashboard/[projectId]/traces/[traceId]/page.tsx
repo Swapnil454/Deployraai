@@ -16,9 +16,9 @@ export default function TraceDetail() {
   useEffect(() => {
     const fetchTrace = async () => {
       try {
-        const ANALYTICS_API_URL = "http://localhost:4318";
+        const ANALYTICS_API_URL = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api/observability` : "http://localhost:5000/api/observability";
         const res = await fetch(`${ANALYTICS_API_URL}/traces/${traceId}?projectId=${projectId}`, {
-          headers: { 'Authorization': 'Bearer demo-token' }
+          credentials: "include"
         });
         if (res.ok) {
           const data = await res.json();

@@ -1,96 +1,123 @@
-# @swapnil454/tracepilot
+# TracePilot React & Node.js SDK
 
-<p align="center">
-  <strong>Zero-configuration Application Performance Monitoring (APM) and OpenTelemetry auto-instrumentation for modern Node.js frameworks.</strong>
-</p>
+[![npm version](https://badge.fury.io/js/@swapnil454%2Ftracepilot.svg)](https://www.npmjs.com/package/@swapnil454/tracepilot)
+![License](https://img.shields.io/npm/l/@swapnil454/tracepilot)
+![Types](https://img.shields.io/npm/types/@swapnil454/tracepilot)
 
----
+The official TracePilot SDK for JavaScript environments. It provides zero-config observability, distributed tracing, and automatic crash reporting for both **Node.js Backends** and **React Frontends**.
 
-## What is Tracepilot?
-
-Tracepilot is an incredibly lightweight, high-performance observability SDK designed exclusively to trace applications deployed on the AI_Agents PaaS platform. 
-
-It intercepts HTTP requests, captures latencies, extracts stack traces, and bundles everything into W3C OpenTelemetry compliant Spans. These spans are automatically beamed directly into your platform's high-speed ingestion pipeline.
-
-## Features
-
-- **Zero-Config Installation**: Works entirely out of the box. No manual tracer setup required.
-- **Non-Blocking**: Uses asynchronous hooks and bulk-flushing to ensure 0% impact on your event loop.
-- **Framework Agnostic**: Native wrappers for both Next.js (App Router) and Express.js.
-- **AI-Ready Context**: Captures highly detailed execution traces specifically designed to feed into Large Language Models for autonomous bug fixing.
+This SDK wraps the `@opentelemetry/api` ecosystem to provide a seamless, 1-line installation experience for TracePilot users.
 
 ---
 
 ## Installation
 
+Install the package using your favorite package manager:
+
 ```bash
 npm install @swapnil454/tracepilot
+# or
+yarn add @swapnil454/tracepilot
+# or
+pnpm add @swapnil454/tracepilot
 ```
-
-> **Note:** If you are deploying via the AI_Agents platform, this package is actually **auto-injected** into your build pipeline. You do not need to install it manually!
 
 ---
 
-## Quick Start
+## Node.js Backend Usage
 
-### 1. Next.js (App Router)
+Initialize the SDK as early as possible in your application lifecycle (ideally at the very top of `index.ts` or `server.ts`). It automatically instruments your Express servers, HTTP clients, and tracks unhandled exceptions.
 
-Tracepilot seamlessly wraps your Next.js API handlers. Simply wrap your `GET`, `POST`, or `PUT` functions with `withTracepilot`.
+```javascript
+import { tracepilot } from '@swapnil454/tracepilot';
 
-```typescript
-// app/api/checkout/route.ts
-import { withTracepilot } from '@swapnil454/tracepilot/next';
-import { NextResponse } from 'next/server';
+// 1. Initialize TracePilot BEFORE importing Express/Fastify/etc
+tracepilot.init({
+  token: process.env.TRACEPILOT_TOKEN, // Found in your TracePilot Project Settings
+  ingestorUrl: 'https://ingestor.tracepilot.io/v1/traces' // Optional: for self-hosting
+});
 
-async function handler(req: Request) {
-  // Your business logic here
-  const data = await processPayment(req);
-  return NextResponse.json({ success: true, data });
-}
-
-export const POST = withTracepilot(handler);
-```
-
-### 2. Express.js
-
-For Express applications, simply drop the `tracepilotMiddleware` at the very top of your middleware stack, before your routes are defined.
-
-```typescript
-// server.ts
+// 2. Normal App Code
 import express from 'express';
-import { tracepilotMiddleware } from '@swapnil454/tracepilot/express';
-
 const app = express();
 
-// 1. Inject Tracepilot first!
-app.use(tracepilotMiddleware);
-
-// 2. Define your routes
-app.get('/health', (req, res) => {
-  res.json({ status: 'healthy' });
+app.get('/api/users', (req, res) => {
+    // This route is automatically traced!
+    res.json({ users: [] });
 });
 
-app.listen(8080, () => {
-  console.log('Server is running and fully instrumented!');
-});
+app.listen(8080);
 ```
 
----
-
-## Configuration (Environment Variables)
-
-Tracepilot requires zero configuration in the code itself. It is fully driven by environment variables injected by the AI_Agents platform during deployment.
-
-- `TRACEPILOT_PROJECT_ID`: The unique UUID of your project (Required).
-- `TRACEPILOT_TOKEN`: The cryptographic access token (Required).
-- `INGESTOR_URL`: The destination to beam the traces (Defaults to `http://localhost:4317` in local development).
-
-## Security & Privacy (Private Repositories)
-
-**Yes! Tracepilot is perfectly safe for private repositories.** 
-Even though this NPM package is publicly available on the NPM registry (so your CI/CD pipelines can easily run `npm install`), the actual observability data it collects is heavily encrypted and sent directly to your private, isolated ingestion cluster. No code or sensitive data is ever exposed to the public registry.
+### Backend Features
+- **Auto-Instrumentation:** Zero manual spans required. Automatically traces incoming HTTP requests, outgoing `fetch` calls, Express routes, and console logs.
+- **Crash Safety:** Installs `uncaughtException` and `unhandledRejection` hooks to guarantee error spans are flushed before Node.js exits.
 
 ---
+
+## React Frontend Usage
+
+For frontend web applications, TracePilot provides a specialized Web Provider that captures UI crashes, React Component Stack traces, and browser performance metrics.
+
+Wrap your React application tree with the `TracePilotProvider` and `ErrorBoundary`.
+
+```tsx
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import { TracePilotProvider, ErrorBoundary } from '@swapnil454/tracepilot/react';
+
+// You can create a custom fallback UI for when the app crashes
+const CrashScreen = () => (
+    <div style={{ padding: 20, color: 'red' }}>
+        <h1>Oops! The application crashed.</h1>
+        <p>Our engineering team has automatically been notified.</p>
+    </div>
+);
+
+ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
+  <TracePilotProvider 
+    token="YOUR_PUBLIC_PROJECT_TOKEN" 
+    ingestorUrl="https://ingestor.tracepilot.io/v1/traces"
+  >
+    <ErrorBoundary fallback={<CrashScreen />}>
+      <App />
+    </ErrorBoundary>
+  </TracePilotProvider>
+);
+```
+
+### Frontend Features
+- **React Crash Capture:** Our `ErrorBoundary` hooks into `componentDidCatch`. If a component throws an error during render, it extracts the `react.component_stack`, attaches it to an OpenTelemetry span, and flushes it to the dashboard.
+- **Web Vitals:** Tracks core web performance metrics.
+- **Graceful Fallbacks:** Prevents white-screen-of-death (WSOD) by displaying your custom fallback UI.
+
+---
+
+## Manual Tracing
+
+If you want to track specific user actions or business logic manually:
+
+```typescript
+import { trace } from '@opentelemetry/api';
+
+const tracer = trace.getTracer('my-frontend-app');
+
+function handleCheckout() {
+    tracer.startActiveSpan('checkout_process', (span) => {
+        span.setAttribute('cart.value', 150.00);
+        
+        try {
+            // Do checkout logic
+            span.addEvent('payment_authorized');
+        } catch (e) {
+            span.recordException(e);
+        } finally {
+            span.end();
+        }
+    });
+}
+```
 
 ## License
-MIT © Swapnil
+MIT License. See [LICENSE](LICENSE) for more details.

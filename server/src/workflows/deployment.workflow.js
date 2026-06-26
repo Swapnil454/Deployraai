@@ -1,6 +1,7 @@
 import { defineWorkflow } from '../services/workflow.service.js';
 import Deployment from '../models/Deployment.js';
 import Project from '../models/Project.js';
+import { injectSdkViaGithub } from '../services/githubSdkInjector.js';
 import { 
   startBackendProviderDeployment, 
   checkBackendProviderStatus,
@@ -33,6 +34,13 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
   });
 
   const project = context.project;
+
+  // Run GitHub SDK Auto-Injector before triggering providers
+  await step.run("auto_inject_sdk_v1", async () => {
+    await injectSdkViaGithub(project);
+    return { status: "ok" };
+  });
+
   let backendUrl = null;
   let finalBackendStatus = null;
   let backendProviderCtx = null;

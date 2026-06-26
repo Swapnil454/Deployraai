@@ -1,0 +1,62 @@
+services:
+  # 1. Analytics API (The Main Backend)
+  - type: web
+    name: tracepilot-analytics-api
+    env: node
+    buildCommand: npm install -g turbo && npm ci && turbo run build --filter=@swapnil454/analytics-api
+    startCommand: npm run start --workspace=@swapnil454/analytics-api
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      - key: DATABASE_URL
+        sync: false # Set in Render dashboard
+      - key: REDIS_URL
+        sync: false # Set in Render dashboard
+
+  # 2. Alerting Background Worker
+  - type: worker
+    name: tracepilot-alerting-worker
+    env: node
+    buildCommand: npm install -g turbo && npm ci && turbo run build --filter=@swapnil454/alerting
+    startCommand: npm run start --workspace=@swapnil454/alerting
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+
+  # 3. Synthetic Checker Worker
+  - type: worker
+    name: tracepilot-synthetic-checker
+    env: node
+    buildCommand: npm install -g turbo && npm ci && turbo run build --filter=@swapnil454/synthetic-checker
+    startCommand: npm run start --workspace=@swapnil454/synthetic-checker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+
+  # 4. AI Agent Workflow Worker
+  - type: worker
+    name: tracepilot-ai-agent
+    env: node
+    buildCommand: npm install -g turbo && npm ci && turbo run build --filter=@swapnil454/ai-agent
+    startCommand: npm run start --workspace=@swapnil454/ai-agent
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
