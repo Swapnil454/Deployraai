@@ -2,28 +2,36 @@ package tracepilot
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"os"
+	"runtime/debug"
+	"strings"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"net/http"
-	"runtime/debug"
-	"fmt"
 )
+
+func normalizeEndpoint(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+	endpoint = strings.TrimPrefix(endpoint, "http://")
+	return endpoint
+}
 
 // Init initializes the TracePilot OpenTelemetry exporter.
 // It sets the global TracerProvider which can be used by standard OpenTelemetry instrumentations.
 // Returns a Shutdown function that should be deferred to ensure spans are flushed.
 func Init(ctx context.Context) (func(context.Context) error, error) {
 	projectID := os.Getenv("TRACEPILOT_TOKEN")
-	
+
 	// Silent disable pattern
 	if projectID == "" {
 		tp := noop.NewTracerProvider()
@@ -33,7 +41,7 @@ func Init(ctx context.Context) (func(context.Context) error, error) {
 
 	ingestorURL := os.Getenv("TRACEPILOT_COLLECTOR_URL")
 	if ingestorURL == "" {
-		ingestorURL = "ingest.tracepilot.ai/v1/traces"
+		ingestorURL = "ingest.tracepilot.ai"
 	}
 
 	serviceName := os.Getenv("SERVICE_NAME")
@@ -41,13 +49,20 @@ func Init(ctx context.Context) (func(context.Context) error, error) {
 		serviceName = "go-service"
 	}
 
-	// Create OTLP HTTP Exporter
-	exporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint(ingestorURL),
+	opts := []otlptracehttp.Option{
+		otlptracehttp.WithEndpoint(normalizeEndpoint(ingestorURL)),
 		otlptracehttp.WithHeaders(map[string]string{
 			"x-tracepilot-project-id": projectID,
 		}),
-	)
+	}
+
+	// Use insecure connection if the original URL is HTTP
+	if strings.HasPrefix(strings.TrimSpace(ingestorURL), "http://") {
+		opts = append(opts, otlptracehttp.WithInsecure())
+	}
+
+	// Create OTLP HTTP Exporter
+	exporter, err := otlptracehttp.New(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +109,7 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 					span.SetAttributes(semconv.ExceptionMessageKey.String(fmt.Sprintf("%v", err)))
 					span.SetAttributes(semconv.ExceptionStacktraceKey.String(string(debug.Stack())))
 				}
-				
+
 				// Repanic
 				panic(err)
 			}
