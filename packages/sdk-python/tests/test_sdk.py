@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 # Mock env vars before importing tracepilot
 os.environ["TRACEPILOT_TOKEN"] = "test-prj-123"
-os.environ["TRACEPILOT_COLLECTOR_URL"] = "http://localhost:4318/v1/traces"
+os.environ["TRACEPILOT_COLLECTOR_URL"] = "http://localhost:4318"
 
 import tracepilot
 

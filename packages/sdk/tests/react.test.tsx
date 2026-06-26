@@ -1,4 +1,3 @@
-import React from 'react';
 import { render, waitFor, act } from '@testing-library/react';
 import { TracePilotProvider, ErrorBoundary } from '../src/react/index';
 
@@ -17,6 +16,37 @@ beforeAll(() => {
     // If your code reads response.json(), provide it
     json: async () => ({})
   }) as unknown as typeof fetch;
+
+  // OpenTelemetry browser exporter uses XHR, not fetch.
+  // We bridge XHR back to global.fetch so the test assertions work perfectly.
+  global.XMLHttpRequest = class {
+    _method = '';
+    _url = '';
+    _headers: any = {};
+    readyState = 4;
+    status = 200;
+    onreadystatechange: any = null;
+
+    open(method: string, url: string) {
+      this._method = method;
+      this._url = url;
+    }
+
+    setRequestHeader(key: string, value: string) {
+      this._headers[key] = value;
+    }
+
+    send(body: any) {
+      global.fetch(this._url, {
+        method: this._method,
+        headers: this._headers,
+        body
+      });
+      if (this.onreadystatechange) {
+        this.onreadystatechange();
+      }
+    }
+  } as any;
 });
 
 afterAll(() => {
