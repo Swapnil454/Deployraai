@@ -1,8 +1,16 @@
 import { Redis } from 'ioredis';
 
-export const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : new Redis();
+const redisOptions = {
+  maxRetriesPerRequest: 0,   // Don't retry queued commands when Redis is down
+  enableOfflineQueue: false,  // Don't queue commands when Redis is not connected
+  lazyConnect: true,          // Don't connect until first command
+};
 
-// Catch connection errors so they don't spam the console if Redis is offline
-redis.on('error', (err) => {
+export const redis = process.env.REDIS_URL 
+  ? new Redis(process.env.REDIS_URL, redisOptions) 
+  : new Redis({ ...redisOptions, host: '127.0.0.1', port: 6379 });
+
+// Catch connection errors so they don't crash the process if Redis is offline
+redis.on('error', () => {
   // Silent fallback when Redis is unavailable (rate limiting degrades gracefully)
 });

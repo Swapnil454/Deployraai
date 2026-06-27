@@ -28,10 +28,15 @@ const DEPLOYMENT_SUBPAGES = [
 ];
 
 const OBSERVABILITY_SUBPAGES = [
+  { name: "Topology", path: "/dashboard/observability/topology" },
+  { name: "Dashboards", path: "/dashboard/observability/dashboards" },
   { name: "Analysis", path: "/dashboard/observability/analysis" },
+  { name: "Profiling", path: "/dashboard/observability/profiling" },
   { name: "RUM & Vitals", path: "/dashboard/observability/rum" },
+  { name: "Sessions", path: "/dashboard/observability/sessions" },
   { name: "Logs", path: "/dashboard/observability/logs" },
   { name: "Issues", path: "/dashboard/issues" },
+  { name: "Alerts", path: "/dashboard/alerts" },
   { name: "Incidents", path: "/dashboard/incidents" },
   { name: "Status Pages", path: "/dashboard/status-pages" },
   { name: "SLOs", path: "/dashboard/slos" }
@@ -47,10 +52,14 @@ export const Sidebar = ({ user }: { user: any }) => {
 
   // Keep accordion open if we are inside an observability subpage
   const isObservabilityActive = 
+    pathname.startsWith("/dashboard/observability/topology") ||
+    pathname.startsWith("/dashboard/observability/dashboards") ||
     pathname.startsWith("/dashboard/observability/analysis") ||
+    pathname.startsWith("/dashboard/observability/profiling") ||
     pathname.startsWith("/dashboard/observability/rum") ||
     pathname.startsWith("/dashboard/observability/logs") ||
     pathname.startsWith("/dashboard/issues") ||
+    pathname.startsWith("/dashboard/alerts") ||
     pathname.startsWith("/dashboard/incidents") ||
     pathname.startsWith("/dashboard/status-pages") ||
     pathname.startsWith("/dashboard/slos");

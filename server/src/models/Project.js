@@ -45,6 +45,11 @@ const ProjectSchema = new mongoose.Schema({
       unique: true,
       sparse: true,
     },
+    rumWriteKey: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
     verified: {
       type: Boolean,
       default: false,

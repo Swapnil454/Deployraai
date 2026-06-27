@@ -19,13 +19,13 @@ export const getAlertRules = async (req, res) => {
 export const createAlertRule = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { name, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type, route_target } = req.body;
+    const { name, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type, route_target, auto_resolve } = req.body;
 
     const result = await pool.query(
       `INSERT INTO alert_rules (
-        project_id, name, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type, route_target
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [projectId, name, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type, route_target || null]
+        project_id, name, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type, route_target, auto_resolve
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [projectId, name, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type, route_target || null, auto_resolve !== undefined ? auto_resolve : true]
     );
 
     res.status(201).json(result.rows[0]);
@@ -38,14 +38,14 @@ export const createAlertRule = async (req, res) => {
 export const updateAlertRule = async (req, res) => {
   try {
     const { projectId, ruleId } = req.params;
-    const { name, enabled, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type, route_target } = req.body;
+    const { name, enabled, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type, route_target, auto_resolve } = req.body;
 
     const result = await pool.query(
       `UPDATE alert_rules SET 
         name = $1, enabled = $2, event_type = $3, severity = $4, threshold = $5, 
-        window_minutes = $6, cooldown_minutes = $7, route_type = $8, route_target = $9, updated_at = NOW()
-      WHERE project_id = $10 AND id = $11 RETURNING *`,
-      [name, enabled, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type, route_target || null, projectId, ruleId]
+        window_minutes = $6, cooldown_minutes = $7, route_type = $8, route_target = $9, auto_resolve = $10, updated_at = NOW()
+      WHERE project_id = $11 AND id = $12 RETURNING *`,
+      [name, enabled, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type, route_target || null, auto_resolve !== undefined ? auto_resolve : true, projectId, ruleId]
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Rule not found' });

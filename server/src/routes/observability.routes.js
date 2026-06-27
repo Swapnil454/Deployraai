@@ -12,9 +12,9 @@ router.use(requireAuth);
 // Middleware to verify user owns the project
 const verifyProjectOwnership = async (req, res, next) => {
   try {
-    const projectId = req.query.projectId;
+    const projectId = req.query.projectId || req.body?.projectId;
     if (!projectId) {
-      return res.status(400).json({ error: 'projectId query parameter is required' });
+      return res.status(400).json({ error: 'projectId is required in query or body' });
     }
 
     const project = await Project.findOne({ _id: projectId, userId: req.user.userId });
@@ -24,6 +24,9 @@ const verifyProjectOwnership = async (req, res, next) => {
 
     next();
   } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(400).json({ error: 'Invalid projectId format' });
+    }
     res.status(500).json({ error: 'Failed to verify project ownership' });
   }
 };

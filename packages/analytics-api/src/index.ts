@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import cors from '@fastify/cors';
@@ -13,6 +14,9 @@ import { logsStreamRouter } from './routes/logs-stream.js';
 import { publicStatusRouter } from './routes/status.js';
 import { sloRouter } from './routes/slo.js';
 import { billingRouter } from './routes/billing.js';
+import { topologyRouter } from './routes/topology.js';
+import { customDashboardsRouter } from './routes/custom-dashboards.js';
+import { profilesRouter } from './routes/profiles.js';
 
 const app = Fastify({
   logger: true,
@@ -45,6 +49,9 @@ app.register(logsStreamRouter, { prefix: '/logs' });
 app.register(publicStatusRouter, { prefix: '/public' });
 app.register(sloRouter, { prefix: '/slo' });
 app.register(billingRouter, { prefix: '/billing' });
+app.register(topologyRouter, { prefix: '/topology' });
+app.register(customDashboardsRouter, { prefix: '/custom-dashboards' });
+app.register(profilesRouter, { prefix: '/profiles' });
 
 app.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
 

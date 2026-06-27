@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Activity, Layout, MousePointer2, AlertTriangle, MonitorPlay, X } from "lucide-react";
 import Script from "next/script";
 import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
+import { WebVitalsDashboard } from "@/components/observability/WebVitalsDashboard";
 
 export default function RumDashboard() {
   const { projectId } = useParams();
@@ -12,6 +13,8 @@ export default function RumDashboard() {
 
   const [window, setWindow] = useState('24h');
   const [vitals, setVitals] = useState<any[]>([]);
+  const [routeVitals, setRouteVitals] = useState<any[]>([]);
+  const [timeseries, setTimeseries] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -27,18 +30,24 @@ export default function RumDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [vitalsRes, sessionsRes, projectRes] = await Promise.all([
+      const [vitalsRes, routeVitalsRes, timeseriesRes, sessionsRes, projectRes] = await Promise.all([
         fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/rum/vitals?projectId=${projectId}&window=${window}`, { credentials: 'include' }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/rum/vitals/routes?projectId=${projectId}&window=${window}`, { credentials: 'include' }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/rum/vitals/timeseries?projectId=${projectId}&window=${window}`, { credentials: 'include' }),
         fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/rum/sessions?projectId=${projectId}&window=${window}`, { credentials: 'include' }),
         fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${projectId}`, { credentials: "include" })
       ]);
 
       // Try to parse JSON regardless of status — the API returns empty arrays when Clickhouse is offline
       const vitalsData = vitalsRes.ok ? await vitalsRes.json() : { vitals: [] };
+      const routeVitalsData = routeVitalsRes.ok ? await routeVitalsRes.json() : { routes: [] };
+      const timeseriesData = timeseriesRes.ok ? await timeseriesRes.json() : { timeseries: [] };
       const sessionsData = sessionsRes.ok ? await sessionsRes.json() : { sessions: [] };
       const projectData = projectRes.ok ? await projectRes.json() : null;
       
       setVitals(vitalsData.vitals || []);
+      setRouteVitals(routeVitalsData.routes || []);
+      setTimeseries(timeseriesData.timeseries || []);
       setSessions(sessionsData.sessions || []);
       setProject(projectData);
     } catch (err: any) {
@@ -118,10 +127,7 @@ export default function RumDashboard() {
     );
   }
 
-  const getVitalScore = (name: string) => {
-    const v = vitals.find(v => v.metric === name);
-    return v ? parseFloat(v.avg_value).toFixed(2) : '-';
-  };
+  // Using the new WebVitalsDashboard instead of inline cards
 
   return (
     <div className="min-h-[calc(100vh-64px)] bg-[#050505] text-zinc-200 font-sans p-6">
@@ -153,46 +159,7 @@ export default function RumDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="bg-[#0a0a0a] border border-zinc-800/60 rounded-xl p-5 relative overflow-hidden">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="h-8 w-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-              <Layout className="h-4 w-4 text-emerald-400" />
-            </div>
-            <h3 className="font-medium text-zinc-300">Largest Contentful Paint (LCP)</h3>
-          </div>
-          <div className="mt-4 flex items-baseline gap-2">
-            <span className="text-3xl font-semibold text-white">{getVitalScore('LCP')}</span>
-            <span className="text-sm text-zinc-500">ms</span>
-          </div>
-        </div>
-
-        <div className="bg-[#0a0a0a] border border-zinc-800/60 rounded-xl p-5 relative overflow-hidden">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-              <MousePointer2 className="h-4 w-4 text-blue-400" />
-            </div>
-            <h3 className="font-medium text-zinc-300">Interaction to Next Paint (INP)</h3>
-          </div>
-          <div className="mt-4 flex items-baseline gap-2">
-            <span className="text-3xl font-semibold text-white">{getVitalScore('INP')}</span>
-            <span className="text-sm text-zinc-500">ms</span>
-          </div>
-        </div>
-
-        <div className="bg-[#0a0a0a] border border-zinc-800/60 rounded-xl p-5 relative overflow-hidden">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="h-8 w-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
-              <Activity className="h-4 w-4 text-amber-400" />
-            </div>
-            <h3 className="font-medium text-zinc-300">Cumulative Layout Shift (CLS)</h3>
-          </div>
-          <div className="mt-4 flex items-baseline gap-2">
-            <span className="text-3xl font-semibold text-white">{getVitalScore('CLS')}</span>
-            <span className="text-sm text-zinc-500">score</span>
-          </div>
-        </div>
-      </div>
+      <WebVitalsDashboard vitals={vitals} routeVitals={routeVitals} timeseries={timeseries} />
 
       <div className="bg-[#0a0a0a] border border-zinc-800/60 rounded-xl overflow-hidden">
         <div className="p-5 border-b border-zinc-800/60">

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@clickhouse/client": "^1.22.0",
+    "@fastify/cors": "^8.5.0",
     "@fastify/rate-limit": "^8.0.3",
     "@types/bcrypt": "^6.0.0",
     "@types/jsonwebtoken": "^9.0.10",
@@ -20,6 +21,7 @@
     "jsonwebtoken": "^9.0.3",
     "lru-cache": "^5.1.1",
     "pg": "^8.11.3",
+    "protobufjs": "^7.6.4",
     "source-map": "^0.6.1"
   },
   "devDependencies": {
@@ -28,8 +30,8 @@
     "@types/pg": "^8.11.2",
     "@types/source-map": "^0.5.2",
     "nodemon": "^3.1.0",
-    "tsx": "^4.19.0",
     "ts-node-dev": "^2.0.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.4.0"
   }
 }

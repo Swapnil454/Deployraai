@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 import { Copy, ExternalLink, Loader2 } from "lucide-react";
 
@@ -10,7 +10,14 @@ import { ObservabilitySetup } from "@/components/observability/ObservabilitySetu
 
 export default function StatusPageSettings() {
   const params = useParams();
-  const projectId = params?.projectId;
+  const projectId = params?.projectId as string;
+  const router = useRouter();
+  
+  useEffect(() => {
+    if (!projectId || projectId === 'undefined') {
+      router.push('/dashboard/status-pages');
+    }
+  }, [projectId, router]);
 
   
   const [config, setConfig] = useState<any>({

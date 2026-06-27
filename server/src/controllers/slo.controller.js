@@ -69,7 +69,8 @@ export const getSLOs = async (req, res) => {
     );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch SLOs' });
+    console.error('getSLOs ERROR:', err);
+    res.status(500).json({ error: 'Failed to fetch SLOs', details: err.message });
   }
 };
 
@@ -151,6 +152,21 @@ export const getSLOStatus = async (req, res) => {
       if (total > 0) {
         actualSuccessPercentage = ((total - errors) / total) * 100;
       }
+    } else if (slo.type === 'latency' && slo.metric_source === 'metrics_minutely') {
+      const checkRes = await pool.query(`
+        SELECT
+          SUM(request_count) as total_requests,
+          SUM(request_count) FILTER (WHERE p99_duration_ms > $3) as total_slow_requests
+        FROM metrics_minutely
+        WHERE project_id = $1
+        AND bucket >= NOW() - ($2::int * INTERVAL '1 day')
+      `, [projectId, windowDays, slo.latency_threshold_ms || 200]);
+      
+      const total = parseInt(checkRes.rows[0].total_requests, 10) || 0;
+      const slow = parseInt(checkRes.rows[0].total_slow_requests, 10) || 0;
+      if (total > 0) {
+        actualSuccessPercentage = ((total - slow) / total) * 100;
+      }
     }
     
     const actualFailurePercentage = 100 - actualSuccessPercentage;
@@ -165,6 +181,13 @@ export const getSLOStatus = async (req, res) => {
     
     const usedDowntimeMinutes = totalMinutes * (actualFailurePercentage / 100);
     const remainingDowntimeMinutes = allowedDowntimeMinutes - usedDowntimeMinutes;
+
+    // Burn rate = actual error rate / allowed error rate
+    const burnRate = allowedFailurePercentage > 0 ? (actualFailurePercentage / allowedFailurePercentage) : 0;
+    let budgetExhaustionDays = null;
+    if (burnRate > 0) {
+      budgetExhaustionDays = Math.round(windowDays / burnRate);
+    }
     
     res.json({
       slo,
@@ -173,7 +196,9 @@ export const getSLOStatus = async (req, res) => {
       remainingDowntimeMinutes,
       budgetRemainingPercentage: budgetRemaining,
       budgetUsedPercentage: budgetUsed,
-      actualSuccessPercentage
+      actualSuccessPercentage,
+      burnRate,
+      budgetExhaustionDays
     });
     
   } catch (err) {

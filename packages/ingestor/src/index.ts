@@ -1,11 +1,13 @@
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
-import { redis } from './redis.js';
+import cors from '@fastify/cors';
+// import { redis } from './redis.js';
 import { tracesRouter } from './routes/traces.js';
 import { logsRouter } from './routes/logs.js';
 import { edgeSpansRouter } from './routes/edge-spans.js';
 import { adminRouter } from './routes/admin.js';
 import { rumRouter } from './routes/rum.js';
+import { profilesRouter } from './routes/profiles.js';
 
 const app = Fastify({
   logger: true,
@@ -14,22 +16,26 @@ const app = Fastify({
   trustProxy: true,
 });
 
+app.register(cors, {
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-rum-key'],
+});
+
 app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
   (req as any).rawBody = body; // store raw bytes
   try { done(null, JSON.parse(body.toString())); }
   catch(e) { done(e as Error); }
 });
 
-app.register(rateLimit, {
-  redis,
-  max: 1000,
-  timeWindow: '1 second',
-  keyGenerator: (req) => {
-    // If authenticated via token, rate limit by token (project ID)
-    // Otherwise rate limit by IP
-    return (req as any).auth?.projectId || req.ip;
-  }
-});
+// app.register(rateLimit, {
+//   redis,
+//   max: 1000,
+//   timeWindow: '1 second',
+//   keyGenerator: (req) => {
+//     return req.headers['x-rum-key'] ?? (req as any).auth?.projectId ?? req.ip;
+//   }
+// });
 
 // Routes
 app.register(tracesRouter, { prefix: '/v1/traces' });
@@ -37,6 +43,7 @@ app.register(logsRouter, { prefix: '/logs' });
 app.register(edgeSpansRouter, { prefix: '/v1/edge-spans' });
 app.register(rumRouter, { prefix: '/v1/rum' });
 app.register(adminRouter, { prefix: '/admin' });
+app.register(profilesRouter, { prefix: '/v1/profiles' });
 
 import { sourcemapsRouter } from './routes/sourcemaps.js';
 app.register(sourcemapsRouter, { prefix: '/v1/sourcemaps' });

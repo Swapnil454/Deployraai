@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Link from "next/link";
-import { ArrowLeft, Clock, Activity, ShieldAlert, Sparkles, Loader2, GitPullRequest } from "lucide-react";
+import { ArrowLeft, Clock, Activity, ShieldAlert, Sparkles, Loader2, GitPullRequest, MonitorPlay } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import ReactMarkdown from 'react-markdown';
 
@@ -281,9 +281,19 @@ export default function IssueDetailPage() {
                     <div key={ev.id} className="border-b last:border-0 pb-4 last:pb-0 flex flex-col gap-1">
                       <div className="flex justify-between items-start">
                         <span className="text-sm font-medium">{new Date(ev.occurred_at).toLocaleString()}</span>
-                        <Link href={`/dashboard/logs/${projectId}?traceId=${ev.trace_id}`}>
-                          <Button variant="link" size="sm" className="h-auto p-0">View Trace</Button>
-                        </Link>
+                        <div className="flex gap-2">
+                          {ev.session_id && (
+                            <Link href={`/dashboard/observability/sessions/${ev.session_id}?projectId=${projectId}`}>
+                              <Button variant="outline" size="sm" className="h-auto py-1 px-2 text-xs gap-1 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10">
+                                <MonitorPlay className="w-3 h-3" />
+                                Watch Session
+                              </Button>
+                            </Link>
+                          )}
+                          <Link href={`/dashboard/logs/${projectId}?traceId=${ev.trace_id}`}>
+                            <Button variant="link" size="sm" className="h-auto p-0 text-xs">View Trace</Button>
+                          </Link>
+                        </div>
                       </div>
                       <div className="text-xs text-muted-foreground flex gap-4">
                         {ev.environment && <span>Env: {ev.environment}</span>}

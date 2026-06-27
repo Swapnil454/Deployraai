@@ -22,11 +22,12 @@ interface AlertRule {
   operator: 'gt' | 'lt';
   threshold: number;
   windowMins: number;
+  auto_resolve?: boolean;
   channels: AlertChannel[];
 }
 
 interface AlertChannel {
-  type: 'slack' | 'webhook' | 'pagerduty' | 'linear' | 'jira';
+  type: 'slack' | 'webhook' | 'pagerduty' | 'linear' | 'jira' | 'status_page';
   url?: string;
   credentialsEncrypted?: string;
 }
@@ -44,6 +45,31 @@ export async function evaluateAlerts() {
     for (const project of activeProjects.rows) {
       await evaluateAnomalies(project.project_id);
     }
+    
+    // Evaluate user-defined alert rules
+    const rulesRes = await db.query(`SELECT * FROM alert_rules WHERE enabled = true`);
+    await Promise.all(rulesRes.rows.map(row => {
+      const channels: AlertChannel[] = [{
+        type: row.route_type as any,
+        url: row.route_target // for status_page, this holds JSON string like {"componentId": "...", "severity": "major"}
+      }];
+      
+      let metric = row.event_type;
+      if (metric === 'exception') metric = 'error_rate'; // Map legacy values if any
+      
+      const rule: AlertRule = {
+        id: row.id,
+        projectId: row.project_id,
+        metric: metric as any,
+        operator: 'gt', // We'll assume greater-than for now
+        threshold: row.threshold,
+        windowMins: row.window_minutes,
+        auto_resolve: row.auto_resolve !== false, // default true
+        channels
+      };
+      
+      return evaluateRule(rule);
+    }));
   } catch (err) {
     console.error('Error evaluating alerts:', err);
   }
@@ -97,6 +123,9 @@ async function evaluateRule(rule: AlertRule) {
 
   if (isTriggered) {
     await fireAlert(rule, value);
+  } else if (rule.auto_resolve && rule.channels.some(c => c.type === 'status_page')) {
+    // If it's NOT triggered and auto_resolve is enabled, attempt to resolve active status page incidents
+    await resolveStatusPageIncident(rule);
   }
 }
 
@@ -237,9 +266,98 @@ async function sendNotification(channel: AlertChannel, rule: AlertRule, value: n
       case 'webhook':
         if (channel.url) await fetch(channel.url, { method: 'POST', body: JSON.stringify({ rule, value, message }) }).catch(()=>{});
         break;
+      case 'status_page':
+        await fireStatusPageIncident(rule, value, message, channel.url);
+        break;
     }
   } catch (err) {
     console.error(`Failed to send alert to ${channel.type}`, err);
+  }
+}
+
+async function fireStatusPageIncident(rule: AlertRule, value: number, message: string, routeTarget?: string) {
+  if (!routeTarget) return;
+  try {
+    const config = JSON.parse(routeTarget);
+    const { componentId, severity } = config;
+    
+    // Check if there's already an unresolved incident for this rule to prevent spam
+    const existing = await db.query(
+      `SELECT id FROM incidents WHERE project_id = $1 AND title = $2 AND status != 'resolved' LIMIT 1`,
+      [rule.projectId, `Automated Alert: ${rule.metric}`]
+    );
+    
+    if (existing.rows.length > 0) return; // Incident already active
+    
+    // Create new incident
+    const incRes = await db.query(
+      `INSERT INTO incidents (project_id, title, status, severity, started_at)
+       VALUES ($1, $2, 'investigating', $3, NOW()) RETURNING id`,
+      [rule.projectId, `Automated Alert: ${rule.metric}`, severity || 'minor']
+    );
+    const incidentId = incRes.rows[0].id;
+    
+    // Add initial message
+    await db.query(
+      `INSERT INTO incident_updates (incident_id, message, new_status)
+       VALUES ($1, $2, 'investigating')`,
+      [incidentId, `Anomaly detected: ${message}`]
+    );
+    
+    // Link component
+    if (componentId) {
+      await db.query(
+        `INSERT INTO incident_components (incident_id, component_id) VALUES ($1, $2)`,
+        [incidentId, componentId]
+      );
+      
+      // Degrade component status
+      const compStatus = severity === 'critical' ? 'major_outage' : (severity === 'major' ? 'partial_outage' : 'degraded');
+      await db.query(
+        `UPDATE status_page_components SET current_status = $1, updated_at = NOW() WHERE id = $2`,
+        [compStatus, componentId]
+      );
+    }
+  } catch (err) {
+    console.error("Failed to parse status_page route_target or create incident", err);
+  }
+}
+
+async function resolveStatusPageIncident(rule: AlertRule) {
+  try {
+    // Find active automated incidents for this rule
+    const active = await db.query(
+      `SELECT id FROM incidents WHERE project_id = $1 AND title = $2 AND status != 'resolved'`,
+      [rule.projectId, `Automated Alert: ${rule.metric}`]
+    );
+    
+    for (const inc of active.rows) {
+      const incidentId = inc.id;
+      
+      // Mark resolved
+      await db.query(
+        `UPDATE incidents SET status = 'resolved', resolved_at = NOW(), updated_at = NOW() WHERE id = $1`,
+        [incidentId]
+      );
+      
+      await db.query(
+        `INSERT INTO incident_updates (incident_id, message, new_status)
+         VALUES ($1, $2, 'resolved')`,
+        [incidentId, `Auto-resolved: ${rule.metric} has returned to normal.`]
+      );
+      
+      // Restore components
+      const comps = await db.query(`SELECT component_id FROM incident_components WHERE incident_id = $1`, [incidentId]);
+      for (const comp of comps.rows) {
+        // Simple logic: if resolved, assume operational. (In a perfect world, we'd check if OTHER incidents still affect this component, but this is fine for now)
+        await db.query(
+          `UPDATE status_page_components SET current_status = 'operational', updated_at = NOW() WHERE id = $1`,
+          [comp.component_id]
+        );
+      }
+    }
+  } catch (err) {
+    console.error("Failed to auto-resolve status page incident", err);
   }
 }
 

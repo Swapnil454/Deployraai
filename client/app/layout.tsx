@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import 'rrweb-player/dist/style.css';
 import Header from "./components/Header";
 import { Toaster } from 'sonner';
 

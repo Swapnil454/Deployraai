@@ -1,0 +1,62 @@
+import { FastifyInstance } from 'fastify';
+import { parsePprof } from '../utils/pprof-parser.js';
+import { db } from '../db.js';
+
+export async function profilesRouter(app: FastifyInstance) {
+  // Add a raw body parser for application/x-protobuf if not already handled
+  app.addContentTypeParser('application/x-protobuf', { parseAs: 'buffer' }, (req, body, done) => {
+    done(null, body);
+  });
+
+  const handler = async (req: any, reply: any) => {
+    const projectId = req.headers['x-project-id'] as string;
+    const serviceName = req.headers['x-service-name'] as string || 'unknown';
+    const profileType = req.headers['x-profile-type'] as string || 'cpu'; // 'cpu' or 'memory'
+
+    if (!projectId) {
+      return reply.status(401).send({ error: 'Missing x-project-id header' });
+    }
+
+    const buffer = req.body as Buffer;
+    if (!buffer || !Buffer.isBuffer(buffer)) {
+      return reply.status(400).send({ error: 'Body must be a valid protobuf buffer' });
+    }
+
+    try {
+      // 1. Parse the pprof protobuf into flattened samples
+      const parsedSamples = await parsePprof(buffer);
+      if (parsedSamples.length === 0) {
+        return reply.status(200).send({ status: 'ok', inserted: 0 });
+      }
+
+      // 2. Prepare for Postgres Bulk Insert
+      const timestamp = new Date().getTime(); // Standardize timestamp per payload flush
+      
+      const values = [];
+      const flatArgs = [];
+      let index = 1;
+      for (const s of parsedSamples) {
+        values.push(`($${index++}, $${index++}, $${index++}, to_timestamp($${index++} / 1000.0), $${index++}, $${index++})`);
+        flatArgs.push(projectId, serviceName, profileType, timestamp, s.stackTrace, s.value);
+      }
+      
+      // 3. Insert into Postgres
+      try {
+        const insertQuery = `
+          INSERT INTO profiles (project_id, service_name, profile_type, timestamp, stack_trace, value)
+          VALUES ${values.join(', ')}
+        `;
+        await db.query(insertQuery, flatArgs);
+      } catch (dbErr: any) {
+        req.log.warn(`[Profiles] Postgres unavailable, profiles not persisted: ${dbErr.message}`);
+      }
+
+      return reply.status(200).send({ status: 'ok', inserted: parsedSamples.length });
+    } catch (err: any) {
+      req.log.error(err);
+      return reply.status(500).send({ error: 'Failed to process profile', details: err.message });
+    }
+  };
+
+  app.post('/', handler);
+}

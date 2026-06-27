@@ -11,20 +11,22 @@ export async function syncProjectToPostgres(project) {
     }
     
     const query = `
-      INSERT INTO projects (id, name, platform, token_hash, user_id)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO projects (id, name, platform, token_hash, user_id, rum_write_key)
+      VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         platform = EXCLUDED.platform,
         token_hash = EXCLUDED.token_hash,
-        user_id = EXCLUDED.user_id
+        user_id = EXCLUDED.user_id,
+        rum_write_key = EXCLUDED.rum_write_key
     `;
     const values = [
       project._id.toString(),
       project.repoName || 'Unnamed Project',
       'vercel',
       tokenHash,
-      project.userId?.toString() || null
+      project.userId?.toString() || null,
+      project.analytics?.rumWriteKey || null
     ];
 
     await pool.query(query, values);

@@ -109,18 +109,20 @@ class SpanWriter {
     }
 
     // ClickHouse Bulk Insert
-    const chBatch = batch.map(s => ({
-      project_id: s.projectId,
-      deploy_id: s.deployId,
-      trace_id: s.traceId,
-      span_id: s.spanId,
-      parent_span_id: s.parentSpanId || '',
-      name: s.name,
-      start_time: s.startTime.getTime(),
-      duration_ms: s.durationMs,
-      status_code: s.statusCode,
-      attributes: sanitizeAttributes(s.attributes)
-    }));
+    const chBatch = batch
+      .filter(s => !(s.attributes['custom.event'] === true || s.attributes['custom.event'] === 'true'))
+      .map(s => ({
+        project_id: s.projectId,
+        deploy_id: s.deployId,
+        trace_id: s.traceId,
+        span_id: s.spanId,
+        parent_span_id: s.parentSpanId || '',
+        name: s.name,
+        start_time: s.startTime.getTime(),
+        duration_ms: s.durationMs,
+        status_code: s.statusCode,
+        attributes: sanitizeAttributes(s.attributes)
+      }));
 
     // ClickHouse Bulk Insert — best-effort, don't fail PG write if CH is offline
     try {
@@ -168,14 +170,27 @@ class SpanWriter {
     // Also insert to Postgres spans table for alerting threshold checks
     const pgParams: any[] = [];
     const pgValues: string[] = [];
+    
+    // Separate out custom events for business metrics
+    const ceParams: any[] = [];
+    const ceValues: string[] = [];
+
     batch.forEach((s, i) => {
-      pgParams.push(
-        s.projectId, s.deployId, s.traceId, s.spanId, s.parentSpanId || null, 
-        s.name, s.startTime, s.endTime, s.durationMs, s.statusCode, 
-        sanitizeAttributes(s.attributes), JSON.stringify(s.events), s.attributes['error.fingerprint'] || null
-      );
-      const offset = i * 13;
-      pgValues.push(`($${offset+1}, $${offset+2}, $${offset+3}, $${offset+4}, $${offset+5}, $${offset+6}, $${offset+7}, $${offset+8}, $${offset+9}, $${offset+10}, $${offset+11}, $${offset+12}, $${offset+13})`);
+      if (s.attributes['custom.event'] === true || s.attributes['custom.event'] === 'true') {
+        const offset = ceValues.length * 5;
+        ceParams.push(
+          s.projectId, s.traceId || null, s.name, sanitizeAttributes(s.attributes), s.startTime
+        );
+        ceValues.push(`($${offset+1}, $${offset+2}, $${offset+3}, $${offset+4}, $${offset+5})`);
+      } else {
+        const offset = pgValues.length * 13;
+        pgParams.push(
+          s.projectId, s.deployId, s.traceId, s.spanId, s.parentSpanId || null, 
+          s.name, s.startTime, s.endTime, s.durationMs, s.statusCode, 
+          sanitizeAttributes(s.attributes), JSON.stringify(s.events), s.attributes['error.fingerprint'] || null
+        );
+        pgValues.push(`($${offset+1}, $${offset+2}, $${offset+3}, $${offset+4}, $${offset+5}, $${offset+6}, $${offset+7}, $${offset+8}, $${offset+9}, $${offset+10}, $${offset+11}, $${offset+12}, $${offset+13})`);
+      }
     });
 
     if (pgValues.length > 0) {
@@ -186,6 +201,14 @@ class SpanWriter {
         ) VALUES ${pgValues.join(',')}
         ON CONFLICT (span_id) DO NOTHING
       `, pgParams);
+    }
+
+    if (ceValues.length > 0) {
+      await db.query(`
+        INSERT INTO custom_events (
+          project_id, trace_id, event_name, properties, created_at
+        ) VALUES ${ceValues.join(',')}
+      `, ceParams);
     }
   }
 }

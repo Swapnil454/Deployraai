@@ -9,7 +9,7 @@ export const sloRouter: FastifyPluginAsync = async (app) => {
     const { projectId } = req.params as any;
 
     const sloRes = await db.query(
-      'SELECT id, metric, target_percent, window_days FROM service_level_objectives WHERE project_id = $1',
+      'SELECT id, name, type, target_percentage as target_percent, window_days, latency_threshold_ms FROM service_level_objectives WHERE project_id = $1',
       [projectId]
     );
 
@@ -26,7 +26,7 @@ export const sloRouter: FastifyPluginAsync = async (app) => {
       let isNoData = false;
 
       try {
-        if (slo.metric === 'success_rate') {
+        if (slo.type === 'success_rate') {
           const chRes = await clickhouse.query({
             query: `
               SELECT 
@@ -53,7 +53,7 @@ export const sloRouter: FastifyPluginAsync = async (app) => {
             totalBudget = 100;
             consumedBudget = 0;
           }
-        } else if (slo.metric === 'uptime') {
+        } else if (slo.type === 'uptime') {
           const upRes = await db.query(`
             SELECT 
               COUNT(*) as total_checks,
@@ -75,6 +75,33 @@ export const sloRouter: FastifyPluginAsync = async (app) => {
             totalBudget = 100;
             consumedBudget = 0;
           }
+        } else if (slo.type === 'latency') {
+          const chRes = await clickhouse.query({
+            query: `
+              SELECT 
+                sum(request_count) as total_reqs,
+                sumIf(request_count, p99_duration_ms > {threshold: Int32}) as slow_reqs
+              FROM metrics_minutely_mv
+              WHERE project_id = {projectId: String} AND bucket >= parseDateTimeBestEffort({from: String})
+            `,
+            query_params: { projectId, from: windowStartStr, threshold: slo.latency_threshold_ms || 200 },
+            format: 'JSONEachRow'
+          });
+          
+          const chData = await chRes.json<any[]>();
+          const totalReqs = parseInt((chData[0] as any)?.total_reqs || '0', 10);
+          const slowReqs = parseInt((chData[0] as any)?.slow_reqs || '0', 10);
+
+          if (totalReqs > 0) {
+            currentPerformance = ((totalReqs - slowReqs) / totalReqs) * 100;
+            totalBudget = Math.floor(totalReqs * (1 - slo.target_percent / 100));
+            consumedBudget = slowReqs;
+          } else {
+            isNoData = true;
+            currentPerformance = 100;
+            totalBudget = 100;
+            consumedBudget = 0;
+          }
         }
       } catch (err: any) {
         // Clickhouse offline — show no_data
@@ -88,13 +115,19 @@ export const sloRouter: FastifyPluginAsync = async (app) => {
       const budgetStatus = isNoData ? 'no_data' : remainingBudget > 0 ? 'healthy' : 'exhausted';
       const isMet = currentPerformance >= slo.target_percent;
 
+      const burnRate = totalBudget > 0 ? (consumedBudget / totalBudget) : 0;
+      const budgetExhaustionDays = burnRate > 0 ? Math.round(slo.window_days / burnRate) : null;
+
       return {
         id: slo.id,
-        metric: slo.metric,
+        name: slo.name,
+        type: slo.type,
         target: parseFloat(slo.target_percent),
         windowDays: slo.window_days,
         currentPerformance: parseFloat(currentPerformance.toFixed(3)),
         isMet,
+        burnRate: parseFloat(burnRate.toFixed(2)),
+        budgetExhaustionDays,
         budget: {
           total: totalBudget,
           consumed: consumedBudget,

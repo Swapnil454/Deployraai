@@ -16,10 +16,21 @@ db.on('connect', async (client) => {
         id SERIAL PRIMARY KEY,
         project_id VARCHAR(255) NOT NULL,
         session_id VARCHAR(255) NOT NULL,
+        sequence_num INTEGER DEFAULT 0,
         events JSONB,
+        url TEXT,
+        user_agent TEXT,
+        duration_ms INTEGER DEFAULT 0,
+        error_count INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT NOW()
       )
     `);
+    // Add missing columns if table already exists (safe migrations)
+    await client.query(`ALTER TABLE rum_events ADD COLUMN IF NOT EXISTS sequence_num INTEGER DEFAULT 0`);
+    await client.query(`ALTER TABLE rum_events ADD COLUMN IF NOT EXISTS url TEXT`);
+    await client.query(`ALTER TABLE rum_events ADD COLUMN IF NOT EXISTS user_agent TEXT`);
+    await client.query(`ALTER TABLE rum_events ADD COLUMN IF NOT EXISTS duration_ms INTEGER DEFAULT 0`);
+    await client.query(`ALTER TABLE rum_events ADD COLUMN IF NOT EXISTS error_count INTEGER DEFAULT 0`);
   } catch (err) {
     console.error('Failed to init RUM table', err);
   }

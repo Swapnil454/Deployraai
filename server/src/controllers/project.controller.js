@@ -256,14 +256,31 @@ export const getProjects = async (req, res) => {
 
 export const getProject = async (req, res) => {
   try {
+    if (!req.params.id || req.params.id === 'undefined') {
+      return res.status(400).json({ error: "Invalid project ID" });
+    }
     let projectDoc = await Project.findOne({ _id: req.params.id, userId: req.user.userId });
     if (!projectDoc) {
       return res.status(404).json({ error: "Project not found" });
     }
 
-    if (!projectDoc.analytics || !projectDoc.analytics.trackingId) {
-      if (!projectDoc.analytics) projectDoc.analytics = {};
+    let saveRequired = false;
+    if (!projectDoc.analytics) {
+      projectDoc.analytics = {};
+    }
+    
+    if (!projectDoc.analytics.trackingId) {
       projectDoc.analytics.trackingId = generateProjectToken(projectDoc._id.toString());
+      saveRequired = true;
+    }
+
+    if (!projectDoc.analytics.rumWriteKey) {
+      const crypto = await import('crypto');
+      projectDoc.analytics.rumWriteKey = `trc_rum_${crypto.randomBytes(16).toString('hex')}`;
+      saveRequired = true;
+    }
+
+    if (saveRequired) {
       await projectDoc.save();
       try {
         const { syncProjectToPostgres } = await import('../utils/postgresSync.js');

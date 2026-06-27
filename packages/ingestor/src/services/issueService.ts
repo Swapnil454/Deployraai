@@ -101,9 +101,10 @@ export async function upsertIssueFromSpan(span: SpanRecord): Promise<Issue | nul
       deploy_id,
       message,
       stacktrace,
-      deobfuscated_stacktrace
+      deobfuscated_stacktrace,
+      session_id
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
   `, [
     issue.id,
     span.projectId,
@@ -115,7 +116,8 @@ export async function upsertIssueFromSpan(span: SpanRecord): Promise<Issue | nul
     span.deployId,
     message,
     stacktrace,
-    deobfuscatedStacktrace
+    deobfuscatedStacktrace,
+    span.attributes['session_id'] || null
   ]);
 
   return issue;

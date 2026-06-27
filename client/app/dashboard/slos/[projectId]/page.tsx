@@ -256,13 +256,27 @@ export default function SLODashboard() {
                         />
                       </div>
                       
+                      <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100">
+                        <div>
+                          <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Burn Rate</p>
+                          <p className={`text-lg font-semibold font-mono ${status.burnRate > 1 ? 'text-red-500' : status.burnRate > 0.8 ? 'text-yellow-500' : ''}`}>
+                            {status.burnRate.toFixed(1)}x
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Budget Exhaustion</p>
+                          <p className="text-lg font-semibold">
+                            {status.budgetExhaustionDays ? `~${status.budgetExhaustionDays} days` : 'Healthy'}
+                          </p>
+                        </div>
+                      </div>
                       <div className="grid grid-cols-2 gap-4 bg-muted/50 p-3 rounded-lg text-sm">
                         <div>
-                          <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Allowed Downtime</p>
+                          <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Allowed Error</p>
                           <p className="font-semibold">{status.allowedDowntimeMinutes.toFixed(1)} min</p>
                         </div>
                         <div>
-                          <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Used Downtime</p>
+                          <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Used Error</p>
                           <p className="font-semibold">{status.usedDowntimeMinutes.toFixed(1)} min</p>
                         </div>
                       </div>

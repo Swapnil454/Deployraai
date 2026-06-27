@@ -35,18 +35,25 @@ export const adminRouter: FastifyPluginAsync = async (app) => {
           DELETE FROM sourcemaps
           WHERE created_at < NOW() - INTERVAL '30 days'
           RETURNING 1
+        ),
+        deleted_rum_events AS (
+          DELETE FROM rum_events
+          WHERE created_at < NOW() - INTERVAL '7 days'
+          RETURNING 1
         )
         SELECT 
           (SELECT count(*) FROM deleted_spans) as spans_deleted,
           (SELECT count(*) FROM deleted_logs) as logs_deleted,
-          (SELECT count(*) FROM deleted_sourcemaps) as sourcemaps_deleted
+          (SELECT count(*) FROM deleted_sourcemaps) as sourcemaps_deleted,
+          (SELECT count(*) FROM deleted_rum_events) as rum_events_deleted
       `);
 
       return {
         success: true,
         spansDeleted: result.rows[0].spans_deleted,
         logsDeleted: result.rows[0].logs_deleted,
-        sourcemapsDeleted: result.rows[0].sourcemaps_deleted
+        sourcemapsDeleted: result.rows[0].sourcemaps_deleted,
+        rumEventsDeleted: result.rows[0].rum_events_deleted
       };
     } catch (err) {
       req.log.error({ err }, 'Cleanup failed');

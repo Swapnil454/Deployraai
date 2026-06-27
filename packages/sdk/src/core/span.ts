@@ -36,12 +36,32 @@ export async function withSpan<T>(
   });
 }
 
-// Attach custom attributes to the current active span
-// Useful in route handlers: track("user.id", userId)
-export function track(key: string, value: string | number | boolean) {
+// Overload signatures
+export function track(key: string, value: string | number | boolean): void;
+export function track(eventName: string, payload: Record<string, string | number | boolean>): void;
+
+// Implementation
+export function track(
+  nameOrKey: string,
+  valueOrPayload: string | number | boolean | Record<string, string | number | boolean>
+): void {
   if (!isEnabled()) return;
-  const span = trace.getActiveSpan();
-  if (span) span.setAttribute(`app.${key}`, value);
+
+  if (typeof valueOrPayload === 'object' && valueOrPayload !== null) {
+    // Custom business event — create its own span
+    const span = tracer.startSpan(nameOrKey);
+    span.setAttribute('custom.event', true);
+    span.setAttribute('event.name', nameOrKey);
+    // Flatten payload as span attributes
+    for (const [k, v] of Object.entries(valueOrPayload)) {
+      span.setAttribute(`event.${k}`, v);
+    }
+    span.end(); // end immediately — it's an instantaneous event
+  } else {
+    // Original behavior — attribute on active span
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan) activeSpan.setAttribute(`app.${nameOrKey}`, valueOrPayload);
+  }
 }
 
 // Record an error on the current span without throwing
