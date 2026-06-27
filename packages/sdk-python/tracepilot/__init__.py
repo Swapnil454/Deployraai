@@ -7,8 +7,27 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
+import re
 
 _provider = None
+
+# Scrubbing regex patterns for PII
+PII_PATTERNS = [
+    re.compile(r"(password|secret|token|api_key|credit_card)(?:\s*=|:\s*)['\"]?([^'\"\s,]+)['\"]?", re.IGNORECASE)
+]
+
+class ScrubbingSpanProcessor(BatchSpanProcessor):
+    def on_end(self, span):
+        if span.attributes:
+            for k, v in list(span.attributes.items()):
+                if isinstance(v, str):
+                    scrubbed_v = v
+                    for pattern in PII_PATTERNS:
+                        if pattern.search(scrubbed_v):
+                            scrubbed_v = pattern.sub(r"\1=***scrubbed***", scrubbed_v)
+                    if scrubbed_v != v:
+                        span.set_attribute(k, scrubbed_v)
+        super().on_end(span)
 
 def init():
     """
@@ -38,8 +57,8 @@ def init():
         headers={"x-tracepilot-project-id": project_id}
     )
     
-    # Use BatchSpanProcessor for performance
-    _provider.add_span_processor(BatchSpanProcessor(exporter))
+    # Use ScrubbingSpanProcessor for Payload PII Scrubbing and performance
+    _provider.add_span_processor(ScrubbingSpanProcessor(exporter))
     trace.set_tracer_provider(_provider)
 
     # Base instrumentation

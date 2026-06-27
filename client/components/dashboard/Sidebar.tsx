@@ -9,6 +9,7 @@ import { ChevronsUpDown, LogOut } from "lucide-react";
 const SIDEBAR_ITEMS = [
   { name: "Projects", path: "/dashboard/projects" },
   { name: "Deployments", path: "" }, // Folder
+  { name: "Logs", path: "/dashboard/logs" }, // Deployment Logs remain here
   { name: "Observability", path: "" }, // Folder
   { name: "Analytics", path: "/dashboard/analytics" },
   { name: "Domains", path: "/dashboard/domains" },
@@ -27,7 +28,9 @@ const DEPLOYMENT_SUBPAGES = [
 ];
 
 const OBSERVABILITY_SUBPAGES = [
-  { name: "Logs", path: "/dashboard/logs" },
+  { name: "Analysis", path: "/dashboard/observability/analysis" },
+  { name: "RUM & Vitals", path: "/dashboard/observability/rum" },
+  { name: "Logs", path: "/dashboard/observability/logs" },
   { name: "Issues", path: "/dashboard/issues" },
   { name: "Incidents", path: "/dashboard/incidents" },
   { name: "Status Pages", path: "/dashboard/status-pages" },
@@ -44,7 +47,9 @@ export const Sidebar = ({ user }: { user: any }) => {
 
   // Keep accordion open if we are inside an observability subpage
   const isObservabilityActive = 
-    pathname.startsWith("/dashboard/logs") || 
+    pathname.startsWith("/dashboard/observability/analysis") ||
+    pathname.startsWith("/dashboard/observability/rum") ||
+    pathname.startsWith("/dashboard/observability/logs") ||
     pathname.startsWith("/dashboard/issues") ||
     pathname.startsWith("/dashboard/incidents") ||
     pathname.startsWith("/dashboard/status-pages") ||
@@ -137,7 +142,6 @@ export const Sidebar = ({ user }: { user: any }) => {
                 {isObservabilityExpanded && (
                   <div className="flex flex-col ml-3 pl-3 border-l border-zinc-800/60 mt-1 mb-2 space-y-0.5">
                     {OBSERVABILITY_SUBPAGES.map(sub => {
-                      // Need to match exactly or match the nested paths for observability
                       const isActive = pathname.startsWith(sub.path);
                       return (
                         <Link

@@ -5,6 +5,7 @@ import { tracesRouter } from './routes/traces.js';
 import { logsRouter } from './routes/logs.js';
 import { edgeSpansRouter } from './routes/edge-spans.js';
 import { adminRouter } from './routes/admin.js';
+import { rumRouter } from './routes/rum.js';
 
 const app = Fastify({
   logger: true,
@@ -34,6 +35,7 @@ app.register(rateLimit, {
 app.register(tracesRouter, { prefix: '/v1/traces' });
 app.register(logsRouter, { prefix: '/logs' });
 app.register(edgeSpansRouter, { prefix: '/v1/edge-spans' });
+app.register(rumRouter, { prefix: '/v1/rum' });
 app.register(adminRouter, { prefix: '/admin' });
 
 import { sourcemapsRouter } from './routes/sourcemaps.js';

@@ -94,7 +94,7 @@ export default function IssuesPage() {
               projects.map((p: any) => (
                 <button
                   key={p._id}
-                  onClick={() => router.push(`/dashboard/logs/${p._id}/issues`)}
+                  onClick={() => router.push(`/dashboard/issues/${p._id}`)}
                   className="w-full flex items-center gap-3 py-1.5 px-3 rounded-md hover:bg-zinc-900 text-left transition-colors group bg-[#0a0a0a]/50"
                 >
                   <div className="h-5 w-5 shrink-0 flex items-center justify-center overflow-hidden rounded-full">

@@ -44,7 +44,7 @@ export async function aggregateBilling() {
         // 3. Push to Stripe Metered Billing API (V2 Meter Events)
         // Ensure idempotency for the given day to prevent double-billing
         const todayStr = new Date().toISOString().split('T')[0];
-        const idempotencyKey = \`spans_\${project.id}_\${todayStr}\`;
+        const idempotencyKey = `spans_${project.id}_${todayStr}`;
 
         await (stripe.billing.meterEvents as any).create({
           event_name: 'spans_ingested',

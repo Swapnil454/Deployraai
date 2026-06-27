@@ -4,6 +4,8 @@ import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { Resource } from '@opentelemetry/resources';
 import { trace, context, SpanStatusCode } from '@opentelemetry/api';
+import * as rrweb from 'rrweb';
+import { onLCP, onINP, onCLS } from 'web-vitals';
 
 interface TracePilotContextValue {
   provider: WebTracerProvider | null;
@@ -16,19 +18,25 @@ interface TracePilotProviderProps {
   token: string;
   serviceName?: string;
   ingestorUrl?: string;
+  rumUrl?: string;
 }
 
 export function TracePilotProvider({ 
   children, 
   token, 
   serviceName = 'browser-app',
-  ingestorUrl = 'https://ingest.tracepilot.ai/v1/traces'
+  ingestorUrl = 'https://ingest.tracepilot.ai/v1/traces',
+  rumUrl = 'https://ingest.tracepilot.ai/v1/rum'
 }: TracePilotProviderProps) {
   const [provider, setProvider] = useState<WebTracerProvider | null>(null);
-
+  
+  // Session Replay Events Buffer
+  const [sessionId] = useState(() => crypto.randomUUID());
+  
   useEffect(() => {
     if (!token) return;
 
+    // --- 1. OTLP TRACING ---
     const resource = new Resource({
       'service.name': serviceName,
       'tracepilot.project.id': token,
@@ -51,10 +59,50 @@ export function TracePilotProvider({
     webProvider.register();
     setProvider(webProvider);
 
+    // --- 2. WEB VITALS ---
+    const reportVitals = (metric: any) => {
+      const globalTracer = trace.getTracer('tracepilot-web-vitals');
+      globalTracer.startActiveSpan('web-vitals', span => {
+        span.setAttribute('web.vital.name', metric.name);
+        span.setAttribute('web.vital.value', metric.value);
+        span.setAttribute('web.vital.rating', metric.rating);
+        span.setAttribute('session_id', sessionId);
+        span.end();
+      });
+    };
+    onLCP(reportVitals);
+    onINP(reportVitals);
+    onCLS(reportVitals);
+
+    // --- 3. SESSION REPLAY (rrweb) ---
+    let events: any[] = [];
+    const stopFn = rrweb.record({
+      emit(event) {
+        events.push(event);
+      },
+    });
+
+    // Flush RUM events every 10 seconds
+    const flushInterval = setInterval(() => {
+      if (events.length > 0) {
+        const payload = events.splice(0, events.length);
+        fetch(rumUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ sessionId, events: payload })
+        }).catch(err => console.error('TracePilot RUM flush failed', err));
+      }
+    }, 10000);
+
     return () => {
       webProvider.forceFlush().catch(console.error);
+      if (stopFn) stopFn();
+      clearInterval(flushInterval);
     };
-  }, [token, serviceName, ingestorUrl]);
+  }, [token, serviceName, ingestorUrl, rumUrl, sessionId]);
 
   return (
     <TracePilotContext.Provider value={{ provider }}>

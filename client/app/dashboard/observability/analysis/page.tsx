@@ -2,10 +2,10 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Loader2, Radio } from "lucide-react";
+import { Loader2, LineChart } from "lucide-react";
 import { ProjectAvatar } from "@/components/dashboard/ProjectAvatar";
 
-export default function StatusPagesPage() {
+export default function ObservabilityAnalysisProxyPage() {
   const router = useRouter();
   const [projects, setProjects] = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -60,17 +60,17 @@ export default function StatusPagesPage() {
 
   return (
     <div 
-      className="w-full flex-1 flex flex-col items-center bg-black px-8" 
+      className="w-full flex-1 flex flex-col items-center bg-[#050505] px-8" 
       style={{ paddingTop: '11vh' }}
     >
       <div className="max-w-sm w-full flex flex-col items-center">
         {/* Header Icon & Text */}
         <div className="flex flex-col items-center mb-8">
           <div className="h-10 w-10 rounded-xl border border-zinc-800 flex items-center justify-center mb-4 bg-zinc-900/50">
-            <Radio className="h-5 w-5 text-zinc-400" />
+            <LineChart className="h-5 w-5 text-indigo-400" />
           </div>
-          <h1 className="text-xl font-semibold text-white mb-1">Continue to Status Pages</h1>
-          <p className="text-[14px] text-zinc-400">Choose a project to continue</p>
+          <h1 className="text-xl font-semibold text-white mb-1">Analysis & Edge Metrics</h1>
+          <p className="text-[14px] text-zinc-400">Choose a project to view analytics</p>
         </div>
 
         {/* Content Area */}
@@ -94,7 +94,7 @@ export default function StatusPagesPage() {
               projects.map((p: any) => (
                 <button
                   key={p._id}
-                  onClick={() => router.push(`/dashboard/status-pages/${p._id}`)}
+                  onClick={() => router.push(`/dashboard/observability/analysis/${p._id}`)}
                   className="w-full flex items-center gap-3 py-1.5 px-3 rounded-md hover:bg-zinc-900 text-left transition-colors group bg-[#0a0a0a]/50"
                 >
                   <div className="h-5 w-5 shrink-0 flex items-center justify-center overflow-hidden rounded-full">
@@ -111,15 +111,6 @@ export default function StatusPagesPage() {
               </div>
             )}
           </div>
-
-          {/* Create Project Link */}
-          <button
-            onClick={() => router.push('/dashboard/new-deployment')}
-            className="w-full flex items-center gap-2 py-1.5 px-3 rounded-md hover:bg-zinc-900 text-left transition-colors text-zinc-400 hover:text-white"
-          >
-            <Plus className="h-4 w-4 shrink-0" />
-            <span className="text-sm font-medium">Create Project</span>
-          </button>
         </div>
       </div>
     </div>
