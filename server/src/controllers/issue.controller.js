@@ -5,8 +5,15 @@ export const getIssues = async (req, res) => {
     const { projectId } = req.params;
     const { status, severity, search, sort = 'last_seen_at' } = req.query;
     
-    let query = `SELECT * FROM issues WHERE project_id = $1`;
+    // Explicit columns — exclude heavy stacktrace blobs not needed in list view
+    let query = `
+      SELECT id, project_id, fingerprint, title, message, exception_type, severity, status,
+             event_count, affected_users, first_seen_at, last_seen_at, resolved_at, ignored_at,
+             status_changed_at, assignee_id, updated_at
+      FROM issues WHERE project_id = $1`;
     const params = [projectId];
+
+
     let paramIdx = 2;
 
     if (status) {
@@ -189,7 +196,7 @@ export const diagnoseIssue = async (req, res) => {
 
     // 3. Fetch the most recent event to get the stack trace and context
     const eventRes = await client.query(`
-      SELECT stack_trace, message, error_type, http_url, http_method 
+      SELECT stacktrace as stack_trace, message, null as error_type, null as http_url, null as http_method 
       FROM issue_events 
       WHERE issue_id = $1 
       ORDER BY occurred_at DESC 

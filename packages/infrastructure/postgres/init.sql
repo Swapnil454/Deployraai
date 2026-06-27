@@ -1,13 +1,13 @@
 -- Teams & RBAC
 CREATE TABLE IF NOT EXISTS teams (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
   name        TEXT NOT NULL,
   owner_id    TEXT NOT NULL,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS team_members (
-  team_id     UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  team_id     VARCHAR(36) NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
   user_id     TEXT NOT NULL,
   role        TEXT NOT NULL DEFAULT 'member',
   created_at  TIMESTAMPTZ DEFAULT NOW(),
@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS team_members (
 
 -- Projects table
 CREATE TABLE IF NOT EXISTS projects (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  team_id     UUID REFERENCES teams(id),
+  id          VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_id     VARCHAR(36) REFERENCES teams(id),
   user_id     TEXT, -- Legacy column
   name        TEXT NOT NULL,
   platform    TEXT NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS projects (
 -- Error Groups — Fingerprinting AI cache and deploy diff
 CREATE TABLE IF NOT EXISTS error_groups (
   fingerprint         TEXT PRIMARY KEY,
-  project_id          UUID NOT NULL REFERENCES projects(id),
+  project_id          VARCHAR(36) NOT NULL REFERENCES projects(id),
   exception_type      TEXT NOT NULL,
   sample_stack_trace  TEXT NOT NULL,
   deploy_id           TEXT NOT NULL,
@@ -42,7 +42,7 @@ CREATE INDEX error_groups_project_last_seen ON error_groups (project_id, last_se
 -- Spans — one row per OTEL span
 CREATE TABLE IF NOT EXISTS spans (
   id              BIGSERIAL PRIMARY KEY,
-  project_id      UUID NOT NULL REFERENCES projects(id),
+  project_id      VARCHAR(36) NOT NULL REFERENCES projects(id),
   deploy_id       TEXT NOT NULL,
   trace_id        TEXT NOT NULL,
   span_id         TEXT NOT NULL UNIQUE,
@@ -68,7 +68,7 @@ CREATE INDEX spans_project_fingerprint_time_idx ON spans (project_id, fingerprin
 -- Logs — one row per log line from the drain
 CREATE TABLE IF NOT EXISTS logs (
   id          BIGSERIAL PRIMARY KEY,
-  project_id  UUID NOT NULL REFERENCES projects(id),
+  project_id  VARCHAR(36) NOT NULL REFERENCES projects(id),
   deploy_id   TEXT,
   timestamp   TIMESTAMPTZ NOT NULL,
   level       TEXT NOT NULL DEFAULT 'info', -- error|warn|info|debug
@@ -88,7 +88,7 @@ CREATE INDEX logs_message_fts ON logs USING GIN (to_tsvector('english', message)
 
 -- Pre-aggregated metrics — updated by ingestor after every span batch
 CREATE TABLE IF NOT EXISTS metrics_minutely (
-  project_id      UUID NOT NULL REFERENCES projects(id),
+  project_id      VARCHAR(36) NOT NULL REFERENCES projects(id),
   deploy_id       TEXT NOT NULL,
   bucket          TIMESTAMPTZ NOT NULL, -- truncated to minute
   route           TEXT NOT NULL,
@@ -105,7 +105,7 @@ CREATE INDEX metrics_project_time ON metrics_minutely (project_id, bucket DESC);
 -- Synthetic health check results
 CREATE TABLE IF NOT EXISTS synthetic_checks (
   id            BIGSERIAL PRIMARY KEY,
-  project_id    UUID NOT NULL REFERENCES projects(id),
+  project_id    VARCHAR(36) NOT NULL REFERENCES projects(id),
   url           TEXT NOT NULL,
   status_code   SMALLINT,
   latency_ms    INTEGER,
@@ -118,8 +118,8 @@ CREATE INDEX synthetic_project_time ON synthetic_checks (project_id, checked_at 
 
 -- Alert rules defined by the user
 CREATE TABLE IF NOT EXISTS alert_rules (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id  UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  id          VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id  VARCHAR(36) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name        TEXT NOT NULL,
   enabled     BOOLEAN DEFAULT TRUE,
   event_type  TEXT NOT NULL DEFAULT 'exception',
@@ -141,9 +141,9 @@ CREATE INDEX alert_rules_project_enabled_idx ON alert_rules(project_id, enabled)
 
 -- Alert firings to prevent duplicate notifications
 CREATE TABLE IF NOT EXISTS alert_events (
-  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  rule_id      UUID REFERENCES alert_rules(id) ON DELETE SET NULL,
+  id           VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id   VARCHAR(36) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  rule_id      VARCHAR(36) REFERENCES alert_rules(id) ON DELETE SET NULL,
   fingerprint  TEXT,
   title        TEXT NOT NULL,
   message      TEXT NOT NULL,
@@ -162,8 +162,8 @@ CREATE INDEX alert_events_fingerprint_time_idx ON alert_events(fingerprint, trig
 
 -- Custom Dashboards layout persistence
 CREATE TABLE IF NOT EXISTS custom_dashboards (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id  UUID NOT NULL REFERENCES projects(id),
+  id          VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id  VARCHAR(36) NOT NULL REFERENCES projects(id),
   layout_json JSONB NOT NULL DEFAULT '[]',
   widgets_json JSONB NOT NULL DEFAULT '[]',
   created_at  TIMESTAMPTZ DEFAULT NOW(),
@@ -174,8 +174,8 @@ CREATE INDEX custom_dashboards_project ON custom_dashboards (project_id);
 
 -- Status Pages (Step 4)
 CREATE TABLE IF NOT EXISTS status_pages (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id VARCHAR(36) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 
   enabled BOOLEAN DEFAULT FALSE,
   slug TEXT UNIQUE,
@@ -196,8 +196,8 @@ CREATE INDEX IF NOT EXISTS status_pages_slug_idx ON status_pages(slug);
 
 -- Service Level Objectives (Step 4)
 CREATE TABLE IF NOT EXISTS service_level_objectives (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id VARCHAR(36) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 
   name TEXT NOT NULL,
   type TEXT NOT NULL,
@@ -221,8 +221,8 @@ CREATE INDEX IF NOT EXISTS slos_project_enabled_idx ON service_level_objectives(
 
 -- Source Maps for JS Deobfuscation
 CREATE TABLE IF NOT EXISTS sourcemaps (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id  UUID NOT NULL REFERENCES projects(id),
+  id          VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id  VARCHAR(36) NOT NULL REFERENCES projects(id),
   deploy_id   TEXT NOT NULL,
   file_name   TEXT NOT NULL,
   source_url  TEXT,
@@ -236,8 +236,8 @@ CREATE INDEX sourcemaps_project_deploy ON sourcemaps(project_id, deploy_id);
 
 -- Issues (Step 3)
 CREATE TABLE IF NOT EXISTS issues (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id VARCHAR(36) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 
   fingerprint TEXT NOT NULL,
   title TEXT NOT NULL,
@@ -246,7 +246,7 @@ CREATE TABLE IF NOT EXISTS issues (
   severity TEXT NOT NULL DEFAULT 'error',
 
   status TEXT NOT NULL DEFAULT 'open',
-  assignee_id UUID,
+  assignee_id VARCHAR(36),
 
   first_seen_at TIMESTAMPTZ DEFAULT NOW(),
   last_seen_at TIMESTAMPTZ DEFAULT NOW(),
@@ -272,9 +272,9 @@ CREATE TABLE IF NOT EXISTS issues (
 );
 
 CREATE TABLE IF NOT EXISTS issue_events (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  issue_id UUID NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  issue_id VARCHAR(36) NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  project_id VARCHAR(36) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 
   span_id TEXT,
   trace_id TEXT,
@@ -291,15 +291,15 @@ CREATE TABLE IF NOT EXISTS issue_events (
 );
 
 CREATE TABLE IF NOT EXISTS issue_comments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  issue_id UUID NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
-  user_id UUID,
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  issue_id VARCHAR(36) NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  user_id VARCHAR(36),
   body TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 ALTER TABLE alert_events
-ADD COLUMN IF NOT EXISTS issue_id UUID REFERENCES issues(id) ON DELETE SET NULL;
+ADD COLUMN IF NOT EXISTS issue_id VARCHAR(36) REFERENCES issues(id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS issues_project_status_idx ON issues(project_id, status, last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS issues_project_fingerprint_idx ON issues(project_id, fingerprint);
@@ -311,8 +311,8 @@ CREATE INDEX IF NOT EXISTS alert_events_issue_id_idx ON alert_events(issue_id);
 -- Step 6: AI Root Cause Analysis
 
 CREATE TABLE IF NOT EXISTS issue_analysis (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  issue_id UUID NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  issue_id VARCHAR(36) NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
   analysis_text TEXT NOT NULL,
   suggested_fix TEXT NOT NULL,
   fix_pr_url TEXT,

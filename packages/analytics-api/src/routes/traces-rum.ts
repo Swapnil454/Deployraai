@@ -12,8 +12,6 @@ export const tracesRumRouter: FastifyPluginAsync = async (app) => {
     else if (window === '1h') timeFilter = "created_at >= NOW() - INTERVAL '1 hour'";
 
     try {
-      // Assuming web-vitals are stored as spans with name='web-vitals'
-      // attributes contains: { "web.vital.name": "LCP", "web.vital.value": 1200, "web.vital.rating": "good" }
       const res = await db.query(`
         SELECT 
           attributes->>'web.vital.name' as metric,
@@ -27,7 +25,11 @@ export const tracesRumRouter: FastifyPluginAsync = async (app) => {
       `, [projectId]);
 
       return { vitals: res.rows };
-    } catch (error) {
+    } catch (error: any) {
+      // spans table lives in Clickhouse — return empty data gracefully when CH is offline
+      if (error?.code === '42P01' || error?.message?.includes('does not exist')) {
+        return { vitals: [] };
+      }
       req.log.error(error);
       return reply.status(500).send({ error: 'Internal server error' });
     }
@@ -39,9 +41,10 @@ export const tracesRumRouter: FastifyPluginAsync = async (app) => {
     if (!projectId) return reply.status(400).send({ error: 'Missing projectId' });
 
     let timeFilter = "created_at >= NOW() - INTERVAL '24 hours'";
+    if (window === '7d') timeFilter = "created_at >= NOW() - INTERVAL '7 days'";
+    else if (window === '1h') timeFilter = "created_at >= NOW() - INTERVAL '1 hour'";
     
     try {
-      // Group by session_id to show a list of unique sessions
       const res = await db.query(`
         SELECT 
           session_id,
@@ -56,7 +59,11 @@ export const tracesRumRouter: FastifyPluginAsync = async (app) => {
       `, [projectId]);
 
       return { sessions: res.rows };
-    } catch (error) {
+    } catch (error: any) {
+      // rum_events table lives in Clickhouse — return empty data gracefully when CH is offline
+      if (error?.code === '42P01' || error?.message?.includes('does not exist')) {
+        return { sessions: [] };
+      }
       req.log.error(error);
       return reply.status(500).send({ error: 'Internal server error' });
     }
@@ -77,7 +84,6 @@ export const tracesRumRouter: FastifyPluginAsync = async (app) => {
         ORDER BY created_at ASC
       `, [projectId, sessionId]);
 
-      // Combine arrays of events from multiple flushes
       let allEvents: any[] = [];
       res.rows.forEach(row => {
         if (Array.isArray(row.events)) {
@@ -86,7 +92,10 @@ export const tracesRumRouter: FastifyPluginAsync = async (app) => {
       });
 
       return { events: allEvents };
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.code === '42P01' || error?.message?.includes('does not exist')) {
+        return { events: [] };
+      }
       req.log.error(error);
       return reply.status(500).send({ error: 'Internal server error' });
     }

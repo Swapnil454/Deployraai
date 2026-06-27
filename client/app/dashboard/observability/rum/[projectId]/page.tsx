@@ -3,10 +3,8 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Activity, Layout, MousePointer2, AlertTriangle, MonitorPlay, X } from "lucide-react";
-import dynamic from "next/dynamic";
-import 'rrweb-player/dist/style.css';
-
-// rrweb-player is imported dynamically in useEffect
+import Script from "next/script";
+import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
 
 export default function RumDashboard() {
   const { projectId } = useParams();
@@ -15,6 +13,7 @@ export default function RumDashboard() {
   const [window, setWindow] = useState('24h');
   const [vitals, setVitals] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
+  const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,19 +27,20 @@ export default function RumDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [vitalsRes, sessionsRes] = await Promise.all([
+      const [vitalsRes, sessionsRes, projectRes] = await Promise.all([
         fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/rum/vitals?projectId=${projectId}&window=${window}`, { credentials: 'include' }),
-        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/rum/sessions?projectId=${projectId}&window=${window}`, { credentials: 'include' })
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/rum/sessions?projectId=${projectId}&window=${window}`, { credentials: 'include' }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${projectId}`, { credentials: "include" })
       ]);
 
-      if (vitalsRes.ok && sessionsRes.ok) {
-        const vitalsData = await vitalsRes.json();
-        const sessionsData = await sessionsRes.json();
-        setVitals(vitalsData.vitals || []);
-        setSessions(sessionsData.sessions || []);
-      } else {
-        setError(`Analytics API error: ${vitalsRes.statusText}`);
-      }
+      // Try to parse JSON regardless of status — the API returns empty arrays when Clickhouse is offline
+      const vitalsData = vitalsRes.ok ? await vitalsRes.json() : { vitals: [] };
+      const sessionsData = sessionsRes.ok ? await sessionsRes.json() : { sessions: [] };
+      const projectData = projectRes.ok ? await projectRes.json() : null;
+      
+      setVitals(vitalsData.vitals || []);
+      setSessions(sessionsData.sessions || []);
+      setProject(projectData);
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Failed to fetch analytics');
@@ -74,9 +74,9 @@ export default function RumDashboard() {
       // Clear previous player
       containerRef.current.innerHTML = '';
       
-      // We must dynamically require rrwebPlayer in a browser context
-      import('rrweb-player').then(rrwebPlayerModule => {
-        const Player = rrwebPlayerModule.default;
+      // Use window.rrwebPlayer loaded from CDN
+      const Player = (window as any).rrwebPlayer;
+      if (Player) {
         playerRef.current = new Player({
           target: containerRef.current!,
           props: {
@@ -86,14 +86,24 @@ export default function RumDashboard() {
             autoPlay: true,
           },
         });
-      });
+      } else {
+        console.error("rrwebPlayer is not loaded on window");
+      }
     }
   }, [playing, sessionEvents]);
 
-  if (loading && !vitals.length) {
+  if (loading && !vitals.length && !project) {
     return (
       <div className="flex h-[calc(100vh-64px)] items-center justify-center bg-[#050505]">
         <div className="animate-spin h-8 w-8 text-indigo-500 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full" />
+      </div>
+    );
+  }
+
+  if (project && !project.analytics?.verified) {
+    return (
+      <div className="min-h-[calc(100vh-64px)] bg-[#050505] text-zinc-200 font-sans p-6 pt-12">
+        <ObservabilitySetup project={project} onVerified={fetchData} />
       </div>
     );
   }
@@ -115,6 +125,9 @@ export default function RumDashboard() {
 
   return (
     <div className="min-h-[calc(100vh-64px)] bg-[#050505] text-zinc-200 font-sans p-6">
+      
+      <Script src="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/index.js" strategy="lazyOnload" />
+      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/style.css" />
       
       <div className="flex items-center justify-between mb-8">
         <div>

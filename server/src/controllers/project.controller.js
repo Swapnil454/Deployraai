@@ -1,6 +1,20 @@
 import axios from "axios";
+import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import { decryptSecret } from "../utils/encryption.js";
+
+function generateProjectToken(projectId) {
+  if (!process.env.INGESTOR_JWT_SECRET) {
+    console.warn("WARNING: INGESTOR_JWT_SECRET not set, falling back to secure random hex");
+    return `da_${crypto.randomBytes(16).toString("hex")}`;
+  }
+  return jwt.sign(
+    { projectId, type: 'ingestor', iat: Math.floor(Date.now() / 1000) },
+    process.env.INGESTOR_JWT_SECRET,
+    { expiresIn: '90d' }
+  );
+}
 
 const getGithubToken = async (userId) => {
   const user = await User.findById(userId);
@@ -171,6 +185,13 @@ export const createProject = async (req, res) => {
     });
 
     try {
+      const { syncProjectToPostgres } = await import('../utils/postgresSync.js');
+      await syncProjectToPostgres(project);
+    } catch (err) {
+      console.error("Failed to sync project to Postgres:", err.message);
+    }
+
+    try {
       const { pool } = await import('../config/postgres.js');
       await pool.query(`
         INSERT INTO alert_rules (project_id, name, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type)
@@ -235,11 +256,24 @@ export const getProjects = async (req, res) => {
 
 export const getProject = async (req, res) => {
   try {
-    const project = await Project.findOne({ _id: req.params.id, userId: req.user.userId }).lean();
-    if (!project) {
+    let projectDoc = await Project.findOne({ _id: req.params.id, userId: req.user.userId });
+    if (!projectDoc) {
       return res.status(404).json({ error: "Project not found" });
     }
 
+    if (!projectDoc.analytics || !projectDoc.analytics.trackingId) {
+      if (!projectDoc.analytics) projectDoc.analytics = {};
+      projectDoc.analytics.trackingId = generateProjectToken(projectDoc._id.toString());
+      await projectDoc.save();
+      try {
+        const { syncProjectToPostgres } = await import('../utils/postgresSync.js');
+        await syncProjectToPostgres(projectDoc);
+      } catch (err) {
+        console.error("Failed to sync project to Postgres during analytics init:", err.message);
+      }
+    }
+
+    const project = projectDoc.toObject();
     const Deployment = (await import('../models/Deployment.js')).default;
     const latestDeployment = await Deployment.findOne({ 
       projectId: project._id,
@@ -311,7 +345,7 @@ export const disconnectProject = async (req, res) => {
     try {
       // In a real microservice arch, the server would hit the ingestor over HTTP to stop the poller.
       // We will leave this comment as an integration point, but if they are the same process, we'd import it.
-      await axios.delete(`${process.env.INGESTOR_URL || 'http://localhost:3002'}/internal/pollers/render/${projectId}`).catch(()=> {});
+      await axios.delete(`${process.env.INGESTOR_API_URL || 'http://localhost:4317'}/internal/pollers/render/${projectId}`).catch(()=> {});
     } catch(err) {}
 
     await Project.findByIdAndDelete(projectId);
@@ -375,21 +409,6 @@ export const updateProjectConfig = async (req, res) => {
   }
 };
 
-import crypto from "crypto";
-import jwt from "jsonwebtoken";
-
-function generateProjectToken(projectId) {
-  if (!process.env.INGESTOR_JWT_SECRET) {
-    console.warn("WARNING: INGESTOR_JWT_SECRET not set, falling back to secure random hex");
-    return `da_${crypto.randomBytes(16).toString("hex")}`;
-  }
-  return jwt.sign(
-    { projectId, type: 'ingestor', iat: Math.floor(Date.now() / 1000) },
-    process.env.INGESTOR_JWT_SECRET,
-    { expiresIn: '90d' }
-  );
-}
-
 export const enableAnalytics = async (req, res) => {
   try {
     const project = await Project.findOne({
@@ -416,6 +435,13 @@ export const enableAnalytics = async (req, res) => {
     }
 
     await project.save();
+
+    try {
+      const { syncProjectToPostgres } = await import('../utils/postgresSync.js');
+      await syncProjectToPostgres(project);
+    } catch (err) {
+      console.error("Failed to sync project to Postgres during analytics enable:", err.message);
+    }
 
     res.json({
       success: true,

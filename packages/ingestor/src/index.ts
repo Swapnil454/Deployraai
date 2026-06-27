@@ -48,14 +48,15 @@ import { db } from './db.js';
 import { renderPollerRegistry } from './pollers/render-poller.js';
 
 async function restoreRenderPollers() {
-  const projects = await db.query(
-    `SELECT id, render_token, render_service_id 
-     FROM projects WHERE platform = 'render' AND is_active = true`
-  );
-  for (const p of projects.rows) {
-    renderPollerRegistry.start(p.id, p.render_token, p.render_service_id);
-  }
-  console.log(`Restored ${projects.rows.length} Render pollers`);
+  // Legacy feature: Render logs polling is currently disabled as it requires missing DB columns
+  // const projects = await db.query(
+  //   `SELECT id, render_token, render_service_id 
+  //    FROM projects WHERE platform = 'render' AND is_active = true`
+  // );
+  // for (const p of projects.rows) {
+  //   renderPollerRegistry.start(p.id, p.render_token, p.render_service_id);
+  // }
+  // console.log(`Restored ${projects.rows.length} Render pollers`);
 }
 
 const start = async () => {

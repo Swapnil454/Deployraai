@@ -32,15 +32,11 @@ interface AlertChannel {
 }
 
 export async function evaluateAlerts() {
-  console.log('Evaluating alerts...');
+  console.log('Evaluating SLOs and Anomalies...');
   try {
-    const [rules, slos] = await Promise.all([
-      db.query(`SELECT id, project_id as "projectId", metric, operator, threshold, window_mins as "windowMins", channels FROM alert_rules WHERE enabled = true`),
-      db.query(`SELECT * FROM service_level_objectives`),
-    ]);
+    const slos = await db.query(`SELECT * FROM service_level_objectives`);
 
     await Promise.all([
-      ...rules.rows.map(rule => evaluateRule(rule)),
       ...slos.rows.map(slo => checkSLOBurnRate(slo)),
     ]);
 
@@ -60,23 +56,24 @@ async function checkSLOBurnRate(slo: any) {
       COUNT(*) as total_minutes
     FROM metrics_minutely
     WHERE project_id = $1 AND bucket >= NOW() - INTERVAL '1 hour'
-  `, [slo.project_id, 1 - (slo.target_pct / 100)]);
+  `, [slo.project_id, 1 - (slo.target_percent / 100)]);
 
   const { bad_minutes, total_minutes } = lastHour.rows[0];
   if (!total_minutes || total_minutes === '0') return;
 
-  const hourlyBudget = parseInt(total_minutes) * (1 - slo.target_pct / 100);
+  const hourlyBudget = parseInt(total_minutes) * (1 - slo.target_percent / 100);
   if (hourlyBudget <= 0) return;
 
   const burnRate = parseInt(bad_minutes) / hourlyBudget;
 
   if (burnRate > 14.4) {
     console.log(`[SLO] Fast burn detected for SLO ${slo.id}: ${burnRate.toFixed(1)}x`);
-    const message = `SLO "${slo.name || slo.metric}" burning at ${burnRate.toFixed(1)}x rate — monthly budget exhausted in ~${(720/burnRate).toFixed(0)}h`;
+    const message = `SLO "${slo.metric}" burning at ${burnRate.toFixed(1)}x rate — monthly budget exhausted in ~${(720/burnRate).toFixed(0)}h`;
     
-    // Find channels configured for this project to notify
-    const rules = await db.query(`SELECT channels FROM alert_rules WHERE project_id = $1 LIMIT 1`, [slo.project_id]);
-    const channels = rules.rows.length > 0 ? rules.rows[0].channels : [];
+    const rules = await db.query(`SELECT route_type, route_target FROM alert_rules WHERE project_id = $1 AND enabled = true LIMIT 1`, [slo.project_id]);
+    const channels: AlertChannel[] = rules.rows.length > 0
+      ? [{ type: rules.rows[0].route_type as any, url: rules.rows[0].route_target }]
+      : [];
     
     const pseudoRule: AlertRule = {
       id: `slo_${slo.id}`,
@@ -85,7 +82,7 @@ async function checkSLOBurnRate(slo: any) {
       operator: 'gt',
       threshold: 14.4,
       windowMins: 60,
-      channels: channels
+      channels
     };
 
     await fireAlert(pseudoRule, burnRate, message);
@@ -168,9 +165,29 @@ async function computeMetric(rule: AlertRule): Promise<number> {
 }
 
 async function fireAlert(rule: AlertRule, currentValue: number, customMessage?: string) {
-  const recent = await db.query(`SELECT id FROM alert_firings WHERE rule_id = $1 AND fired_at > NOW() - INTERVAL '15 minutes'`, [rule.id]);
+  // Use alert_events table for cooldown tracking
+  const recent = await db.query(
+    `SELECT id FROM alert_events WHERE rule_id = $1 AND triggered_at > NOW() - INTERVAL '15 minutes' LIMIT 1`,
+    // SLO pseudo rules don't have real UUIDs — use NULL so we skip cooldown for those
+    [rule.id.startsWith('slo_') ? null : rule.id]
+  );
   if (recent.rows.length > 0) return;
-  await db.query(`INSERT INTO alert_firings (rule_id, project_id, metric_value) VALUES ($1, $2, $3)`, [rule.id, rule.projectId, currentValue]);
+
+  // Insert alert event (rule_id is NULL for SLO pseudo-alerts)
+  await db.query(
+    `INSERT INTO alert_events (project_id, rule_id, title, message, severity, route_type, route_target, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued')`,
+    [
+      rule.projectId,
+      rule.id.startsWith('slo_') ? null : rule.id,
+      `Alert: ${rule.metric}`,
+      customMessage || `${rule.metric} is ${currentValue} (threshold: ${rule.operator} ${rule.threshold})`,
+      'warning',
+      rule.channels[0]?.type || 'dashboard',
+      rule.channels[0]?.url || null
+    ]
+  );
+
   for (const channel of rule.channels) {
     await sendNotification(channel, rule, currentValue, customMessage);
   }

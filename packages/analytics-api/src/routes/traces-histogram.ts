@@ -17,7 +17,7 @@ export const tracesHistogramRouter: FastifyPluginAsync = async (app) => {
           percentile_cont(0.99) WITHIN GROUP (ORDER BY duration_ms) as p99,
           SUM(CASE WHEN status_code = 2 THEN 1 ELSE 0 END) as errors
         FROM spans
-        WHERE project_id = $1 AND parent_span_id IS NULL AND start_time > NOW() - INTERVAL '1 hour'
+        WHERE project_id = $1 AND (parent_span_id IS NULL OR parent_span_id = '') AND start_time > NOW() - INTERVAL '1 hour'
         GROUP BY bucket
         ORDER BY bucket ASC
       `, [projectId]);

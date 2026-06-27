@@ -25,7 +25,7 @@ export const tracesStreamRouter: FastifyPluginAsync = async (app) => {
             start_time, end_time, duration_ms,
             status_code, attributes, events
           FROM spans
-          WHERE project_id = $1 AND parent_span_id IS NULL AND start_time > $2
+          WHERE project_id = $1 AND (parent_span_id IS NULL OR parent_span_id = '') AND start_time > $2
           ORDER BY start_time DESC
           LIMIT 50
         `, [projectId, lastChecked]);

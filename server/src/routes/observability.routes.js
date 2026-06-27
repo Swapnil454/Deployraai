@@ -33,18 +33,20 @@ router.use('/', verifyProjectOwnership, async (req, res) => {
   try {
     const targetUrl = `${ANALYTICS_API_URL}${req.path}`;
     
-    // Forward the request to the internal Analytics API
+    // Server auth uses HTTP-only cookies, but analytics-api expects Authorization: Bearer <token>.
+    // Re-package the verified cookie JWT as a Bearer header for the internal service call.
+    const cookieName = process.env.COOKIE_NAME || 'deployai_token';
+    const cookieToken = req.cookies?.[cookieName];
     const response = await axios({
       method: req.method,
       url: targetUrl,
       params: req.query,
       data: req.body,
-      // Pass the JWT to the internal API just in case it needs it
       headers: {
-        Authorization: req.headers.authorization,
-        // Don't forward host header so axios resolves localhost properly
+        Authorization: cookieToken ? `Bearer ${cookieToken}` : (req.headers.authorization || ''),
       },
-      responseType: req.path.includes('stream') ? 'stream' : 'json'
+      responseType: req.path.includes('stream') ? 'stream' : 'json',
+      timeout: 30000, // 30s — prevent hanging if analytics-api is slow
     });
 
     // If it's a stream (like SSE for logs), pipe it back

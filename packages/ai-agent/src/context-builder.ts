@@ -6,32 +6,47 @@ const anthropicClient = new Anthropic({
 });
 
 export async function buildFingerprintContext(projectId: string, fingerprint: string) {
-  const group = await db.query(`
-    SELECT exception_type, sample_stack_trace, first_seen, last_seen, occurrence_count
-    FROM error_groups
-    WHERE project_id = $1 AND fingerprint = $2
-  `, [projectId, fingerprint]);
+  try {
+    // Try the newer 'issues' table first (canonical error group table)
+    let group = await db.query(`
+      SELECT exception_type, latest_stacktrace as sample_stack_trace, first_seen_at as first_seen, last_seen_at as last_seen, event_count as occurrence_count
+      FROM issues
+      WHERE project_id = $1 AND fingerprint = $2
+      LIMIT 1
+    `, [projectId, fingerprint]);
 
-  if (group.rowCount === 0) return null;
+    // Fall back to legacy error_groups table (older projects)
+    if (!group.rowCount || group.rowCount === 0) {
+      group = await db.query(`
+        SELECT exception_type, sample_stack_trace, first_seen, last_seen, occurrence_count
+        FROM error_groups
+        WHERE project_id = $1 AND fingerprint = $2
+        LIMIT 1
+      `, [projectId, fingerprint]).catch(() => ({ rows: [], rowCount: 0 } as any));
+    }
 
-  // Get recent error logs containing this fingerprint (we attached it to span, but logs may correlate by traceId or time. We'll just fetch recent error logs near the last_seen time, or if we link fingerprint to logs later, use that).
-  // For now, fetch recent errors in the project.
-  const errorLogs = await db.query(`
-    SELECT timestamp, message
-    FROM logs
-    WHERE project_id = $1 AND level = 'error'
-    ORDER BY timestamp DESC
-    LIMIT 20
-  `, [projectId]);
+    if (!group.rowCount || group.rowCount === 0) return null;
 
-  return {
-    exceptionType: group.rows[0].exception_type,
-    stackTrace: group.rows[0].sample_stack_trace,
-    occurrenceCount: group.rows[0].occurrence_count,
-    firstSeen: group.rows[0].first_seen,
-    lastSeen: group.rows[0].last_seen,
-    errorLogs: errorLogs.rows,
-  };
+    const errorLogs = await db.query(`
+      SELECT timestamp, message
+      FROM logs
+      WHERE project_id = $1 AND level = 'error'
+      ORDER BY timestamp DESC
+      LIMIT 20
+    `, [projectId]);
+
+    return {
+      exceptionType: group.rows[0].exception_type,
+      stackTrace: group.rows[0].sample_stack_trace,
+      occurrenceCount: group.rows[0].occurrence_count,
+      firstSeen: group.rows[0].first_seen,
+      lastSeen: group.rows[0].last_seen,
+      errorLogs: errorLogs.rows,
+    };
+  } catch (err: any) {
+    console.error('Error building fingerprint context:', err.message);
+    return null;
+  }
 }
 
 export async function buildErrorContext(projectId: string, deployId: string) {

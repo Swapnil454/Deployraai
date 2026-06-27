@@ -28,57 +28,38 @@ export const metricsRouter: FastifyPluginAsync = async (app) => {
     const cacheKey = `overview:${projectId}:${from}:${to}:${deployId || 'any'}`;
 
     return withCache(cacheKey, async () => {
-      const [requestsRes, errorsRes, latencyRes, uptimeRes] = await Promise.all([
-      // Total requests
-      clickhouse.query({
-        query: `
-          SELECT toString(sum(request_count)) as count
-          FROM metrics_minutely_mv
-          WHERE project_id = {projectId: String} AND bucket BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})
-        `,
-        query_params: { projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
-        format: 'JSONEachRow'
-      }).then(r => r.json<{count: string}[]>()),
-
-      // Error rate
-      clickhouse.query({
-        query: `
-          SELECT toString(round(100.0 * sum(error_count) / nullIf(sum(request_count), 0), 2)) as error_rate
-          FROM metrics_minutely_mv
-          WHERE project_id = {projectId: String} AND bucket BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})
-        `,
-        query_params: { projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
-        format: 'JSONEachRow'
-      }).then(r => r.json<{error_rate: string}[]>()),
-
-      // P99 latency across all routes
-      clickhouse.query({
-        query: `
-          SELECT toString(quantile(0.99)(duration_ms)) as p99
-          FROM spans
-          WHERE project_id = {projectId: String}
-            AND start_time BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})
-            AND parent_span_id = ''
-            AND http_method != ''
-        `,
-        query_params: { projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
-        format: 'JSONEachRow'
-      }).then(r => r.json<{p99: string}[]>()),
-
-      // Uptime (Still in Postgres for now since synthetic_checks wasn't migrated, or we can use Postgres for this one)
-      db.query<{ uptime: string }>(`
-        SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE status_code BETWEEN 200 AND 399) / NULLIF(COUNT(*), 0), 2)::text as uptime
-        FROM synthetic_checks
-        WHERE project_id = $1 AND checked_at BETWEEN $2 AND $3
-      `, [projectId, fromDate, toDate])
-    ]);
-
-      return {
-        totalRequests: parseInt((requestsRes as any)[0]?.count || '0'),
-        errorRate: parseFloat((errorsRes as any)[0]?.error_rate || '0'),
-        p99LatencyMs: parseFloat((latencyRes as any)[0]?.p99 || '0'),
-        uptime: parseFloat(uptimeRes.rows[0]?.uptime ?? '100'),
-      };
+      try {
+        const [requestsRes, errorsRes, latencyRes, uptimeRes] = await Promise.all([
+          clickhouse.query({
+            query: `SELECT toString(sum(request_count)) as count FROM metrics_minutely_mv WHERE project_id = {projectId: String} AND bucket BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})`,
+            query_params: { projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
+            format: 'JSONEachRow'
+          }).then(r => r.json<{count: string}[]>()),
+          clickhouse.query({
+            query: `SELECT toString(round(100.0 * sum(error_count) / nullIf(sum(request_count), 0), 2)) as error_rate FROM metrics_minutely_mv WHERE project_id = {projectId: String} AND bucket BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})`,
+            query_params: { projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
+            format: 'JSONEachRow'
+          }).then(r => r.json<{error_rate: string}[]>()),
+          clickhouse.query({
+            query: `SELECT toString(quantile(0.99)(duration_ms)) as p99 FROM spans WHERE project_id = {projectId: String} AND start_time BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String}) AND parent_span_id = '' AND http_method != ''`,
+            query_params: { projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
+            format: 'JSONEachRow'
+          }).then(r => r.json<{p99: string}[]>()),
+          db.query<{ uptime: string }>(`
+            SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE status_code BETWEEN 200 AND 399) / NULLIF(COUNT(*), 0), 2)::text as uptime
+            FROM synthetic_checks WHERE project_id = $1 AND checked_at BETWEEN $2 AND $3
+          `, [projectId, fromDate, toDate])
+        ]);
+        return {
+          totalRequests: parseInt((requestsRes as any)[0]?.count || '0'),
+          errorRate: parseFloat((errorsRes as any)[0]?.error_rate || '0'),
+          p99LatencyMs: parseFloat((latencyRes as any)[0]?.p99 || '0'),
+          uptime: parseFloat(uptimeRes.rows[0]?.uptime ?? '100'),
+        };
+      } catch (err: any) {
+        req.log.warn({ err: err.message }, 'Metrics overview: data source unavailable');
+        return { totalRequests: 0, errorRate: 0, p99LatencyMs: 0, uptime: 100, _noData: true };
+      }
     });
   });
 
@@ -93,24 +74,29 @@ export const metricsRouter: FastifyPluginAsync = async (app) => {
     const cacheKey = `timeseries:${projectId}:${metric}:${interval}:${from}:${to}:${deployId || 'any'}`;
 
     return withCache(cacheKey, async () => {
-      const res = await clickhouse.query({
-        query: `
-          SELECT
-            dateTrunc({trunc: String}, bucket) as time,
-            sum(request_count) as requests,
-            sum(error_count) as errors,
-            round(100.0 * sum(error_count) / nullIf(sum(request_count), 0), 2) as error_rate,
-            max(p99_duration_ms) as max_ms,
-            round(sum(total_duration_ms) / nullIf(sum(request_count), 0), 0) as avg_ms
-          FROM metrics_minutely_mv
-          WHERE project_id = {projectId: String} AND bucket BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})
-          GROUP BY time
-          ORDER BY time
-        `,
-        query_params: { trunc, projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
-        format: 'JSONEachRow'
-      });
-      return await res.json<any[]>();
+      try {
+        const res = await clickhouse.query({
+          query: `
+            SELECT
+              dateTrunc({trunc: String}, bucket) as time,
+              sum(request_count) as requests,
+              sum(error_count) as errors,
+              round(100.0 * sum(error_count) / nullIf(sum(request_count), 0), 2) as error_rate,
+              max(p99_duration_ms) as max_ms,
+              round(sum(total_duration_ms) / nullIf(sum(request_count), 0), 0) as avg_ms
+            FROM metrics_minutely_mv
+            WHERE project_id = {projectId: String} AND bucket BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})
+            GROUP BY time
+            ORDER BY time
+          `,
+          query_params: { trunc, projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
+          format: 'JSONEachRow'
+        });
+        return await res.json<any[]>();
+      } catch (err: any) {
+        req.log.warn({ err: err.message }, 'Timeseries: data source unavailable');
+        return [];
+      }
     });
   });
 

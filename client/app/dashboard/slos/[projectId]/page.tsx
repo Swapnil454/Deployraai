@@ -11,12 +11,14 @@ import { Plus, Trash2, Loader2, Target, Clock, Activity } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
+import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
 
 export default function SLODashboard() {
   const params = useParams();
   const projectId = params?.projectId;
-    const [slos, setSlos] = useState<any[]>([]);
+  const [slos, setSlos] = useState<any[]>([]);
   const [statuses, setStatuses] = useState<Record<string, any>>({});
+  const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
   const [isCreating, setIsCreating] = useState(false);
@@ -37,12 +39,15 @@ export default function SLODashboard() {
   async function fetchSLOs() {
     try {
       setLoading(true);
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/slos`, {
-        credentials: "include"
-      });
-      if (!res.ok) throw new Error("Failed to load");
-      const data = await res.json();
+      const [slosRes, projectRes] = await Promise.all([
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/slos`, { credentials: "include" }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}`, { credentials: "include" })
+      ]);
+      
+      if (!slosRes.ok) throw new Error("Failed to load");
+      const data = await slosRes.json();
       setSlos(data);
+      if (projectRes.ok) setProject(await projectRes.json());
       
       // Fetch statuses for each SLO
       data.forEach((slo: any) => fetchSLOStatus(slo.id));
@@ -116,6 +121,14 @@ export default function SLODashboard() {
 
   if (loading) {
     return <div className="p-8 text-center text-muted-foreground"><Loader2 className="animate-spin inline mr-2"/>Loading SLOs...</div>;
+  }
+
+  if (project && !project.analytics?.verified) {
+    return (
+      <div className="space-y-6 max-w-5xl mx-auto pt-8">
+        <ObservabilitySetup project={project} onVerified={fetchSLOs} />
+      </div>
+    );
   }
 
   return (

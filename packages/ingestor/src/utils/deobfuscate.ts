@@ -1,6 +1,6 @@
 import { SourceMapConsumer } from 'source-map';
 // @ts-ignore
-import { LRUCache } from 'lru-cache';
+import LRUCache from 'lru-cache';
 import { db } from '../db.js';
 
 // Cache: key = "projectId:deployId:fileName", value = SourceMapConsumer

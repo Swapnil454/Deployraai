@@ -11,13 +11,15 @@ import { Badge } from "@/components/ui/Badge";
 import { Plus, Loader2, AlertTriangle, AlertCircle, AlertOctagon, MessageSquare, Clock, ArrowRight, Server } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
 
 export default function IncidentsPage() {
   const params = useParams();
   const projectId = params?.projectId;
   const router = useRouter();
-    const [incidents, setIncidents] = useState<any[]>([]);
+  const [incidents, setIncidents] = useState<any[]>([]);
   const [components, setComponents] = useState<any[]>([]);
+  const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
   const [isCreating, setIsCreating] = useState(false);
@@ -37,17 +39,19 @@ export default function IncidentsPage() {
   async function fetchData() {
     try {
       setLoading(true);
-      const [incRes, compRes] = await Promise.all([
+      const [incRes, compRes, projectRes] = await Promise.all([
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/incidents`, {
           credentials: "include"
         }),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/status-components`, {
           credentials: "include"
-        })
+        }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}`, { credentials: "include" })
       ]);
       
       if (incRes.ok) setIncidents(await incRes.json());
       if (compRes.ok) setComponents(await compRes.json());
+      if (projectRes.ok) setProject(await projectRes.json());
     } catch (err) {
       toast.error("Failed to load incidents");
     } finally {
@@ -96,6 +100,14 @@ export default function IncidentsPage() {
 
   if (loading) {
     return <div className="p-8 text-center text-muted-foreground"><Loader2 className="animate-spin inline mr-2"/>Loading incidents...</div>;
+  }
+
+  if (project && !project.analytics?.verified) {
+    return (
+      <div className="space-y-6 max-w-5xl mx-auto pt-8">
+        <ObservabilitySetup project={project} onVerified={fetchData} />
+      </div>
+    );
   }
 
   return (

@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { Copy, ExternalLink, Loader2 } from "lucide-react";
 
 import Link from "next/link";
+import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
 
 export default function StatusPageSettings() {
   const params = useParams();
@@ -20,6 +21,7 @@ export default function StatusPageSettings() {
     show_uptime_history: true,
     show_incidents: true
   });
+  const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -31,12 +33,16 @@ export default function StatusPageSettings() {
   async function fetchConfig() {
     try {
       setLoading(true);
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/status-page`, {
-        credentials: "include"
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setConfig(data);
+      const [configRes, projectRes] = await Promise.all([
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/status-page`, { credentials: "include" }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}`, { credentials: "include" })
+      ]);
+      
+      if (configRes.ok) {
+        setConfig(await configRes.json());
+      }
+      if (projectRes.ok) {
+        setProject(await projectRes.json());
       }
     } catch (err) {
       console.error(err);
@@ -73,6 +79,14 @@ export default function StatusPageSettings() {
 
   if (loading) {
     return <div className="p-8 text-center text-muted-foreground flex items-center justify-center"><Loader2 className="animate-spin mr-2" /> Loading settings...</div>;
+  }
+
+  if (project && !project.analytics?.verified) {
+    return (
+      <div className="space-y-6 max-w-4xl mx-auto pt-8">
+        <ObservabilitySetup project={project} onVerified={fetchConfig} />
+      </div>
+    );
   }
 
   const publicUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/status/${config.slug || projectId}`;

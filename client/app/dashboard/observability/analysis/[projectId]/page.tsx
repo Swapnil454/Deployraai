@@ -10,6 +10,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, PieChart, Pie, Cell, Legend
 } from "recharts";
+import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
 
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444'];
 const STATUS_COLORS = {
@@ -25,6 +26,7 @@ export default function AnalysisDashboard() {
   const projectId = params.projectId as string;
   const [window, setWindow] = useState('24h');
   const [data, setData] = useState<any>(null);
+  const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,13 +34,19 @@ export default function AnalysisDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/analysis/dashboard?projectId=${projectId}&window=${window}`, {
-        credentials: 'include'
-      });
+      const [res, projectRes] = await Promise.all([
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/analysis/dashboard?projectId=${projectId}&window=${window}`, {
+          credentials: 'include'
+        }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${projectId}`, { credentials: "include" })
+      ]);
       if (res.ok) {
         setData(await res.json());
       } else {
         setError(`Analytics API error: ${res.statusText}`);
+      }
+      if (projectRes.ok) {
+        setProject(await projectRes.json());
       }
     } catch (err: any) {
       console.error(err);
@@ -56,6 +64,14 @@ export default function AnalysisDashboard() {
     return (
       <div className="flex h-[calc(100vh-64px)] items-center justify-center bg-[#050505]">
         <div className="animate-spin h-8 w-8 text-indigo-500 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full" />
+      </div>
+    );
+  }
+
+  if (project && !project.analytics?.verified) {
+    return (
+      <div className="flex flex-col min-h-[calc(100vh-64px)] bg-[#050505] text-zinc-200 font-sans p-6 pt-12">
+        <ObservabilitySetup project={project} onVerified={fetchAnalysis} />
       </div>
     );
   }

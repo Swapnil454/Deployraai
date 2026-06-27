@@ -18,21 +18,21 @@ export async function evaluateAlertsForSpan(span: SpanRecord, issue: Issue) {
 
     // 2. Evaluate each rule
     for (const rule of rulesRes.rows) {
-      // Filter out mismatches
+      // Only process exception rules
       if (rule.event_type !== 'exception') continue;
       const severity = span.attributes['error.severity'] || 'error';
       if (rule.severity !== 'any' && rule.severity !== severity) continue;
 
-      // Threshold check using the spans table
+      // Threshold check using issue_events (PostgreSQL) — spans table is in Clickhouse only
       const countRes = await db.query(`
         SELECT COUNT(*) AS error_count
-        FROM spans
+        FROM issue_events
         WHERE project_id = $1 
-          AND fingerprint = $2 
-          AND created_at >= NOW() - ($3::int * INTERVAL '1 minute')
-      `, [span.projectId, fingerprint, rule.window_minutes]);
+          AND issue_id = $2
+          AND occurred_at >= NOW() - ($3::int * INTERVAL '1 minute')
+      `, [span.projectId, issue.id, rule.window_minutes]);
 
-      // Add +1 to include the current span which hasn't been written yet
+      // +1 for the current event being processed (not yet committed)
       const count = parseInt(countRes.rows[0].error_count, 10) + 1;
 
       if (count >= rule.threshold) {
@@ -50,14 +50,10 @@ export async function evaluateAlertsForSpan(span: SpanRecord, issue: Issue) {
         let isCooldown = false;
         if (cooldownRes.rows.length > 0) {
           const lastTriggered = new Date(cooldownRes.rows[0].triggered_at).getTime();
-          const now = Date.now();
-          if (now - lastTriggered < rule.cooldown_minutes * 60 * 1000) {
+          if (Date.now() - lastTriggered < rule.cooldown_minutes * 60 * 1000) {
             isCooldown = true;
           }
         }
-
-        const title = issue.title;
-        const message = issue.message;
 
         // Insert alert event
         const eventRes = await db.query(`
@@ -66,33 +62,35 @@ export async function evaluateAlertsForSpan(span: SpanRecord, issue: Issue) {
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
           RETURNING *
         `, [
-          span.projectId, 
-          rule.id, 
+          span.projectId,
+          rule.id,
           issue.id,
-          fingerprint, 
-          title, 
-          message, 
-          severity, 
-          rule.route_type, 
-          rule.route_target, 
+          fingerprint,
+          issue.title,
+          issue.message,
+          severity,
+          rule.route_type,
+          rule.route_target,
           isCooldown ? 'suppressed' : 'queued'
         ]);
 
-        const alertEvent = {
-          id: eventRes.rows[0].id,
-          projectId: span.projectId,
-          title,
-          message,
-          severity,
-          fingerprint,
-          routeType: rule.route_type,
-          routeTarget: rule.route_target
-        };
+        if (!isCooldown) {
+          const alertEvent: AlertEvent = {
+            id: eventRes.rows[0].id,
+            projectId: span.projectId,
+            title: issue.title,
+            message: issue.message,
+            severity,
+            fingerprint,
+            routeType: rule.route_type,
+            routeTarget: rule.route_target
+          };
 
-        // Dispatch async, don't wait for completion here
-        dispatchAlert(alertEvent).catch(err => {
-          console.error(`Failed to dispatch alert internally:`, err);
-        });
+          // Dispatch async — don't block the span write path
+          dispatchAlert(alertEvent).catch(err => {
+            console.error(`Failed to dispatch alert:`, err);
+          });
+        }
       }
     }
   } catch (err) {

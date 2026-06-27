@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
 
 export default function IssueInboxPage() {
   const params = useParams();
   const projectId = params?.projectId;
-    const [issues, setIssues] = useState([]);
+  const [issues, setIssues] = useState([]);
+  const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
   const [statusFilter, setStatusFilter] = useState("open");
@@ -30,12 +32,17 @@ export default function IssueInboxPage() {
       if (statusFilter !== "all") url.searchParams.set("status", statusFilter);
       if (search) url.searchParams.set("search", search);
 
-      const res = await fetch(url.toString(), {
-        credentials: "include"
-      });
-      if (res.ok) {
-        const data = await res.json();
+      const [issuesRes, projectRes] = await Promise.all([
+        fetch(url.toString(), { credentials: "include" }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}`, { credentials: "include" })
+      ]);
+      
+      if (issuesRes.ok) {
+        const data = await issuesRes.json();
         setIssues(data);
+      }
+      if (projectRes.ok) {
+        setProject(await projectRes.json());
       }
     } catch (err) {
       console.error(err);
@@ -49,6 +56,14 @@ export default function IssueInboxPage() {
     if (status === 'ignored') return <Badge variant="outline" className="text-gray-500">Ignored</Badge>;
     if (status === 'regressed') return <Badge variant="destructive">Regressed</Badge>;
     return <Badge variant="default" className="bg-blue-500/10 text-blue-500">Open</Badge>;
+  }
+
+  if (project && !project.analytics?.verified) {
+    return (
+      <div className="space-y-6 max-w-6xl mx-auto pt-8">
+        <ObservabilitySetup project={project} onVerified={fetchIssues} />
+      </div>
+    );
   }
 
   return (

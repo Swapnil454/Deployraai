@@ -122,11 +122,16 @@ class SpanWriter {
       attributes: sanitizeAttributes(s.attributes)
     }));
 
-    await clickhouse.insert({
-      table: 'spans',
-      values: chBatch,
-      format: 'JSONEachRow'
-    });
+    // ClickHouse Bulk Insert — best-effort, don't fail PG write if CH is offline
+    try {
+      await clickhouse.insert({
+        table: 'spans',
+        values: chBatch,
+        format: 'JSONEachRow'
+      });
+    } catch (chErr: any) {
+      console.warn('[SpanWriter] Clickhouse unavailable, spans not persisted to CH:', chErr.message);
+    }
 
     // Upsert Error Groups to Postgres
     if (errorGroups.length > 0) {

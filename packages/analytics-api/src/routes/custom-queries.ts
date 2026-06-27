@@ -59,13 +59,17 @@ export const customQueriesRouter: FastifyPluginAsync = async (app) => {
     
     queryStr += ` ORDER BY m0 DESC LIMIT 50`;
 
-    const res = await clickhouse.query({
-      query: queryStr,
-      query_params: queryParams,
-      format: 'JSONEachRow'
-    });
-
-    const data = await res.json<any[]>();
-    return data;
+    try {
+      const res = await clickhouse.query({
+        query: queryStr,
+        query_params: queryParams,
+        format: 'JSONEachRow'
+      });
+      const data = await res.json<any[]>();
+      return data;
+    } catch (err: any) {
+      req.log.error({ err }, 'Custom query failed');
+      return reply.status(500).send({ error: 'Query execution failed', detail: err.message });
+    }
   });
 };
