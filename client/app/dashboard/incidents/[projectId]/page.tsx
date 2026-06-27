@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/Badge";
-import { Plus, Loader2, AlertTriangle, AlertCircle, AlertOctagon, MessageSquare, Clock, ArrowRight } from "lucide-react";
+import { Plus, Loader2, AlertTriangle, AlertCircle, AlertOctagon, MessageSquare, Clock, ArrowRight, Server } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
@@ -127,7 +127,7 @@ export default function IncidentsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Severity</Label>
-                  <Select value={newIncident.severity} onValueChange={(val) => setNewIncident({...newIncident, severity: val})}>
+                  <Select value={newIncident.severity} onValueChange={(val: string) => setNewIncident({...newIncident, severity: val})}>
                     <SelectTrigger><SelectValue/></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="minor">Minor</SelectItem>
@@ -138,7 +138,7 @@ export default function IncidentsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Initial Status</Label>
-                  <Select value={newIncident.status} onValueChange={(val) => setNewIncident({...newIncident, status: val})}>
+                  <Select value={newIncident.status} onValueChange={(val: string) => setNewIncident({...newIncident, status: val})}>
                     <SelectTrigger><SelectValue/></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="investigating">Investigating</SelectItem>

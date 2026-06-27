@@ -51,8 +51,8 @@ export default function StatusPageSettings() {
       setSaving(true);
             const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/status-page`, {
         method: 'PATCH',
+        credentials: "include",
         headers: { 
-          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(config)
@@ -109,7 +109,7 @@ export default function StatusPageSettings() {
             <div className="space-y-2">
               <label className="text-sm font-medium text-zinc-200">Public URL</label>
               <div className="flex gap-2">
-                <input className="w-full bg-[#0a0a0a] border border-zinc-800 rounded-md h-10 px-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 transition-colors" readOnly value={publicUrl} className="bg-muted font-mono text-sm" />
+                <input className="w-full bg-[#0a0a0a] border border-zinc-800 rounded-md h-10 px-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 transition-colors bg-muted font-mono" readOnly value={publicUrl} />
                 <button className="h-10 w-10 flex items-center justify-center border border-zinc-800 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors" onClick={() => {
                   navigator.clipboard.writeText(publicUrl);
                   alert("Copied to clipboard");

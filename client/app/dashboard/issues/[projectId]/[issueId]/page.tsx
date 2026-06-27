@@ -36,13 +36,11 @@ export default function IssueDetailPage() {
   async function fetchData() {
     try {
       setLoading(true);
-      const headers = { Authorization: `Bearer ${user.token}` };
-      
       const [issueRes, eventsRes, commentsRes, aiRes] = await Promise.all([
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}`, { headers }),
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/events`, { headers }),
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/comments`, { headers }),
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/diagnose`, { headers })
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}`, { credentials: "include" }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/events`, { credentials: "include" }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/comments`, { credentials: "include" }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/diagnose`, { credentials: "include" })
       ]);
 
       if (issueRes.ok) setIssue(await issueRes.json());
@@ -58,13 +56,13 @@ export default function IssueDetailPage() {
   }
 
   async function updateStatus(newStatus: string) {
-    if (!issue || !user || isUpdatingStatus) return;
+    if (!issue || isUpdatingStatus) return;
     try {
       setIsUpdatingStatus(true);
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/status`, {
         method: 'PATCH',
+        credentials: "include",
         headers: { 
-          Authorization: `Bearer ${user.token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ status: newStatus })
@@ -81,12 +79,12 @@ export default function IssueDetailPage() {
   }
 
   async function postComment() {
-    if (!newComment.trim() || !user) return;
+    if (!newComment.trim()) return;
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/comments`, {
         method: 'POST',
+        credentials: "include",
         headers: { 
-          Authorization: `Bearer ${user.token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ body: newComment })
@@ -102,7 +100,6 @@ export default function IssueDetailPage() {
   }
 
   async function handleDiagnose() {
-    if (!user) return;
     try {
       setIsDiagnosing(true);
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/diagnose`, {
@@ -121,7 +118,7 @@ export default function IssueDetailPage() {
   }
 
   async function handleCreatePr() {
-    if (!user || !aiDiagnosis) return;
+    if (!aiDiagnosis) return;
     try {
       setIsFixing(true);
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/create-pr`, {

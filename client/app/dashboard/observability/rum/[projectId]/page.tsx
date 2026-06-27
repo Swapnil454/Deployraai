@@ -6,8 +6,7 @@ import { Activity, Layout, MousePointer2, AlertTriangle, MonitorPlay, X } from "
 import dynamic from "next/dynamic";
 import 'rrweb-player/dist/style.css';
 
-// Dynamically import rrweb-player to avoid SSR issues
-const rrwebPlayer = dynamic(() => import('rrweb-player').then(mod => mod.default), { ssr: false });
+// rrweb-player is imported dynamically in useEffect
 
 export default function RumDashboard() {
   const { projectId } = useParams();

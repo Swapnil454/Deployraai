@@ -98,7 +98,7 @@ export default function IncidentDetailPage() {
       case "identified": return <Badge variant="warning" className="bg-yellow-100 text-yellow-800">Identified</Badge>;
       case "monitoring": return <Badge variant="secondary" className="bg-blue-100 text-blue-800">Monitoring</Badge>;
       case "resolved": return <Badge variant="success" className="bg-green-100 text-green-800">Resolved</Badge>;
-      default: return <Badge variant="outline">{status}</Badge>;
+      default: return <Badge variant="outline" className="">{status}</Badge>;
     }
   }
 

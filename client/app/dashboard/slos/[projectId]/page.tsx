@@ -146,7 +146,7 @@ export default function SLODashboard() {
               </div>
               <div className="space-y-2">
                 <Label>Metric Type</Label>
-                <Select value={newSlo.type} onValueChange={(val) => setNewSlo({...newSlo, type: val})}>
+                <Select value={newSlo.type} onValueChange={(val: string) => setNewSlo({...newSlo, type: val})}>
                   <SelectTrigger><SelectValue/></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="uptime">Uptime</SelectItem>
@@ -181,7 +181,7 @@ export default function SLODashboard() {
               </div>
               <div className="space-y-2">
                 <Label>Data Source</Label>
-                <Select value={newSlo.metric_source} onValueChange={(val) => setNewSlo({...newSlo, metric_source: val})}>
+                <Select value={newSlo.metric_source} onValueChange={(val: string) => setNewSlo({...newSlo, metric_source: val})}>
                   <SelectTrigger><SelectValue/></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="synthetic_checks">Synthetic Checks (External)</SelectItem>
