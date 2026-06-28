@@ -43,7 +43,7 @@ export const profilesRouter: FastifyPluginAsync = async (app) => {
       ]);
 
       const rows: ProfileRow[] = result.rows.map(row => ({
-        stack_trace: row.stack_trace,
+        stack_trace: (row.stack_trace || '').split(';'),
         total_value: Number(row.total_value) // pg sum() returns BigInt or string
       }));
 

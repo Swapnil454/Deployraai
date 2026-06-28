@@ -21,6 +21,11 @@ export function buildFlamegraphTrie(rows: ProfileRow[]): FlamegraphNode {
     for (let i = 0; i < row.stack_trace.length; i++) {
       const frameName = row.stack_trace[i];
       
+      // Skip the frame if it's "root" and it's the very first frame, to prevent a double "root" node
+      if (i === 0 && frameName === 'root') {
+        continue;
+      }
+
       if (!current.children) {
         current.children = [];
       }
@@ -51,4 +56,62 @@ export function buildFlamegraphTrie(rows: ProfileRow[]): FlamegraphNode {
   cleanup(root);
 
   return root;
+}
+
+export function convertTreeToFlamebearer(root: FlamegraphNode, units: string = "samples") {
+  const names: string[] = [];
+  const nameMap = new Map<string, number>();
+
+  function getNameIndex(name: string) {
+    if (nameMap.has(name)) return nameMap.get(name)!;
+    const idx = names.length;
+    names.push(name);
+    nameMap.set(name, idx);
+    return idx;
+  }
+
+  const levels: number[][] = [];
+  let maxSelf = 0;
+
+  function traverse(node: FlamegraphNode, depth: number, offset: number) {
+    if (!levels[depth]) levels[depth] = [];
+    
+    const children = node.children || [];
+    let childrenTotal = 0;
+    for (const child of children) {
+      childrenTotal += child.value;
+    }
+    const self = node.value - childrenTotal;
+    if (self > maxSelf) maxSelf = self;
+
+    levels[depth].push(
+      offset,
+      node.value,
+      self,
+      getNameIndex(node.name)
+    );
+
+    let childOffset = offset;
+    for (const child of children) {
+      traverse(child, depth + 1, childOffset);
+      childOffset += child.value;
+    }
+  }
+
+  traverse(root, 0, 0);
+
+  return {
+    version: 1,
+    flamebearer: {
+      names,
+      levels,
+      numTicks: root.value,
+      maxSelf
+    },
+    metadata: {
+      format: "single",
+      sampleRate: 100,
+      units: units
+    }
+  };
 }
