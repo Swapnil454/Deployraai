@@ -150,6 +150,31 @@ Provide the root cause and a code fix. Ensure the fixedCode represents the ENTIR
         body: `### Auto-generated fix by TracePilot\n\n**Error Fingerprint:** \`${fingerprint}\`\n**Root Cause:** ${generated.rootCause}\n\n*Opened by TracePilot on behalf of the user.*`,
       });
 
+      // 8. Notify User Internally
+      try {
+        const notifyUrl = process.env.INTERNAL_API_URL || 'http://localhost:5000';
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        
+        fetch(`${notifyUrl}/api/internal/notify`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Internal-Secret': process.env.INTERNAL_API_SECRET || ''
+          },
+          body: JSON.stringify({
+            event: 'pr_created',
+            projectId,
+            data: { prUrl: prData.html_url, exceptionType: context.exceptionType }
+          }),
+          signal: controller.signal
+        }).catch(err => {
+          app.log.error(`[Notification] Background notification failed: ${err.message}`);
+        }).finally(() => clearTimeout(timeout));
+      } catch (notifyErr) {
+        app.log.error(`[Notification] Sync setup failed: ${notifyErr}`);
+      }
+
       return reply.send({ prUrl: prData.html_url });
 
     } catch (err: any) {

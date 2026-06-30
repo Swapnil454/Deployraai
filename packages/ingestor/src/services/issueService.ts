@@ -129,11 +129,38 @@ async function upsertIssuesFromSpans(spans: SpanRecord[]): Promise<Issue[]> {
         status_changed_at = CASE WHEN issues.status = 'resolved' THEN NOW() ELSE issues.status_changed_at END,
         resolved_at = CASE WHEN issues.status = 'resolved' THEN NULL ELSE issues.resolved_at END,
         updated_at = NOW()
-      RETURNING id, project_id as "projectId", fingerprint, title, message, exception_type as "exceptionType", severity, status, event_count as "eventCount"
+      RETURNING id, project_id as "projectId", fingerprint, title, message, exception_type as "exceptionType", severity, status, event_count as "eventCount", (xmax = 0) as "isInsert"
     `, issueParamsWithCount);
 
     for (const row of issuesRes.rows) {
       issuesToReturn.push(row as Issue);
+
+      // Trigger notification if this is a net-new issue (xmax = 0 indicates an INSERT occurred rather than an UPDATE)
+      if (row.isInsert) {
+        try {
+          const notifyUrl = process.env.INTERNAL_API_URL || 'http://localhost:5000';
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 5000);
+          
+          fetch(`${notifyUrl}/api/internal/notify`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Internal-Secret': process.env.INTERNAL_API_SECRET || ''
+            },
+            body: JSON.stringify({
+              event: 'issue_arrived',
+              projectId: row.projectId,
+              data: { issueTitle: row.title, severity: row.severity }
+            }),
+            signal: controller.signal
+          }).catch(err => {
+            console.error(`[Notification] Background notification failed for issue ${row.id}: ${err.message}`);
+          }).finally(() => clearTimeout(timeout));
+        } catch (notifyErr) {
+          console.error(`[Notification] Sync setup failed: ${notifyErr}`);
+        }
+      }
     }
   }
 

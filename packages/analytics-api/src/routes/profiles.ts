@@ -32,6 +32,8 @@ export const profilesRouter: FastifyPluginAsync = async (app) => {
           AND timestamp >= $4
           AND timestamp <= $5
         GROUP BY stack_trace
+        ORDER BY total_value DESC
+        LIMIT 5000
       `;
 
       const result = await db.query(query, [

@@ -11,6 +11,7 @@ export interface ProfilerOptions {
 export class ContinuousProfiler {
   private timer: ReturnType<typeof setInterval> | null = null;
   private options: Required<ProfilerOptions>;
+  private stopCpuProfile: (() => any) | null = null;
 
   constructor(options: ProfilerOptions) {
     this.options = {
@@ -25,8 +26,9 @@ export class ContinuousProfiler {
   public start() {
     if (!this.options.enabled) return;
     
-    // Start the first profiling session
-    pprof.time.start(1000000, 10000); // interval: 1000us (1ms), duration is arbitrary since we control when to stop
+    // Start the first profiling session (interval: 1000us / 1ms)
+    this.stopCpuProfile = pprof.time.start(1000, 'cpu');
+    pprof.heap.start(512 * 1024, 64); // start heap allocation profiling (intervalBytes: 512KB, stackDepth: 64)
 
     this.timer = setInterval(async () => {
       await this.flush();
@@ -44,24 +46,45 @@ export class ContinuousProfiler {
 
   private async flush() {
     try {
-      // Stop current profile and start next one immediately
-      const profile = pprof.time.stop();
-      pprof.time.start(1000000, 10000); 
+      // Stop current CPU profile and start next one immediately
+      let cpuProfile;
+      if (this.stopCpuProfile) {
+        cpuProfile = this.stopCpuProfile();
+      }
+      this.stopCpuProfile = pprof.time.start(1000, 'cpu');
 
-      // Serialize profile to protobuf
-      const buffer = await pprof.encode(profile);
+      // Capture current Heap memory profile (runs continuously)
+      const memProfile = pprof.heap.profile();
 
-      // pprof.encode already gzip compresses it!
-      await fetch(this.options.ingestUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-protobuf',
-          'X-Project-ID': this.options.projectId,
-          'X-Service-Name': this.options.serviceName,
-          'X-Profile-Type': 'cpu'
-        },
-        body: buffer as any
-      });
+      // Serialize profiles to protobuf
+      const [cpuBuffer, memBuffer] = await Promise.all([
+        pprof.encode(cpuProfile),
+        pprof.encode(memProfile)
+      ]);
+
+      // Flush both profiles to ingestor
+      await Promise.all([
+        fetch(this.options.ingestUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-protobuf',
+            'X-Project-ID': this.options.projectId,
+            'X-Service-Name': this.options.serviceName,
+            'X-Profile-Type': 'cpu'
+          },
+          body: cpuBuffer as any
+        }),
+        fetch(this.options.ingestUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-protobuf',
+            'X-Project-ID': this.options.projectId,
+            'X-Service-Name': this.options.serviceName,
+            'X-Profile-Type': 'memory'
+          },
+          body: memBuffer as any
+        })
+      ]);
     } catch (err: any) {
       // Suppress connection errors if backend goes down temporarily
       if (err.cause?.code === 'ECONNREFUSED' || err.code === 'ECONNREFUSED') {

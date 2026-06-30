@@ -22,9 +22,15 @@ export async function profilesRouter(app: FastifyInstance) {
 
     try {
       // 1. Parse the pprof protobuf into flattened samples
-      const parsedSamples = await parsePprof(buffer);
+      let parsedSamples = await parsePprof(buffer);
       if (parsedSamples.length === 0) {
         return reply.status(200).send({ status: 'ok', inserted: 0 });
+      }
+
+      // Prevent Postgres Connection Pool Exhaustion from massive payloads
+      if (parsedSamples.length > 20000) {
+        req.log.warn(`[Profiles] Payload too large (${parsedSamples.length} samples), truncating to 20000`);
+        parsedSamples = parsedSamples.slice(0, 20000);
       }
 
       // 2. Prepare for Postgres Bulk Insert
@@ -39,7 +45,7 @@ export async function profilesRouter(app: FastifyInstance) {
         
         for (const s of chunk) {
           values.push(`($${index++}, $${index++}, $${index++}, to_timestamp($${index++} / 1000.0), $${index++}, $${index++})`);
-          flatArgs.push(projectId, serviceName, profileType, timestamp, s.stackTrace, s.value);
+          flatArgs.push(projectId, serviceName, profileType, timestamp, s.stackTrace.join(';'), s.value);
         }
         
         // 3. Insert chunk into Postgres

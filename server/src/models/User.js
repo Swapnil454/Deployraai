@@ -28,7 +28,12 @@ const UserSchema = new mongoose.Schema({
 
   // Billing
   stripeCustomerId: { type: String, sparse: true, unique: true },
-  billingStatus: { type: String, enum: ['active', 'suspended', 'past_due'], default: 'active' }
+  billingStatus: { type: String, enum: ['active', 'suspended', 'past_due'], default: 'active' },
+
+  // Notifications
+  notificationPreferences: {
+    emailEnabled: { type: Boolean, default: true }
+  }
 }, {
   timestamps: true
 });

@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { verifyWebhookSecret } from '../middleware/webhook.js';
 import { checkUsageCap } from '../middleware/usage-check.js';
 import { logWriter } from '../writers/logs.js';
+import { parseMessage } from '../services/logParser.js';
 
 export const logsRouter: FastifyPluginAsync = async (app) => {
   // Vercel log drain
@@ -21,6 +22,14 @@ export const logsRouter: FastifyPluginAsync = async (app) => {
       region: line.proxy?.region ?? 'unknown',
       deployId: line.deploymentId,
       raw: line,
+    }));
+
+    // Apply custom log parsing pipelines concurrently
+    await Promise.all(logs.map(async (log) => {
+      const attributes = await parseMessage(log.projectId, log.message);
+      if (attributes) {
+        (log as any).attributes = attributes;
+      }
     }));
 
     logWriter.write(logs).catch(() => {});
@@ -56,6 +65,14 @@ export const logsRouter: FastifyPluginAsync = async (app) => {
       region: line.attributes?.region ?? 'unknown',
       deployId: line.attributes?.deploymentId ?? 'unknown',
       raw: line,
+    }));
+
+    // Apply custom log parsing pipelines concurrently
+    await Promise.all(logs.map(async (log) => {
+      const attributes = await parseMessage(log.projectId, log.message);
+      if (attributes) {
+        (log as any).attributes = attributes;
+      }
     }));
 
     logWriter.write(logs).catch(() => {});

@@ -29,7 +29,8 @@ export async function parsePprof(buffer: Uint8Array | Buffer): Promise<ParsedSam
   let data = buffer;
   // Check for gzip magic numbers: 0x1F 0x8B
   if (data.length >= 2 && data[0] === 0x1f && data[1] === 0x8b) {
-    data = await gunzipAsync(data);
+    // Zip Bomb Protection: Limit decompression to 20MB
+    data = await promisify(zlib.gunzip)(data, { maxOutputLength: 20 * 1024 * 1024 }) as Buffer;
   }
 
   const message = Profile.decode(data) as any;

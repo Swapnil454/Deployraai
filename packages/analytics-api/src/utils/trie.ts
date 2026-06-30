@@ -17,9 +17,12 @@ export function buildFlamegraphTrie(rows: ProfileRow[]): FlamegraphNode {
   for (const row of rows) {
     let current = root;
     root.value += row.total_value;
+    
+    // Prevent Maximum Call Stack Size Exceeded (Recursion DoS)
+    const safeStackTrace = row.stack_trace.slice(0, 500);
 
-    for (let i = 0; i < row.stack_trace.length; i++) {
-      const frameName = row.stack_trace[i];
+    for (let i = 0; i < safeStackTrace.length; i++) {
+      const frameName = safeStackTrace[i];
       
       // Skip the frame if it's "root" and it's the very first frame, to prevent a double "root" node
       if (i === 0 && frameName === 'root') {

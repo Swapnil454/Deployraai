@@ -10,6 +10,8 @@ const SIDEBAR_ITEMS = [
   { name: "Projects", path: "/dashboard/projects" },
   { name: "Deployments", path: "" }, // Folder
   { name: "Logs", path: "/dashboard/logs" }, // Deployment Logs remain here
+  { name: "Log Rules", path: "/dashboard/log-rules" },
+  { name: "Infrastructure", path: "/dashboard/infrastructure" },
   { name: "Observability", path: "" }, // Folder
   { name: "Analytics", path: "/dashboard/analytics" },
   { name: "Domains", path: "/dashboard/domains" },

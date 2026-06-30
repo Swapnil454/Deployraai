@@ -8,6 +8,7 @@ import { edgeSpansRouter } from './routes/edge-spans.js';
 import { adminRouter } from './routes/admin.js';
 import { rumRouter } from './routes/rum.js';
 import { profilesRouter } from './routes/profiles.js';
+import { metricsRouter } from './routes/metrics.js';
 
 const app = Fastify({
   logger: true,
@@ -27,7 +28,7 @@ app.register(rateLimit, {
   // To prevent memory leaks (OOM) via attackers generating infinite unique keys:
   // 1. We strictly bind the rate limit key to the requester's IP.
   // 2. We cap the maximum number of keys stored in memory (cache).
-  max: 100, // 100 requests per minute
+  max: 5000, // 5000 requests per minute to support NAT'd microservices
   timeWindow: '1 minute',
   cache: 5000, // Hard limit of 5000 keys in memory to prevent Heap OOM
   keyGenerator: (req) => {
@@ -47,6 +48,7 @@ app.register(edgeSpansRouter, { prefix: '/v1/edge-spans' });
 app.register(rumRouter, { prefix: '/v1/rum' });
 app.register(adminRouter, { prefix: '/admin' });
 app.register(profilesRouter, { prefix: '/v1/profiles' });
+app.register(metricsRouter, { prefix: '/v1/metrics' });
 
 import { sourcemapsRouter } from './routes/sourcemaps.js';
 app.register(sourcemapsRouter, { prefix: '/v1/sourcemaps' });

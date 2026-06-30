@@ -12,7 +12,6 @@ import multer from "multer";
 import { v2 as cloudinary } from "cloudinary";
 import axios from "axios";
 import { escapeRegex } from "../utils/regex.js";
-import { generateSupportEmbeddings } from '../utils/embeddingGenerator.js';
 import { BoundedCache } from '../utils/BoundedCache.js';
 
 const upload = multer({ 

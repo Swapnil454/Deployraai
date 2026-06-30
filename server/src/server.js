@@ -1,13 +1,11 @@
+import 'dotenv/config'; // MUST BE FIRST
 import app from "./app.js";
 import connect from "./connect.js";
-import dotenv from "dotenv";
 import { initCron } from "./cron.js";
 import http from "http";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import HumanSupportCase from "./models/HumanSupportCase.js";
-
-dotenv.config({ override: true });
 
 // ── Startup environment guard ────────────────────────────────────────────────
 const REQUIRED_ENV = ["JWT_SECRET", "MONGO_URI"];

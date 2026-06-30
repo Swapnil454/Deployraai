@@ -18,6 +18,7 @@ import { topologyRouter } from './routes/topology.js';
 import { customDashboardsRouter } from './routes/custom-dashboards.js';
 import { profilesRouter } from './routes/profiles.js';
 import { issuesRouter } from './routes/issues.js';
+import { infrastructureRouter } from './routes/infrastructure.js';
 
 const app = Fastify({
   logger: true,
@@ -55,6 +56,7 @@ app.register(topologyRouter, { prefix: '/topology' });
 app.register(customDashboardsRouter, { prefix: '/custom-dashboards' });
 app.register(profilesRouter, { prefix: '/profiles' });
 app.register(issuesRouter, { prefix: '/issues' });
+app.register(infrastructureRouter, { prefix: '/infrastructure' });
 
 app.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
 

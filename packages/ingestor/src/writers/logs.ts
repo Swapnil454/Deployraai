@@ -58,6 +58,7 @@ class LogWriter {
             request_id: log.requestId || '',
             region: log.region || '',
             source: log.source || 'unknown',
+            attributes: log.attributes || {},
             raw: log.raw ? JSON.stringify(log.raw) : '{}'
           });
         }
