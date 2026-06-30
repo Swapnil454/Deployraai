@@ -8,8 +8,8 @@ export const db = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
-// Create rum_events table if it doesn't exist (ingestor owns this schema)
-db.on('connect', async (client) => {
+export async function initDb() {
+  const client = await db.connect();
   try {
     await client.query(`
       CREATE TABLE IF NOT EXISTS rum_events (
@@ -31,10 +31,16 @@ db.on('connect', async (client) => {
     await client.query(`ALTER TABLE rum_events ADD COLUMN IF NOT EXISTS user_agent TEXT`);
     await client.query(`ALTER TABLE rum_events ADD COLUMN IF NOT EXISTS duration_ms INTEGER DEFAULT 0`);
     await client.query(`ALTER TABLE rum_events ADD COLUMN IF NOT EXISTS error_count INTEGER DEFAULT 0`);
+    
+    // Create missing indexes for RUM events to prevent full table scans
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_rum_events_project_time ON rum_events (project_id, created_at DESC)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_rum_events_session ON rum_events (session_id)`);
   } catch (err) {
     console.error('Failed to init RUM table', err);
+  } finally {
+    client.release();
   }
-});
+}
 
 db.on('error', (err) => {
   // Log but don't exit — pg Pool will auto-reconnect on the next query

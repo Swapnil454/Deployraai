@@ -34,7 +34,7 @@ export async function aggregateBilling() {
         format: 'JSONEachRow'
       });
 
-      const data = await chRes.json<any[]>();
+      const data = await chRes.json<any>();
       const totalSpans = parseInt((data[0] as any)?.total_spans || '0', 10);
 
       if (totalSpans > 0) {

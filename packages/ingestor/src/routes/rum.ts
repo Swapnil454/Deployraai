@@ -1,5 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { db } from '../db.js';
+import { redis } from '../redis.js';
+import { checkUsageCap } from '../middleware/usage-check.js';
 
 export const rumRouter: FastifyPluginAsync = async (app) => {
   app.post('/', async (req, reply) => {
@@ -26,13 +28,25 @@ export const rumRouter: FastifyPluginAsync = async (app) => {
       if (token === 'trc_rum_681f7258c62ef56fa9154a263a4811fe') {
          projectId = '6a2c3b57d3a51ae19d6450da';
       } else {
-        const projectRes = await db.query('SELECT id FROM projects WHERE rum_write_key = $1 OR id = $1', [token]);
-        if (projectRes.rows.length === 0) {
-          return reply.status(401).send({ error: 'Invalid or inactive project token' });
+        const rumCacheKey = `cache:rum_token:${token}`;
+        const cachedId = await redis.get(rumCacheKey);
+        
+        if (cachedId) {
+          projectId = cachedId;
+        } else {
+          const projectRes = await db.query('SELECT id FROM projects WHERE rum_write_key = $1 OR id = $1', [token]);
+          if (projectRes.rows.length === 0) {
+            return reply.status(401).send({ error: 'Invalid or inactive project token' });
+          }
+          projectId = projectRes.rows[0].id;
+          await redis.set(rumCacheKey, projectId, 'EX', 300); // 5 minutes cache
         }
-        projectId = projectRes.rows[0].id;
       }
       
+      (req as any).projectId = projectId;
+      await checkUsageCap(req, reply);
+      if (reply.sent) return;
+
       let error_count = 0;
       events.forEach((evt: any) => {
         // Very rough heuristic for counting errors in rrweb events if applicable
@@ -48,13 +62,14 @@ export const rumRouter: FastifyPluginAsync = async (app) => {
       }
 
       await db.query(`
-        INSERT INTO rum_events (project_id, session_id, sequence_num, events, url, user_agent, duration_ms, error_count, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        INSERT INTO rum_events (project_id, session_id, sequence_num, events, event_count, url, user_agent, duration_ms, error_count, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
       `, [
         projectId, 
         sessionId, 
         sequence_num,
         JSON.stringify(events),
+        events.length,
         url || null,
         user_agent || req.headers['user-agent'] || null,
         duration_ms,

@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import { db } from '../db.js';
+import { clickhouse } from '../clickhouse.js';
 import { requireAuth } from '../middleware/auth.js';
 
 export const logsRouter: FastifyPluginAsync = async (app) => {
@@ -9,30 +9,47 @@ export const logsRouter: FastifyPluginAsync = async (app) => {
     const safeLimit = Math.min(parseInt(limit), 500);
 
     let query = `
-      SELECT id, timestamp, level, message, request_id, region, deploy_id, source
+      SELECT timestamp, level, message, request_id, region, deploy_id, source, raw
       FROM logs
-      WHERE project_id = $1
+      WHERE project_id = {projectId: String}
     `;
-    const params: any[] = [projectId];
-    let p = 2;
+    const params: Record<string, any> = { projectId };
 
-    if (level) { query += ` AND level = $${p++}`; params.push(level); }
-    if (requestId) { query += ` AND request_id = $${p++}`; params.push(requestId); }
-    if (from) { query += ` AND timestamp >= $${p++}`; params.push(new Date(from)); }
-    if (to) { query += ` AND timestamp <= $${p++}`; params.push(new Date(to)); }
-
-    // Full-text search on message (GIN index exists in init.sql)
-    if (search) {
-      query += ` AND to_tsvector('english', message) @@ plainto_tsquery('english', $${p++})`;
-      params.push(search);
+    if (level) { 
+      query += ` AND level = {level: String}`; 
+      params.level = level; 
+    }
+    if (requestId) { 
+      query += ` AND request_id = {requestId: String}`; 
+      params.requestId = requestId; 
+    }
+    if (from) { 
+      query += ` AND timestamp >= {from: DateTime64(3)}`; 
+      params.from = new Date(from).getTime(); 
+    }
+    if (to) { 
+      query += ` AND timestamp <= {to: DateTime64(3)}`; 
+      params.to = new Date(to).getTime(); 
     }
 
-    query += ` ORDER BY timestamp DESC LIMIT $${p++} OFFSET $${p++}`;
-    params.push(safeLimit, parseInt(offset));
+    // Full-text search on message (ClickHouse bloom filter on message_idx)
+    if (search) {
+      query += ` AND positionCaseInsensitive(message, {search: String}) > 0`;
+      params.search = search;
+    }
+
+    query += ` ORDER BY timestamp DESC LIMIT {limit: UInt32} OFFSET {offset: UInt32}`;
+    params.limit = safeLimit;
+    params.offset = parseInt(offset);
 
     try {
-      const result = await db.query(query, params);
-      return { logs: result.rows, total: result.rowCount };
+      const resultSet = await clickhouse.query({
+        query,
+        query_params: params,
+        format: 'JSONEachRow'
+      });
+      const rows = await resultSet.json();
+      return { logs: rows, total: rows.length }; // Note: total is page size here since CH pagination count requires a second query
     } catch (err) {
       req.log.error({ err }, 'Failed to fetch logs');
       return reply.status(500).send({ error: 'Failed to fetch logs' });

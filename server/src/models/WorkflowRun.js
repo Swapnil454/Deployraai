@@ -84,5 +84,6 @@ const workflowRunSchema = new mongoose.Schema(
 );
 
 workflowRunSchema.index({ status: 1, resumeAt: 1 });
+workflowRunSchema.index({ projectId: 1, createdAt: -1 });
 
 export default mongoose.model("WorkflowRun", workflowRunSchema);

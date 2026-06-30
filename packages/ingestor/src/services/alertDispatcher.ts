@@ -60,11 +60,18 @@ async function sendEmailAlert(alert: AlertEvent) {
 
 async function sendSlackAlert(alert: AlertEvent) {
   if (!alert.routeTarget) throw new Error('Missing route target for Slack');
-  await validateWebhookUrl(alert.routeTarget);
+  const safeIp = await validateWebhookUrl(alert.routeTarget);
+  
+  const targetUrl = new URL(alert.routeTarget);
+  const originalHost = targetUrl.hostname;
+  targetUrl.hostname = safeIp; // Hard bind to the validated IP
 
-  const res = await fetch(alert.routeTarget, {
+  const res = await fetch(targetUrl.toString(), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'Host': originalHost // Preserve original hostname for virtual hosts
+    },
     body: JSON.stringify({
       text: `🚨 *${alert.title}*\n${alert.message}\n*Severity*: ${alert.severity}\n*Fingerprint*: \`${alert.fingerprint}\``
     }),
@@ -79,11 +86,18 @@ async function sendSlackAlert(alert: AlertEvent) {
 
 async function sendWebhookAlert(alert: AlertEvent) {
   if (!alert.routeTarget) throw new Error('Missing route target for Webhook');
-  await validateWebhookUrl(alert.routeTarget);
+  const safeIp = await validateWebhookUrl(alert.routeTarget);
 
-  const res = await fetch(alert.routeTarget, {
+  const targetUrl = new URL(alert.routeTarget);
+  const originalHost = targetUrl.hostname;
+  targetUrl.hostname = safeIp; // Hard bind to the validated IP
+
+  const res = await fetch(targetUrl.toString(), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'Host': originalHost // Preserve original hostname for virtual hosts
+    },
     body: JSON.stringify(alert),
     redirect: 'manual',
     signal: AbortSignal.timeout(5000), // 5s timeout

@@ -15,6 +15,8 @@ const mapCache = new LRUCache<string, SourceMapConsumer>({
   },
 });
 
+const pendingFetches = new Map<string, Promise<SourceMapConsumer | null>>();
+
 async function getConsumer(projectId: string, deployId: string, fileName: string): Promise<SourceMapConsumer | null> {
   const cacheKey = `${projectId}:${deployId}:${fileName}`;
 
@@ -22,18 +24,31 @@ async function getConsumer(projectId: string, deployId: string, fileName: string
     return mapCache.get(cacheKey)!;
   }
 
-  const result = await db.query(
-    'SELECT map_content FROM sourcemaps WHERE project_id=$1 AND deploy_id=$2 AND file_name=$3',
-    [projectId, deployId, fileName]
-  );
+  if (pendingFetches.has(cacheKey)) {
+    return pendingFetches.get(cacheKey)!;
+  }
 
-  if (!result.rows[0]) return null;
+  const promise = (async () => {
+    try {
+      const result = await db.query(
+        'SELECT map_content FROM sourcemaps WHERE project_id=$1 AND deploy_id=$2 AND file_name=$3',
+        [projectId, deployId, fileName]
+      );
 
-  const rawMap = JSON.parse(result.rows[0].map_content);
-  const consumer = await new SourceMapConsumer(rawMap);
+      if (!result.rows[0]) return null;
 
-  mapCache.set(cacheKey, consumer);
-  return consumer;
+      const rawMap = JSON.parse(result.rows[0].map_content);
+      const consumer = await new SourceMapConsumer(rawMap);
+
+      mapCache.set(cacheKey, consumer);
+      return consumer;
+    } finally {
+      pendingFetches.delete(cacheKey);
+    }
+  })();
+
+  pendingFetches.set(cacheKey, promise);
+  return promise;
 }
 
 export async function deobfuscateStackTrace(

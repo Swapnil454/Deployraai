@@ -16,6 +16,7 @@ export async function createJiraIssue(domain: string, email: string, apiToken: s
           }]
         }
       }
-    })
+    }),
+    signal: AbortSignal.timeout(5000)
   });
 }

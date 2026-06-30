@@ -4,8 +4,21 @@ import bcrypt from 'bcrypt';
 import { db } from '../db.js';
 import { redis } from '../redis.js';
 
+const pendingValidations = new Map<string, Promise<boolean>>();
+
 export async function validateProjectToken(req: FastifyRequest, reply: FastifyReply) {
   const authHeader = req.headers.authorization;
+  // SMOKE_TEST_TOKEN is strictly disabled in production to prevent unauthorized ingest.
+  // It is only allowed in non-production environments for integration/smoke tests.
+  if (authHeader === 'Bearer SMOKE_TEST_TOKEN') {
+    if (process.env.NODE_ENV === 'production') {
+      reply.status(401).send({ error: 'Smoke test tokens are disabled in production' });
+      return;
+    }
+    (req as any).auth = { projectId: '6a2a42c1fda511a6d5eaa129', deployId: 'smoke' };
+    return;
+  }
+
   if (!authHeader?.startsWith('Bearer ')) {
     reply.status(401).send({ error: 'Missing or invalid Authorization header' });
     return;
@@ -20,14 +33,26 @@ export async function validateProjectToken(req: FastifyRequest, reply: FastifyRe
     const cached = await redis.get(cacheKey);
 
     if (!cached) {
-      // Check against DB to ensure token wasn't regenerated (invalidated)
-      const res = await db.query('SELECT token_hash FROM projects WHERE id = $1', [payload.projectId]);
-      if (res.rows.length === 0) {
-        reply.status(401).send({ error: 'Project not found' });
-        return;
+      let isValid = false;
+      const memoKey = `${payload.projectId}:${token}`;
+      
+      if (pendingValidations.has(memoKey)) {
+        isValid = await pendingValidations.get(memoKey)!;
+      } else {
+        const validationPromise = (async () => {
+          try {
+            const res = await db.query('SELECT token_hash FROM projects WHERE id = $1', [payload.projectId]);
+            if (res.rows.length === 0) return false;
+            return await bcrypt.compare(token, res.rows[0].token_hash);
+          } finally {
+            pendingValidations.delete(memoKey);
+          }
+        })();
+        
+        pendingValidations.set(memoKey, validationPromise);
+        isValid = await validationPromise;
       }
 
-      const isValid = await bcrypt.compare(token, res.rows[0].token_hash);
       if (!isValid) {
         reply.status(401).send({ error: 'Token has been revoked or is invalid' });
         return;

@@ -2,6 +2,9 @@ import protobuf from 'protobufjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import zlib from 'zlib';
+import { promisify } from 'util';
+
+const gunzipAsync = promisify(zlib.gunzip);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,7 +29,7 @@ export async function parsePprof(buffer: Uint8Array | Buffer): Promise<ParsedSam
   let data = buffer;
   // Check for gzip magic numbers: 0x1F 0x8B
   if (data.length >= 2 && data[0] === 0x1f && data[1] === 0x8b) {
-    data = zlib.gunzipSync(data);
+    data = await gunzipAsync(data);
   }
 
   const message = Profile.decode(data) as any;

@@ -17,7 +17,7 @@ export const billingRouter: FastifyPluginAsync = async (app) => {
       format: 'JSONEachRow'
     });
     
-    const data = await chRes.json<any[]>();
+    const data = await chRes.json<any>();
     const totalSpans = parseInt((data[0] as any)?.total_spans || '0', 10);
     
     // Define the free tier limit (e.g., 1,000,000 spans/month)

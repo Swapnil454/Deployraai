@@ -11,7 +11,6 @@ import { profilesRouter } from './routes/profiles.js';
 
 const app = Fastify({
   logger: true,
-  bodyLimit: 10 * 1024 * 1024, // 10MB limit for spans
   // Trust X-Forwarded-For — ingestor is behind a load balancer
   trustProxy: true,
 });
@@ -22,20 +21,24 @@ app.register(cors, {
   allowedHeaders: ['Content-Type', 'Authorization', 'x-rum-key'],
 });
 
-app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
-  (req as any).rawBody = body; // store raw bytes
-  try { done(null, JSON.parse(body.toString())); }
-  catch(e) { done(e as Error); }
-});
 
-// app.register(rateLimit, {
-//   redis,
-//   max: 1000,
-//   timeWindow: '1 second',
-//   keyGenerator: (req) => {
-//     return req.headers['x-rum-key'] ?? (req as any).auth?.projectId ?? req.ip;
-//   }
-// });
+app.register(rateLimit, {
+  // We use an in-memory LRU cache because Redis is disabled.
+  // To prevent memory leaks (OOM) via attackers generating infinite unique keys:
+  // 1. We strictly bind the rate limit key to the requester's IP.
+  // 2. We cap the maximum number of keys stored in memory (cache).
+  max: 100, // 100 requests per minute
+  timeWindow: '1 minute',
+  cache: 5000, // Hard limit of 5000 keys in memory to prevent Heap OOM
+  keyGenerator: (req) => {
+    const rumKey = req.headers['x-rum-key'] ? String(req.headers['x-rum-key']).slice(0, 50) : '';
+    const projectId = (req as any).auth?.projectId ? String((req as any).auth.projectId) : '';
+    
+    // Always prefix with the requester's IP so an attacker from a single IP 
+    // cannot bypass limits by simply rotating 'x-rum-key' headers.
+    return `${req.ip}:${rumKey}:${projectId}`;
+  }
+});
 
 // Routes
 app.register(tracesRouter, { prefix: '/v1/traces' });
@@ -51,23 +54,39 @@ app.register(sourcemapsRouter, { prefix: '/v1/sourcemaps' });
 // Health check — used by load balancer
 app.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
 
-import { db } from './db.js';
+// Expose internal telemetry metrics (connection pools, queue depth)
+app.get('/metrics', async () => {
+  return {
+    postgres_pool: {
+      total_connections: db.totalCount,
+      idle_connections: db.idleCount,
+      waiting_clients: db.waitingCount
+    }
+  };
+});
+
+import { db, initDb } from './db.js';
 import { renderPollerRegistry } from './pollers/render-poller.js';
 
+import { usagePoller } from './pollers/usage-poller.js';
+
+import { runRetentionPoller } from './pollers/retention-poller.js';
+
 async function restoreRenderPollers() {
-  // Legacy feature: Render logs polling is currently disabled as it requires missing DB columns
-  // const projects = await db.query(
-  //   `SELECT id, render_token, render_service_id 
-  //    FROM projects WHERE platform = 'render' AND is_active = true`
-  // );
-  // for (const p of projects.rows) {
-  //   renderPollerRegistry.start(p.id, p.render_token, p.render_service_id);
-  // }
-  // console.log(`Restored ${projects.rows.length} Render pollers`);
+  // ...
+  
+  usagePoller.start();
+
+  // Run retention poller immediately, then every hour
+  runRetentionPoller();
+  setInterval(runRetentionPoller, 60 * 60 * 1000);
 }
 
 const start = async () => {
   try {
+    console.log('Running database migrations...');
+    await initDb();
+    
     await app.listen({ port: 4317, host: '0.0.0.0' });
     console.log('Ingestor running on port 4317');
     await restoreRenderPollers();

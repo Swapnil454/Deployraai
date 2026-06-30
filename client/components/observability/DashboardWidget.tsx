@@ -27,6 +27,7 @@ export function DashboardWidget({ projectId, widget }: { projectId: string; widg
         const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/custom-dashboards/query`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             projectId,
             eventName: widget.eventName,

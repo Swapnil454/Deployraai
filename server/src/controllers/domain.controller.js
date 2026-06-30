@@ -1,4 +1,5 @@
 import dns from "dns/promises";
+import { BoundedCache } from '../utils/BoundedCache.js';
 import DomainSetup from "../models/DomainSetup.js";
 import Project from "../models/Project.js";
 import Deployment from "../models/Deployment.js";
@@ -78,7 +79,7 @@ const PRIVATE_IP_PATTERNS = [
 ];
 
 // In-memory rate limiter: domainSetupId â†’ timestamp of last verify call
-const verifyRateLimitMap = new Map();
+const verifyRateLimitMap = new BoundedCache(5000);
 const VERIFY_RATE_LIMIT_MS = 30_000; // 30 seconds
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -105,7 +106,7 @@ const assertNotPrivateIp = async (domain) => {
     const v6 = await dns.resolve6(domain).catch(() => []);
     addresses = [...v4, ...v6];
   } catch (_) {
-    // Domain doesn't resolve yet â€” that's fine; SSRF risk is zero
+    // Domain doesn't resolve yet — that's fine; SSRF risk is zero
     return;
   }
 
@@ -342,7 +343,7 @@ export const addCustomDomain = async (req, res) => {
 export const getProjectDomains = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const domains = await DomainSetup.find({ projectId, userId: req.user.userId }).sort({ createdAt: -1 });
+    const domains = await DomainSetup.find({ projectId, userId: req.user.userId }).sort({ createdAt: -1 }).limit(100);
     res.json(domains);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch domains." });
@@ -356,7 +357,7 @@ export const getAllDomains = async (req, res) => {
     const match = { userId: req.user.userId, status: { $ne: 'removed' } };
     if (projectId) match.projectId = projectId;
     
-    const customDomains = await DomainSetup.find(match).populate("projectId", "repoName").sort({ createdAt: -1 }).lean();
+    const customDomains = await DomainSetup.find(match).populate("projectId", "repoName").sort({ createdAt: -1 }).limit(100).lean();
 
     const projMatch = { userId: req.user.userId };
     if (projectId) projMatch._id = projectId;
@@ -820,7 +821,7 @@ export const verifyDomain = async (req, res) => {
         error: `Too many verification requests. Please wait ${retryAfter} second(s) before trying again.`,
       });
     }
-    verifyRateLimitMap.set(domainSetupId, now);
+    verifyRateLimitMap.set(domainSetupId, now, VERIFY_RATE_LIMIT_MS);
 
     if (!domainSetupId.match(/^[a-f\d]{24}$/i)) {
       return res.status(400).json({ error: "Provider-managed domains cannot be verified here." });

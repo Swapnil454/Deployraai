@@ -1,6 +1,6 @@
 import express from 'express';
 import axios from 'axios';
-import { requireAuth } from '../middleware/auth.middleware.js';
+import { requireAuth, verifyProjectOwnership } from '../middleware/auth.middleware.js';
 import Project from '../models/Project.js';
 
 const router = express.Router();
@@ -8,28 +8,6 @@ const ANALYTICS_API_URL = process.env.ANALYTICS_API_URL || 'http://localhost:431
 
 // Apply auth middleware to all routes
 router.use(requireAuth);
-
-// Middleware to verify user owns the project
-const verifyProjectOwnership = async (req, res, next) => {
-  try {
-    const projectId = req.query.projectId || req.body?.projectId;
-    if (!projectId) {
-      return res.status(400).json({ error: 'projectId is required in query or body' });
-    }
-
-    const project = await Project.findOne({ _id: projectId, userId: req.user.userId });
-    if (!project) {
-      return res.status(403).json({ error: 'Access denied: You do not own this project' });
-    }
-
-    next();
-  } catch (error) {
-    if (error.name === 'CastError') {
-      return res.status(400).json({ error: 'Invalid projectId format' });
-    }
-    res.status(500).json({ error: 'Failed to verify project ownership' });
-  }
-};
 
 // Catch-all proxy route
 router.use('/', verifyProjectOwnership, async (req, res) => {
@@ -48,23 +26,25 @@ router.use('/', verifyProjectOwnership, async (req, res) => {
       headers: {
         Authorization: cookieToken ? `Bearer ${cookieToken}` : (req.headers.authorization || ''),
       },
-      responseType: req.path.includes('stream') ? 'stream' : 'json',
+      responseType: 'stream',
       timeout: 30000, // 30s — prevent hanging if analytics-api is slow
     });
 
-    // If it's a stream (like SSE for logs), pipe it back
-    if (req.path.includes('stream') || response.headers['content-type']?.includes('text/event-stream')) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      return response.data.pipe(res);
+    // Pass through status and headers
+    res.status(response.status);
+    for (const [key, value] of Object.entries(response.headers)) {
+      // Don't set transfer-encoding chunked manually as Node handles it
+      if (key.toLowerCase() !== 'transfer-encoding') {
+        res.setHeader(key, value);
+      }
     }
 
-    // Otherwise send standard JSON response
-    res.status(response.status).json(response.data);
+    // Pipe the binary stream directly back to the client to avoid holding JSON in memory
+    response.data.pipe(res);
   } catch (error) {
-    if (error.response) {
-      res.status(error.response.status).json(error.response.data);
+    if (error.response && error.response.data && typeof error.response.data.pipe === 'function') {
+      res.status(error.response.status);
+      error.response.data.pipe(res);
     } else {
       console.error('Analytics API Proxy Error:', error.message);
       res.status(502).json({ error: 'Bad Gateway: Analytics API is unreachable' });

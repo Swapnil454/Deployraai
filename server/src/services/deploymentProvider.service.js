@@ -18,13 +18,13 @@ export const appendLog = async (deploymentId, level, step, message, metadata={})
 
   await Deployment.updateOne(
     { _id: deploymentId },
-    { $push: { logs: logEntry } }
+    { $push: { logs: { $each: [logEntry], $slice: -1000 } } }
   );
 
   if (deployment.type !== 'full' && deployment.orchestrationGroupId) {
     await Deployment.updateOne(
       { orchestrationGroupId: deployment.orchestrationGroupId, type: 'full' },
-      { $push: { logs: logEntry } }
+      { $push: { logs: { $each: [logEntry], $slice: -1000 } } }
     );
   }
 };

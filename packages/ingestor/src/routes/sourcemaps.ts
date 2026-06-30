@@ -16,14 +16,17 @@ export const sourcemapsRouter: FastifyPluginAsync = async (app) => {
       return reply.status(400).send({ error: 'Missing required fields: deployId, fileName, mapContent' });
     }
 
-    // Validate it's actually a source map
     try {
-      const parsed = JSON.parse(mapContent);
-      if (!parsed.version || !Array.isArray(parsed.sources) || typeof parsed.mappings !== 'string') {
+      // Prevent Event Loop Starvation: Do not synchronously parse a 10MB JSON string!
+      // Simply check for essential sourcemap keys using string search.
+      const isValid = mapContent.includes('"version"') && 
+                      mapContent.includes('"sources"') && 
+                      mapContent.includes('"mappings"');
+      if (!isValid) {
         return reply.status(400).send({ error: 'Invalid source map format (missing version/sources/mappings)' });
       }
     } catch {
-      return reply.status(400).send({ error: 'mapContent must be valid JSON string' });
+      return reply.status(400).send({ error: 'mapContent must be valid string' });
     }
 
     // Optional fields

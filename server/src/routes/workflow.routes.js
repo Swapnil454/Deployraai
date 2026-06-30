@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { triggerWorkflow } from "../services/workflow.service.js";
 import WorkflowRun from "../models/WorkflowRun.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
+import { escapeRegex } from "../utils/regex.js";
 
 const router = express.Router({ mergeParams: true });
 
@@ -12,15 +13,27 @@ router.get("/", requireAuth, async (req, res) => {
     const { projectId } = req.params;
     const { status = 'all', search = '' } = req.query;
 
-    // 1. Get accurate counts for all statuses
-    const allRuns = await WorkflowRun.find({ projectId }, 'status');
+    // 1. Get accurate counts for all statuses using native MongoDB aggregation to prevent OOM
+    const statusCounts = await WorkflowRun.aggregate([
+      { $match: { projectId: new mongoose.Types.ObjectId(projectId) } },
+      { $group: { _id: "$status", count: { $sum: 1 } } }
+    ]);
+    
     const counts = {
-      all: allRuns.length,
-      completed: allRuns.filter(r => r.status === 'completed').length,
-      running: allRuns.filter(r => ['running', 'sleeping', 'failed_retrying'].includes(r.status)).length,
-      failed: allRuns.filter(r => r.status === 'failed').length,
-      cancelled: allRuns.filter(r => r.status === 'cancelled').length
+      all: 0,
+      completed: 0,
+      running: 0,
+      failed: 0,
+      cancelled: 0
     };
+
+    for (const sc of statusCounts) {
+      counts.all += sc.count;
+      if (sc._id === 'completed') counts.completed += sc.count;
+      else if (['running', 'sleeping', 'failed_retrying'].includes(sc._id)) counts.running += sc.count;
+      else if (sc._id === 'failed') counts.failed += sc.count;
+      else if (sc._id === 'cancelled') counts.cancelled += sc.count;
+    }
 
     // 2. Build filter query for actual runs
     const filterQuery = { projectId };
@@ -34,7 +47,7 @@ router.get("/", requireAuth, async (req, res) => {
     }
 
     if (search) {
-      const searchRegex = new RegExp(search, 'i');
+      const searchRegex = new RegExp(escapeRegex(search), 'i');
       
       // Find associated deployments that match the search query (e.g. commit messages)
       const matchingDeps = await mongoose.model('Deployment').find({
@@ -74,37 +87,6 @@ router.get("/", requireAuth, async (req, res) => {
             hasCommitMessage = true;
             if (!obj.payload) obj.payload = {};
             obj.payload.commitMessage = dep.source.commitMessage;
-          } else {
-            // Eagerly fetch from GitHub if missing
-            try {
-              const proj = await mongoose.model('Project').findById(dep.projectId || obj.projectId).select('repoFullName selectedBranch');
-              if (proj && proj.repoFullName) {
-                const User = mongoose.model('User');
-                const user = await User.findById(req.user?.userId || req.user?._id);
-                let githubToken = process.env.GITHUB_ACCESS_TOKEN;
-                if (user?.githubAccessTokenEncrypted) {
-                  const { decryptSecret } = await import('../utils/encryption.js');
-                  githubToken = decryptSecret(user.githubAccessTokenEncrypted) || githubToken;
-                }
-                const branch = dep.source?.branch || proj.selectedBranch || 'main';
-                let url = `https://api.github.com/repos/${proj.repoFullName}/commits/${branch}`;
-                if (dep.source?.commitSha) url = `https://api.github.com/repos/${proj.repoFullName}/commits/${dep.source.commitSha}`;
-                
-                const ghRes = await fetch(url, { headers: { Authorization: `Bearer ${githubToken}`, Accept: 'application/vnd.github.v3+json' } });
-                if (ghRes.ok) {
-                  const data = await ghRes.json();
-                  const commitMessage = data.commit?.message?.split('\n')[0];
-                  if (commitMessage) {
-                     hasCommitMessage = true;
-                     if (!obj.payload) obj.payload = {};
-                     obj.payload.commitMessage = commitMessage;
-                     await mongoose.model('Deployment').updateOne({ _id: dep._id }, { $set: { 'source.commitMessage': commitMessage, 'source.commitSha': data.sha || dep.source?.commitSha } });
-                  }
-                }
-              }
-            } catch (err) {
-              console.error("Failed to fetch commit message for workflow UI:", err);
-            }
           }
           
           if (!hasCommitMessage && dep.triggerReason && dep.triggerReason !== 'manual') {

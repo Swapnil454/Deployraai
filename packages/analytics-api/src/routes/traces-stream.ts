@@ -1,7 +1,10 @@
 import { FastifyPluginAsync } from 'fastify';
-import { db } from '../db.js';
+import { requireAuth } from '../middleware/auth.js';
+import { sseEmitter, subscribeToChannel, unsubscribeFromChannel } from '../utils/sse-manager.js';
 
 export const tracesStreamRouter: FastifyPluginAsync = async (app) => {
+  app.addHook('onRequest', requireAuth);
+
   app.get('/stream', async (req, reply) => {
     const { projectId } = req.query as any;
 
@@ -10,35 +13,31 @@ export const tracesStreamRouter: FastifyPluginAsync = async (app) => {
     reply.raw.setHeader('Connection', 'keep-alive');
     // Ensure we handle CORS correctly for stream
     reply.raw.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
+    reply.raw.setHeader('X-Accel-Buffering', 'no'); // Prevent Nginx buffering
 
     // Send an initial heartbeat
     reply.raw.write(':\n\n');
 
-    // We'll keep track of the last checked timestamp to only fetch new spans
-    let lastChecked = new Date();
+    const channel = `traces:${projectId}`;
 
-    const interval = setInterval(async () => {
-      try {
-        const newTraces = await db.query(`
-          SELECT
-            span_id, trace_id, parent_span_id, name,
-            start_time, end_time, duration_ms,
-            status_code, attributes, events
-          FROM spans
-          WHERE project_id = $1 AND (parent_span_id IS NULL OR parent_span_id = '') AND start_time > $2
-          ORDER BY start_time DESC
-          LIMIT 50
-        `, [projectId, lastChecked]);
+    const listener = (message: string) => {
+      // message is a JSON array string of root spans published by SpanWriter
+      reply.raw.write(`data: ${message}\n\n`);
+    };
 
-        if (newTraces.rows.length > 0) {
-          reply.raw.write(`data: ${JSON.stringify(newTraces.rows)}\n\n`);
-          lastChecked = new Date(); // update only when we've processed up to this point
-        }
-      } catch (err) {
-        console.error('Error fetching stream traces:', err);
-      }
-    }, 2000);
+    sseEmitter.on(channel, listener);
+    await subscribeToChannel(channel);
 
-    req.raw.on('close', () => clearInterval(interval));
+    // Wait until the client disconnects. Wrapping in a Promise is CRITICAL — without it,
+    // the async route handler never resolves, and Node.js permanently holds the request 
+    // context (headers, closure, stack frame) in memory. Over thousands of SSE connections 
+    // this causes a slow but guaranteed OOM crash.
+    await new Promise<void>((resolve) => {
+      req.raw.on('close', () => {
+        sseEmitter.off(channel, listener);
+        unsubscribeFromChannel(channel);
+        resolve();
+      });
+    });
   });
 };

@@ -29,4 +29,7 @@ const FixPullRequestSchema = new mongoose.Schema({
   
 }, { timestamps: true });
 
+FixPullRequestSchema.index({ projectId: 1, createdAt: -1 });
+FixPullRequestSchema.index({ userId: 1, createdAt: -1 });
+
 export default mongoose.model("FixPullRequest", FixPullRequestSchema);

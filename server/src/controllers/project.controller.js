@@ -228,7 +228,7 @@ export const getProjects = async (req, res) => {
       sort = { repoName: 1 };
     }
 
-    const projects = await Project.find(query).sort(sort).lean();
+    const projects = await Project.find(query).sort(sort).limit(50).lean();
 
     const Deployment = (await import('../models/Deployment.js')).default;
     const Monitor = (await import('../models/Monitor.js')).default;
@@ -414,9 +414,30 @@ export const updateProjectConfig = async (req, res) => {
       };
     }
 
-    project.configuration = configuration;
+    // --- Security: Only allow user-editable fields to be updated ---
+    // System-managed provider IDs (vercelProjectId, renderServiceId, railwayProjectId)
+    // MUST NOT be overwritten by user input. An attacker could otherwise set their
+    // project's IDs to those belonging to another user, gaining access to that
+    // user's provider infrastructure.
+    const USER_EDITABLE_CONFIG_FIELDS = [
+      'frontendPlatform', 'backendPlatform', 'databasePlatform', 'storagePlatform',
+      'frontendRoot', 'backendRoot',
+      'frontendBuildCommand', 'backendBuildCommand', 'backendStartCommand',
+      'installCommand', 'outputDirectory',
+    ];
+
+    for (const field of USER_EDITABLE_CONFIG_FIELDS) {
+      if (configuration[field] !== undefined) {
+        project.configuration[field] = configuration[field];
+      }
+    }
+
+    // Env variables are the only nested object the user controls
+    if (configuration.envVariables !== undefined) {
+      project.configuration.envVariables = configuration.envVariables;
+    }
+
     project.status = 'configured';
-    
     await project.save();
 
     res.json({ success: true, message: "Configuration saved successfully" });
@@ -816,7 +837,28 @@ export const getAiUsage = async (req, res) => {
     
     query.createdAt = { $gte: startDate };
 
-    const usages = await AiUsage.find(query).sort({ createdAt: -1 }).populate('projectId', 'repoName repoFullName');
+    // 1. Offload chart data to native MongoDB aggregation
+    const aggPipeline = [
+      { $match: query },
+      { 
+        $group: {
+          _id: {
+            $dateToString: { 
+              format: isHourly ? "%Y-%m-%dT%H:00:00.000Z" : "%Y-%m-%d", 
+              date: "$createdAt" 
+            }
+          },
+          count: { $sum: 1 }
+        }
+      }
+    ];
+
+    const [statusCounts, recentActivity] = await Promise.all([
+      AiUsage.aggregate(aggPipeline),
+      feature === 'total' 
+        ? AiUsage.find(query).sort({ createdAt: -1 }).limit(10).populate('projectId', 'repoName repoFullName') 
+        : Promise.resolve([])
+    ]);
     
     // Calculate chart data map
     const chartDataMap = {};
@@ -841,28 +883,16 @@ export const getAiUsage = async (req, res) => {
 
     let totalUsage = 0;
 
-    usages.forEach(u => {
-      totalUsage += 1;
-      
-      let key = "";
-      if (isHourly) {
-        const d = new Date(u.createdAt);
-        d.setMinutes(0, 0, 0);
-        key = d.toISOString();
-      } else {
-        key = u.createdAt.toISOString().split('T')[0];
-      }
-
+    for (const sc of statusCounts) {
+      totalUsage += sc.count;
+      const key = sc._id;
       if (chartDataMap[key] !== undefined) {
-        chartDataMap[key].value += 1;
+        chartDataMap[key].value += sc.count;
       }
-    });
+    }
 
     const chartData = Object.values(chartDataMap);
     
-    // We only need recentActivity for the 'total' feature to avoid duplicate logs in the UI
-    const recentActivity = feature === 'total' ? usages.slice(0, 10) : [];
-
     return res.json({ success: true, total: totalUsage, chartData, recentActivity });
   } catch (error) {
     console.error("Get AI Usage Error:", error);

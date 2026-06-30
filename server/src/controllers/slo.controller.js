@@ -1,4 +1,5 @@
 import { pool } from '../config/postgres.js';
+import { clickhouse } from '../config/clickhouse.js';
 
 export const getStatusPageConfig = async (req, res) => {
   try {
@@ -138,32 +139,42 @@ export const getSLOStatus = async (req, res) => {
         actualSuccessPercentage = ((total - failed) / total) * 100;
       }
     } else if (slo.type === 'success_rate' && slo.metric_source === 'metrics_minutely') {
-      const checkRes = await pool.query(`
-        SELECT
-          SUM(request_count) as total_requests,
-          SUM(error_count) as total_errors
-        FROM metrics_minutely
-        WHERE project_id = $1
-        AND bucket >= NOW() - ($2::int * INTERVAL '1 day')
-      `, [projectId, windowDays]);
+      const checkRes = await clickhouse.query({
+        query: `
+          SELECT
+            toString(sum(request_count)) as total_requests,
+            toString(sum(error_count)) as total_errors
+          FROM metrics_minutely_mv
+          WHERE project_id = {projectId: String}
+          AND bucket >= now() - INTERVAL {windowDays: UInt32} DAY
+        `,
+        query_params: { projectId, windowDays },
+        format: 'JSONEachRow'
+      });
       
-      const total = parseInt(checkRes.rows[0].total_requests, 10) || 0;
-      const errors = parseInt(checkRes.rows[0].total_errors, 10) || 0;
+      const rows = await checkRes.json();
+      const total = parseInt(rows[0]?.total_requests || '0', 10);
+      const errors = parseInt(rows[0]?.total_errors || '0', 10);
       if (total > 0) {
         actualSuccessPercentage = ((total - errors) / total) * 100;
       }
     } else if (slo.type === 'latency' && slo.metric_source === 'metrics_minutely') {
-      const checkRes = await pool.query(`
-        SELECT
-          SUM(request_count) as total_requests,
-          SUM(request_count) FILTER (WHERE p99_duration_ms > $3) as total_slow_requests
-        FROM metrics_minutely
-        WHERE project_id = $1
-        AND bucket >= NOW() - ($2::int * INTERVAL '1 day')
-      `, [projectId, windowDays, slo.latency_threshold_ms || 200]);
+      const checkRes = await clickhouse.query({
+        query: `
+          SELECT
+            toString(sum(request_count)) as total_requests,
+            toString(sumIf(request_count, p99_duration_ms > {threshold: UInt32})) as total_slow_requests
+          FROM metrics_minutely_mv
+          WHERE project_id = {projectId: String}
+          AND bucket >= now() - INTERVAL {windowDays: UInt32} DAY
+        `,
+        query_params: { projectId, windowDays, threshold: slo.latency_threshold_ms || 200 },
+        format: 'JSONEachRow'
+      });
       
-      const total = parseInt(checkRes.rows[0].total_requests, 10) || 0;
-      const slow = parseInt(checkRes.rows[0].total_slow_requests, 10) || 0;
+      const rows = await checkRes.json();
+      const total = parseInt(rows[0]?.total_requests || '0', 10);
+      const slow = parseInt(rows[0]?.total_slow_requests || '0', 10);
       if (total > 0) {
         actualSuccessPercentage = ((total - slow) / total) * 100;
       }

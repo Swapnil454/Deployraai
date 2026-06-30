@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.middleware.js';
+import { requireAuth, verifyProjectOwnership } from '../middleware/auth.middleware.js';
 import {
   getAlertRules,
   createAlertRule,
@@ -11,6 +11,7 @@ import {
 const router = express.Router();
 
 router.use(requireAuth);
+router.use(verifyProjectOwnership);
 
 // Routes nested under a project, requiring team access
 router.get('/:projectId/rules', getAlertRules);

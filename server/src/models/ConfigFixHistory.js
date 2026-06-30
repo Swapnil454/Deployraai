@@ -12,4 +12,7 @@ const ConfigFixHistorySchema = new mongoose.Schema({
   appliedAt: { type: Date, default: Date.now }
 });
 
+ConfigFixHistorySchema.index({ projectId: 1, appliedAt: -1 });
+ConfigFixHistorySchema.index({ userId: 1, appliedAt: -1 });
+
 export default mongoose.model("ConfigFixHistory", ConfigFixHistorySchema);

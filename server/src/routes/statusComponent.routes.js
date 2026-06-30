@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.middleware.js';
+import { requireAuth, verifyProjectOwnership } from '../middleware/auth.middleware.js';
 import {
   getComponents,
   createComponent,
@@ -10,6 +10,7 @@ import {
 const router = express.Router();
 
 router.use(requireAuth);
+router.use(verifyProjectOwnership);
 
 router.get('/:projectId/status-components', getComponents);
 router.post('/:projectId/status-components', createComponent);

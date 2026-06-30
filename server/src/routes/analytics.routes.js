@@ -1,10 +1,6 @@
 import express from "express";
-import { trackEvent } from "../controllers/analytics.controller.js";
 
 const router = express.Router();
-
-// Public endpoint for tracking events from user websites
-router.post("/track", trackEvent);
 
 // Auto-Injector script served to Vercel builds
 router.get("/injector.js", (req, res) => {

@@ -1,8 +1,10 @@
 import { FastifyPluginAsync } from 'fastify';
-import { db } from '../db.js';
+import { clickhouse } from '../clickhouse.js';
 import { requireAuth } from '../middleware/auth.js';
 
 export const topologyRouter: FastifyPluginAsync = async (app) => {
+  app.addHook('onRequest', requireAuth);
+  
   app.get('/', async (req, reply) => {
     const { projectId } = req.query as { projectId: string };
 
@@ -12,30 +14,34 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
 
     try {
       // Look at spans in the last hour
+      // Using ClickHouse syntax with CTEs
+      // WARNING: ClickHouse materializes CTEs differently than Postgres. 
+      // If topology mapping performance degrades at high scale, this query should 
+      // be rewritten to avoid CTEs or utilize materialized views.
       const query = `
         WITH recent_spans AS (
           SELECT 
             span_id,
             trace_id,
             parent_span_id,
-            attributes->>'service.name' as service_name,
-            attributes->>'db.system' as db_system,
+            attributes['service.name'] as service_name,
+            attributes['db.system'] as db_system,
             duration_ms,
             status_code
           FROM spans
-          WHERE project_id = $1 AND start_time > NOW() - INTERVAL '1 hour'
+          WHERE project_id = {projectId: String} AND start_time > now() - INTERVAL 1 HOUR
         ),
         edges AS (
           -- Edge type 1: Service to Service (parent-child relationship)
           SELECT 
             parent.service_name as source,
             child.service_name as target,
-            child.duration_ms,
-            child.status_code
+            child.duration_ms as duration_ms,
+            child.status_code as status_code
           FROM recent_spans child
           JOIN recent_spans parent ON child.parent_span_id = parent.span_id
-          WHERE parent.service_name IS NOT NULL 
-            AND child.service_name IS NOT NULL 
+          WHERE parent.service_name != '' 
+            AND child.service_name != '' 
             AND parent.service_name != child.service_name
             
           UNION ALL
@@ -47,19 +53,24 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
             duration_ms,
             status_code
           FROM recent_spans
-          WHERE db_system IS NOT NULL AND service_name IS NOT NULL
+          WHERE db_system != '' AND service_name != ''
         )
         SELECT 
           source, 
           target,
           COUNT(*) as request_count,
-          AVG(duration_ms) as avg_latency_ms,
-          SUM(CASE WHEN status_code = 2 THEN 1 ELSE 0 END)::float / COUNT(*) as error_rate
+          avg(duration_ms) as avg_latency_ms,
+          sum(if(status_code = 2, 1, 0)) / COUNT(*) as error_rate
         FROM edges
-        GROUP BY source, target;
+        GROUP BY source, target
       `;
 
-      const result = await db.query(query, [projectId]);
+      const result = await clickhouse.query({
+        query,
+        query_params: { projectId },
+        format: 'JSONEachRow'
+      });
+      const rows = await result.json<any>();
       
       const nodesMap = new Map<string, { id: string, type: string, reqCount: number, errCount: number, totalLatency: number }>();
       const edges = [];
@@ -76,7 +87,7 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
         if (type === 'database') node.type = 'database';
       };
 
-      for (const row of result.rows) {
+      for (const row of rows) {
         const sourceId = row.source;
         const targetId = row.target;
         

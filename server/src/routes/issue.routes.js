@@ -1,9 +1,8 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.middleware.js';
+import { requireAuth, verifyProjectOwnership } from '../middleware/auth.middleware.js';
 import {
   getIssues,
   getIssue,
-  getIssueEvents,
   getIssueComments,
   createIssueComment,
   ignoreIssue,
@@ -16,10 +15,10 @@ import { createIssueFixPr } from '../controllers/issueFix.controller.js';
 const router = express.Router();
 
 router.use(requireAuth);
+router.use(verifyProjectOwnership);
 
 router.get('/:projectId/issues', getIssues);
 router.get('/:projectId/issues/:issueId', getIssue);
-router.get('/:projectId/issues/:issueId/events', getIssueEvents);
 router.get('/:projectId/issues/:issueId/comments', getIssueComments);
 router.post('/:projectId/issues/:issueId/comments', createIssueComment);
 router.patch('/:projectId/issues/:issueId/ignore', ignoreIssue);

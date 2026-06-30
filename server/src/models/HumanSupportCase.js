@@ -28,4 +28,6 @@ const humanSupportCaseSchema = new mongoose.Schema({
   parentCaseId: { type: mongoose.Schema.Types.ObjectId, ref: 'HumanSupportCase', default: null }
 }, { timestamps: true });
 
+humanSupportCaseSchema.index({ userId: 1, updatedAt: -1 });
+
 export default mongoose.model('HumanSupportCase', humanSupportCaseSchema);

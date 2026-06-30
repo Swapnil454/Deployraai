@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.middleware.js';
+import { requireAuth, verifyProjectOwnership } from '../middleware/auth.middleware.js';
 import {
   getStatusPageConfig,
   updateStatusPageConfig,
@@ -12,6 +12,7 @@ import {
 const router = express.Router();
 
 router.use(requireAuth);
+router.use(verifyProjectOwnership);
 
 // Status Page Config
 router.get('/:projectId/status-page', getStatusPageConfig);

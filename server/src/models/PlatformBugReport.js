@@ -23,4 +23,8 @@ const PlatformBugReportSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+PlatformBugReportSchema.index({ projectId: 1, createdAt: -1 });
+PlatformBugReportSchema.index({ userId: 1, createdAt: -1 });
+PlatformBugReportSchema.index({ status: 1 });
+
 export default mongoose.model("PlatformBugReport", PlatformBugReportSchema);

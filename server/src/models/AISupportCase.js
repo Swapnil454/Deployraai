@@ -23,4 +23,6 @@ const aiSupportCaseSchema = new mongoose.Schema({
   messages: [messageSchema]
 }, { timestamps: true });
 
+aiSupportCaseSchema.index({ userId: 1, updatedAt: -1 });
+
 export default mongoose.model('AISupportCase', aiSupportCaseSchema);

@@ -38,7 +38,7 @@ export default function IssueDetailPage() {
       setLoading(true);
       const [issueRes, eventsRes, commentsRes, aiRes] = await Promise.all([
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}`, { credentials: "include" }),
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/events`, { credentials: "include" }),
+        fetch(`${process.env.NEXT_PUBLIC_ANALYTICS_API_URL}/issues/${projectId}/${issueId}/events`, { credentials: "include" }),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/comments`, { credentials: "include" }),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/issues/${issueId}/diagnose`, { credentials: "include" })
       ]);

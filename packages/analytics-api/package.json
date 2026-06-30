@@ -16,8 +16,10 @@
     "@fastify/rate-limit": "^8.0.3",
     "dotenv": "^17.4.2",
     "fastify": "^4.26.2",
+    "lru-cache": "^5.1.1",
     "pg": "^8.11.3",
-    "stripe": "^22.3.0"
+    "stripe": "^22.3.0",
+    "@ai-agents/shared": "*"
   },
   "devDependencies": {
     "@types/node": "^20.11.24",

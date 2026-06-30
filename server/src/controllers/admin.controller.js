@@ -41,7 +41,7 @@ export const getOverviewMetrics = async (req, res) => {
 
 export const getUsers = async (req, res) => {
   try {
-    const users = await User.find({}).sort({ createdAt: -1 });
+    const users = await User.find({}).sort({ createdAt: -1 }).limit(100);
     res.json({ success: true, users });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch users" });
@@ -71,9 +71,11 @@ export const getDeployments = async (req, res) => {
 export const getBugReports = async (req, res) => {
   try {
     const bugReports = await PlatformBugReport.find({})
+      .select('-sanitizedLogs -stackTraceSanitized')
       .populate('projectId', 'name')
       .populate('userId', 'name email')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(100);
     res.json({ success: true, bugReports });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch bug reports" });
@@ -96,7 +98,8 @@ export const getMonitors = async (req, res) => {
     const monitors = await Monitor.find({})
       .populate('projectId', 'name')
       .populate('userId', 'name email')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(100);
     res.json({ success: true, monitors });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch monitors" });
@@ -105,7 +108,11 @@ export const getMonitors = async (req, res) => {
 
 export const getProvidersSummary = async (req, res) => {
   try {
-    const deployments = await Deployment.find({ status: 'failed' });
+    const failedCounts = await Deployment.aggregate([
+      { $match: { status: 'failed' } },
+      { $group: { _id: "$platform", count: { $sum: 1 } } }
+    ]);
+
     const providers = {
       vercel: 0,
       render: 0,
@@ -115,9 +122,9 @@ export const getProvidersSummary = async (req, res) => {
       cloudflare: 0
     };
 
-    deployments.forEach(dep => {
-      if (dep.platform && providers[dep.platform] !== undefined) {
-        providers[dep.platform]++;
+    failedCounts.forEach(stat => {
+      if (stat._id && providers[stat._id] !== undefined) {
+        providers[stat._id] = stat.count;
       }
     });
 

@@ -1,5 +1,18 @@
 import { pool } from '../config/postgres.js';
 
+import { BoundedCache } from '../utils/BoundedCache.js';
+
+const cache = new BoundedCache(1000);
+const CACHE_TTL = 60 * 1000;
+
+function getCached(key) {
+  return cache.get(key);
+}
+
+function setCache(key, data) {
+  cache.set(key, data, CACHE_TTL);
+}
+
 async function getStatusConfig(identifier) {
   // identifier could be a project_id (UUID) or a slug
   const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(identifier);
@@ -25,6 +38,10 @@ async function getStatusConfig(identifier) {
 export const getPublicStatus = async (req, res) => {
   try {
     const { identifier } = req.params;
+    const cacheKey = `status:${identifier}`;
+    const cachedData = getCached(cacheKey);
+    if (cachedData) return res.json(cachedData);
+
     const config = await getStatusConfig(identifier);
     
     if (!config) {
@@ -113,7 +130,7 @@ export const getPublicStatus = async (req, res) => {
       status = 'degraded';
     }
 
-    res.json({
+    const responseData = {
       config: {
         title: config.title || config.project_name,
         description: config.description,
@@ -123,7 +140,10 @@ export const getPublicStatus = async (req, res) => {
       components,
       activeIncidents,
       pastIncidents
-    });
+    };
+
+    setCache(cacheKey, responseData);
+    res.json(responseData);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch status' });
@@ -133,6 +153,10 @@ export const getPublicStatus = async (req, res) => {
 export const getUptimeHistory = async (req, res) => {
   try {
     const { identifier } = req.params;
+    const cacheKey = `history:${identifier}`;
+    const cachedData = getCached(cacheKey);
+    if (cachedData) return res.json(cachedData);
+
     const config = await getStatusConfig(identifier);
     
     if (!config || !config.show_uptime_history) {
@@ -175,6 +199,7 @@ export const getUptimeHistory = async (req, res) => {
       };
     });
 
+    setCache(cacheKey, history);
     res.json(history);
   } catch (err) {
     console.error(err);

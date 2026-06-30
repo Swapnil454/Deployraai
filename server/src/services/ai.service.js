@@ -39,12 +39,16 @@ Format your response exactly as follows:
 
   const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"];
   let lastError;
+  
+  const AI_TIMEOUT_MS = 15000;
 
   for (const modelName of fallbackModels) {
     const currentModel = genAI.getGenerativeModel({ model: modelName });
     for (let i = 0; i < 3; i++) {
       try {
-        const result = await currentModel.generateContent(prompt);
+        const result = await currentModel.generateContent(prompt, {
+          signal: AbortSignal.timeout(AI_TIMEOUT_MS)
+        });
         let text = result.response.text().trim();
         
         // Split into Root Cause and Suggested Fix
@@ -58,6 +62,12 @@ Format your response exactly as follows:
         };
       } catch (err) {
         lastError = err;
+        
+        if (err.name === 'AbortError' || err.name === 'TimeoutError') {
+          console.error(`[AI Diagnosis] AI provider timeout after ${AI_TIMEOUT_MS}ms with ${modelName}`);
+          throw new Error('AI provider timeout');
+        }
+        
         if (err.status === 503 || err.status === 429) {
           console.log(`[AI Diagnosis] API error ${err.status} with ${modelName}, retrying...`);
           await new Promise(res => setTimeout(res, (i + 1) * 3000));

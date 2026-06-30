@@ -3,7 +3,7 @@ import { pool } from '../config/postgres.js';
 export const getIssues = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { status, severity, search, sort = 'last_seen_at' } = req.query;
+    const { status, severity, search, sort = 'last_seen_at', last_seen_at_cursor, id_cursor } = req.query;
     
     // Explicit columns — exclude heavy stacktrace blobs not needed in list view
     let query = `
@@ -29,16 +29,23 @@ export const getIssues = async (req, res) => {
       params.push(`%${search}%`);
       paramIdx++;
     }
+    
+    // Keyset pagination (Cursor)
+    if (last_seen_at_cursor && id_cursor) {
+      query += ` AND (last_seen_at, id) < ($${paramIdx++}, $${paramIdx++})`;
+      params.push(last_seen_at_cursor, id_cursor);
+    }
 
     if (sort === 'event_count') {
-      query += ` ORDER BY event_count DESC`;
+      query += ` ORDER BY event_count DESC, id DESC LIMIT 100`;
     } else if (sort === 'affected_users') {
-      query += ` ORDER BY affected_users DESC`;
+      query += ` ORDER BY affected_users DESC, id DESC LIMIT 100`;
     } else {
-      query += ` ORDER BY last_seen_at DESC`;
+      query += ` ORDER BY last_seen_at DESC, id DESC LIMIT 100`;
     }
 
     const result = await pool.query(query, params);
+    
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -102,25 +109,18 @@ export const updateIssueAssignee = async (req, res) => {
   }
 };
 
-export const getIssueEvents = async (req, res) => {
-  try {
-    const { projectId, issueId } = req.params;
-    const result = await pool.query(
-      `SELECT * FROM issue_events WHERE project_id = $1 AND issue_id = $2 ORDER BY occurred_at DESC LIMIT 50`, 
-      [projectId, issueId]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch issue events' });
-  }
-};
+
 
 export const getIssueComments = async (req, res) => {
   try {
-    const { issueId } = req.params;
+    const { projectId, issueId } = req.params;
+    // Scope by project_id to prevent cross-tenant IDOR
     const result = await pool.query(
-      `SELECT * FROM issue_comments WHERE issue_id = $1 ORDER BY created_at ASC`, 
-      [issueId]
+      `SELECT ic.* FROM issue_comments ic
+       JOIN issues i ON i.id = ic.issue_id
+       WHERE ic.issue_id = $1 AND i.project_id = $2
+       ORDER BY ic.created_at ASC`, 
+      [issueId, projectId]
     );
     res.json(result.rows);
   } catch (err) {
@@ -130,11 +130,20 @@ export const getIssueComments = async (req, res) => {
 
 export const createIssueComment = async (req, res) => {
   try {
-    const { issueId } = req.params;
+    const { projectId, issueId } = req.params;
     const { body } = req.body;
     const userId = req.user?.userId || null;
     
     if (!body) return res.status(400).json({ error: 'Comment body required' });
+
+    // Verify the issue belongs to this project before inserting
+    const issueCheck = await pool.query(
+      `SELECT id FROM issues WHERE id = $1 AND project_id = $2`,
+      [issueId, projectId]
+    );
+    if (issueCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Issue not found' });
+    }
 
     const result = await pool.query(
       `INSERT INTO issue_comments (issue_id, user_id, body) VALUES ($1, $2, $3) RETURNING *`, 
@@ -181,8 +190,13 @@ export const diagnoseIssue = async (req, res) => {
   try {
     const { projectId, issueId } = req.params;
 
-    // 1. Check if already diagnosed
-    const existingRes = await client.query(`SELECT * FROM issue_analysis WHERE issue_id = $1`, [issueId]);
+    // 1. Check if already diagnosed — scoped to project_id to prevent cross-tenant IDOR
+    const existingRes = await client.query(
+      `SELECT ia.* FROM issue_analysis ia
+       JOIN issues i ON i.id = ia.issue_id
+       WHERE ia.issue_id = $1 AND i.project_id = $2`,
+      [issueId, projectId]
+    );
     if (existingRes.rows.length > 0) {
       return res.json(existingRes.rows[0]);
     }
@@ -194,16 +208,12 @@ export const diagnoseIssue = async (req, res) => {
     }
     const issue = issueRes.rows[0];
 
-    // 3. Fetch the most recent event to get the stack trace and context
-    const eventRes = await client.query(`
-      SELECT stacktrace as stack_trace, message, null as error_type, null as http_url, null as http_method 
-      FROM issue_events 
-      WHERE issue_id = $1 
-      ORDER BY occurred_at DESC 
-      LIMIT 1
-    `, [issueId]);
+    // 3. Use the latest stacktrace from the issue itself
+    const latestEvent = {
+      stack_trace: issue.latest_deobfuscated_stacktrace || issue.latest_stacktrace,
+      message: issue.message
+    };
     
-    const latestEvent = eventRes.rows[0];
     if (!latestEvent || !latestEvent.stack_trace) {
       return res.status(400).json({ error: 'Not enough context (missing stack trace) to generate an AI diagnosis.' });
     }
@@ -229,8 +239,14 @@ export const diagnoseIssue = async (req, res) => {
 
 export const getIssueDiagnosis = async (req, res) => {
   try {
-    const { issueId } = req.params;
-    const result = await pool.query(`SELECT * FROM issue_analysis WHERE issue_id = $1`, [issueId]);
+    const { projectId, issueId } = req.params;
+    // Scope by project_id to prevent cross-tenant IDOR
+    const result = await pool.query(
+      `SELECT ia.* FROM issue_analysis ia
+       JOIN issues i ON i.id = ia.issue_id
+       WHERE ia.issue_id = $1 AND i.project_id = $2`,
+      [issueId, projectId]
+    );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'No diagnosis found' });
     }

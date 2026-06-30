@@ -199,7 +199,7 @@ export default function SingleDashboardPage() {
       </div>
 
       {/* Grid Area */}
-      <div className="flex-1 overflow-x-hidden min-h-[500px]">
+      <div className="flex-1 min-h-[500px] pt-8">
         {widgets.length === 0 ? (
           <div className="h-full border border-dashed border-zinc-800 rounded-lg flex flex-col items-center justify-center mt-4">
             <p className="text-zinc-500 mb-4">This dashboard is empty</p>
@@ -216,20 +216,23 @@ export default function SingleDashboardPage() {
             className="layout -mx-4"
             layout={layout}
             width={1200} // We could use a ResponsiveGridLayout to handle resizing better, but specifying a fixed width for now or a width provider
-            gridConfig={{ cols: 12, rowHeight: 100 }}
-            dragConfig={{ handle: '.drag-handle', enabled: true, threshold: 3, bounded: false }}
+            {...({ cols: 12 } as any)}
+            rowHeight={100}
+            draggableHandle=".drag-handle"
             onLayoutChange={onLayoutChange}
           >
             {widgets.map(w => (
               <div key={w.id} className="relative group">
                 {/* Drag Handle Bar */}
-                <div className="absolute top-0 left-0 right-0 h-6 bg-zinc-900/80 backdrop-blur opacity-0 group-hover:opacity-100 transition-opacity z-10 flex items-center justify-between px-2 cursor-grab drag-handle rounded-t-lg">
-                  <span className="text-[10px] text-zinc-400 font-medium uppercase tracking-wider">Drag to move</span>
-                  <button onClick={() => removeWidget(w.id)} className="text-zinc-500 hover:text-red-400 p-0.5">
+                <div className="absolute -top-7 left-0 right-0 h-7 bg-zinc-800/95 border border-zinc-700/50 border-b-0 rounded-t-lg opacity-0 group-hover:opacity-100 transition-opacity z-10 flex items-center justify-between px-3 cursor-grab drag-handle">
+                  <span className="text-[10px] text-zinc-300 font-medium uppercase tracking-wider">Drag to move</span>
+                  <button onClick={() => removeWidget(w.id)} className="text-zinc-400 hover:text-red-400 p-0.5" title="Remove Widget">
                     <Trash2 className="h-3 w-3" />
                   </button>
                 </div>
-                <DashboardWidget projectId={projectId} widget={w} />
+                <div className="w-full h-full relative z-20">
+                  <DashboardWidget projectId={projectId} widget={w} />
+                </div>
               </div>
             ))}
           </GridLayout>

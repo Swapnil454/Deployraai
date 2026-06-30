@@ -17,10 +17,12 @@ import { billingRouter } from './routes/billing.js';
 import { topologyRouter } from './routes/topology.js';
 import { customDashboardsRouter } from './routes/custom-dashboards.js';
 import { profilesRouter } from './routes/profiles.js';
+import { issuesRouter } from './routes/issues.js';
 
 const app = Fastify({
   logger: true,
-  bodyLimit: 10 * 1024 * 1024 // 10MB
+  bodyLimit: 10 * 1024 * 1024, // 10MB
+  trustProxy: true
 });
 
 app.register(cors, {
@@ -52,6 +54,7 @@ app.register(billingRouter, { prefix: '/billing' });
 app.register(topologyRouter, { prefix: '/topology' });
 app.register(customDashboardsRouter, { prefix: '/custom-dashboards' });
 app.register(profilesRouter, { prefix: '/profiles' });
+app.register(issuesRouter, { prefix: '/issues' });
 
 app.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
 

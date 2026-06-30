@@ -165,12 +165,14 @@ export const updateIncidentStatus = async (req, res) => {
 
 export const getIncidentUpdates = async (req, res) => {
   try {
-    const { incidentId } = req.params;
+    const { projectId, incidentId } = req.params;
+    // Scope by project_id to prevent cross-tenant IDOR
     const result = await pool.query(`
-      SELECT * FROM incident_updates 
-      WHERE incident_id = $1 
-      ORDER BY created_at ASC
-    `, [incidentId]);
+      SELECT u.* FROM incident_updates u
+      JOIN incidents i ON i.id = u.incident_id
+      WHERE u.incident_id = $1 AND i.project_id = $2
+      ORDER BY u.created_at ASC
+    `, [incidentId, projectId]);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch updates' });
