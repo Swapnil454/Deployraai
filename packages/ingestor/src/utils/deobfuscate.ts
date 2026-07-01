@@ -1,6 +1,6 @@
 import { SourceMapConsumer } from 'source-map';
 // @ts-ignore
-import LRUCache from 'lru-cache';
+import { LRUCache } from 'lru-cache';
 import { db } from '../db.js';
 
 // Cache: key = "projectId:deployId:fileName", value = SourceMapConsumer
@@ -59,7 +59,7 @@ export async function deobfuscateStackTrace(
   if (!deployId) return { deobfuscated: stackTrace, status: 'missing_deploy_id' };
   if (!stackTrace) return { deobfuscated: stackTrace, status: 'missing_stacktrace' };
 
-  const frameRegex = /at .+ \((.+):(\d+):(\d+)\)/g;
+  const frameRegex = /at [^\(]+ \(([^:]+):(\d+):(\d+)\)/g;
   let result = stackTrace;
   
   const replacements: { original: string, mapped: string }[] = [];

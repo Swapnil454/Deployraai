@@ -11,14 +11,13 @@ import {
 const router = express.Router();
 
 router.use(requireAuth);
-router.use(verifyProjectOwnership);
 
 // Routes nested under a project, requiring team access
-router.get('/:projectId/rules', getAlertRules);
-router.post('/:projectId/rules', createAlertRule);
-router.put('/:projectId/rules/:ruleId', updateAlertRule);
-router.delete('/:projectId/rules/:ruleId', deleteAlertRule);
+router.get('/:projectId/rules', verifyProjectOwnership, getAlertRules);
+router.post('/:projectId/rules', verifyProjectOwnership, createAlertRule);
+router.put('/:projectId/rules/:ruleId', verifyProjectOwnership, updateAlertRule);
+router.delete('/:projectId/rules/:ruleId', verifyProjectOwnership, deleteAlertRule);
 
-router.get('/:projectId/history', getAlertHistory);
+router.get('/:projectId/history', verifyProjectOwnership, getAlertHistory);
 
 export default router;

@@ -60,6 +60,7 @@ export function createRequireAuth(db: { query: (q: string, p?: any[]) => Promise
             reply.status(403).send({ error: 'Access denied: You do not own this project.' });
             return;
           }
+          (req as any).user.projectId = projectId; // Set projectId for non-team projects
           return;
         }
 

@@ -114,13 +114,15 @@ export const updateIssueAssignee = async (req, res) => {
 export const getIssueComments = async (req, res) => {
   try {
     const { projectId, issueId } = req.params;
+    const { limit = 100, offset = 0 } = req.query;
     // Scope by project_id to prevent cross-tenant IDOR
     const result = await pool.query(
       `SELECT ic.* FROM issue_comments ic
        JOIN issues i ON i.id = ic.issue_id
        WHERE ic.issue_id = $1 AND i.project_id = $2
-       ORDER BY ic.created_at ASC`, 
-      [issueId, projectId]
+       ORDER BY ic.created_at ASC
+       LIMIT $3 OFFSET $4`, 
+      [issueId, projectId, Math.min(parseInt(limit), 500), parseInt(offset) || 0]
     );
     res.json(result.rows);
   } catch (err) {

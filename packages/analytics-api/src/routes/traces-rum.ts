@@ -4,7 +4,7 @@ import { clickhouse } from '../clickhouse.js';
 import { requireAuth } from '../middleware/auth.js';
 
 export const tracesRumRouter: FastifyPluginAsync = async (app) => {
-  app.addHook('onRequest', requireAuth);
+  app.addHook('preHandler', requireAuth);
 
   // Get Web Vitals aggregates (LCP, INP, CLS)
   app.get('/vitals', async (req, reply) => {

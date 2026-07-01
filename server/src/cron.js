@@ -278,10 +278,9 @@ export const initCron = () => {
         count++;
         const result = await clickhouse.query({
           query: `
-            SELECT count() as span_count FROM spans
+            SELECT sum(span_count) as span_count FROM project_spans_daily_mv
             WHERE project_id = {projectId: String}
-              AND start_time >= date_trunc('day', now() - INTERVAL 1 DAY)
-              AND start_time < date_trunc('day', now())
+              AND date = toDate(now() - INTERVAL 1 DAY)
           `,
           query_params: { projectId: project._id.toString() },
           format: 'JSONEachRow'

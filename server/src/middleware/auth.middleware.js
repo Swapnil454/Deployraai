@@ -39,14 +39,21 @@ export const verifyProjectOwnership = async (req, res, next) => {
 
     const project = await Project.findOne({ _id: projectId, userId: req.user.userId });
     if (!project) {
+      // Also check without userId filter to distinguish "project not found" from "wrong owner"
+      const anyProject = await Project.findById(projectId).lean();
+      if (!anyProject) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+      console.error('[verifyProjectOwnership] Owner mismatch. JWT userId:', req.user.userId, '| DB userId:', anyProject.userId);
       return res.status(403).json({ error: 'Access denied: You do not own this project' });
     }
 
     next();
   } catch (error) {
+    console.error('[verifyProjectOwnership] Error:', error.name, error.message);
     if (error.name === 'CastError') {
-      return res.status(400).json({ error: 'Invalid projectId format' });
+      return res.status(400).json({ error: 'Invalid projectId format', detail: error.message });
     }
-    res.status(500).json({ error: 'Failed to verify project ownership' });
+    res.status(500).json({ error: 'Failed to verify project ownership', detail: error.message });
   }
 };

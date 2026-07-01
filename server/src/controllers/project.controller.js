@@ -275,7 +275,6 @@ export const getProject = async (req, res) => {
     }
 
     if (!projectDoc.analytics.rumWriteKey) {
-      const crypto = await import('crypto');
       projectDoc.analytics.rumWriteKey = `trc_rum_${crypto.randomBytes(16).toString('hex')}`;
       saveRequired = true;
     }
@@ -304,12 +303,23 @@ export const getProject = async (req, res) => {
 
     // Decrypt values for the frontend as per user request
     if (project.configuration?.envVariables) {
-      const safeEnv = (envs) => envs?.map(env => ({
-        key: env.key,
-        hasValue: !!env.valueEncrypted,
-        value: env.valueEncrypted ? decryptSecret(env.valueEncrypted) : "",
-        isSecret: env.isSecret
-      })) || [];
+      const safeEnv = (envs) => envs?.map(env => {
+        let val = "";
+        if (env.valueEncrypted) {
+          try {
+            val = decryptSecret(env.valueEncrypted);
+          } catch (e) {
+            console.error(`Failed to decrypt env var ${env.key}:`, e.message);
+            val = "error_decrypting";
+          }
+        }
+        return {
+          key: env.key,
+          hasValue: !!env.valueEncrypted,
+          value: val,
+          isSecret: env.isSecret
+        };
+      }) || [];
 
       project.configuration.envVariables = {
         frontend: safeEnv(project.configuration.envVariables.frontend),
@@ -608,20 +618,11 @@ export const getAnalyticsSummary = async (req, res) => {
 
     const [
       pageViews,
-      visitorsResult,
       bounceResult,
       timeseries,
-      topPages,
-      topReferrers,
-      topHostnames,
-      topCountries,
-      topDevices,
-      topBrowsers,
-      topOS
+      topListsResult
     ] = await Promise.all([
       AnalyticsEvent.countDocuments(baseMatch),
-      
-      AnalyticsEvent.distinct("visitorHash", baseMatch),
       
       AnalyticsEvent.aggregate([
         { $match: baseMatch },
@@ -644,59 +645,61 @@ export const getAnalyticsSummary = async (req, res) => {
 
       AnalyticsEvent.aggregate([
         { $match: baseMatch },
-        { $group: { _id: "$path", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      AnalyticsEvent.aggregate([
-        { $match: { ...baseMatch, referrer: { $ne: null, $ne: "" } } },
-        { $group: { _id: "$referrer", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      AnalyticsEvent.aggregate([
-        { $match: { ...baseMatch, hostname: { $ne: null, $ne: "" } } },
-        { $group: { _id: "$hostname", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      AnalyticsEvent.aggregate([
-        { $match: { ...baseMatch, country: { $ne: null, $ne: "" } } },
-        { $group: { _id: "$country", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      AnalyticsEvent.aggregate([
-        { $match: { ...baseMatch, device: { $ne: null, $ne: "" } } },
-        { $group: { _id: "$device", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      AnalyticsEvent.aggregate([
-        { $match: { ...baseMatch, browser: { $ne: null, $ne: "" } } },
-        { $group: { _id: "$browser", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      AnalyticsEvent.aggregate([
-        { $match: { ...baseMatch, os: { $ne: null, $ne: "" } } },
-        { $group: { _id: "$os", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
+        {
+          $facet: {
+            topPages: [
+              { $group: { _id: "$path", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ],
+            topReferrers: [
+              { $match: { referrer: { $ne: null, $ne: "" } } },
+              { $group: { _id: "$referrer", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ],
+            topHostnames: [
+              { $match: { hostname: { $ne: null, $ne: "" } } },
+              { $group: { _id: "$hostname", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ],
+            topCountries: [
+              { $match: { country: { $ne: null, $ne: "" } } },
+              { $group: { _id: "$country", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ],
+            topDevices: [
+              { $match: { device: { $ne: null, $ne: "" } } },
+              { $group: { _id: "$device", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ],
+            topBrowsers: [
+              { $match: { browser: { $ne: null, $ne: "" } } },
+              { $group: { _id: "$browser", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ],
+            topOS: [
+              { $match: { os: { $ne: null, $ne: "" } } },
+              { $group: { _id: "$os", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ]
+          }
+        }
       ])
     ]);
 
-    const visitors = visitorsResult.length;
+    const visitors = bounceResult.length > 0 ? bounceResult[0].totalVisitors : 0;
     let bounceRate = 0;
     if (bounceResult.length > 0 && bounceResult[0].totalVisitors > 0) {
       bounceRate = Math.round((bounceResult[0].bouncedVisitors / bounceResult[0].totalVisitors) * 100);
     }
+    
+    const { topPages, topReferrers, topHostnames, topCountries, topDevices, topBrowsers, topOS } = topListsResult[0] || {};
 
     res.json({
       success: true,

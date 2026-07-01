@@ -80,7 +80,7 @@ export default function AnalysisDashboard() {
     return (
       <div className="flex flex-col h-[calc(100vh-64px)] items-center justify-center bg-[#050505] text-zinc-400 gap-4">
         <AlertTriangle className="h-10 w-10 text-red-500/50" />
-        <p className="text-sm">Database connection failed. Please ensure your PostgreSQL database is running.</p>
+        <p className="text-sm">Failed to load analysis data.</p>
         {error && <p className="text-xs text-red-400/80 font-mono bg-red-500/10 px-3 py-1.5 rounded">{error}</p>}
       </div>
     );

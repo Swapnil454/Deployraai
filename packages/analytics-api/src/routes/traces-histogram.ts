@@ -3,7 +3,7 @@ import { clickhouse } from '../clickhouse.js';
 import { requireAuth } from '../middleware/auth.js';
 
 export const tracesHistogramRouter: FastifyPluginAsync = async (app) => {
-  app.addHook('onRequest', requireAuth);
+  app.addHook('preHandler', requireAuth);
 
   app.get('/histogram', async (req, reply) => {
     const { projectId } = req.query as any;

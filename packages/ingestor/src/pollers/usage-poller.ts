@@ -67,13 +67,13 @@ export class UsagePoller {
         lastId = projects.rows[projects.rows.length - 1].id;
         const projectIds = projects.rows.map(p => p.id);
         
-        // Bulk query ClickHouse for this chunk
+        // Bulk query ClickHouse for this chunk using the daily aggregated Materialized View
         const chRes = await clickhouse.query({
           query: `
-            SELECT project_id, count() as c 
-            FROM spans 
+            SELECT project_id, sum(span_count) as c 
+            FROM project_spans_daily_mv 
             WHERE project_id IN ({projectIds: Array(String)}) 
-              AND start_time >= parseDateTimeBestEffort({from: String})
+              AND date >= parseDateTimeBestEffort({from: String})
             GROUP BY project_id
           `,
           query_params: { projectIds, from: firstDay },

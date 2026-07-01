@@ -9,14 +9,20 @@ export interface ProfileRow {
   total_value: number;
 }
 
+interface InternalNode {
+  name: string;
+  value: number;
+  childrenMap: Map<string, InternalNode>;
+}
+
 export function buildFlamegraphTrie(rows: ProfileRow[]): FlamegraphNode {
   // We initialize the root node. The name doesn't matter too much, Pyroscope uses "root".
   // The value of the root node is the sum of all values.
-  const root: FlamegraphNode = { name: 'root', value: 0, children: [] };
+  const rootMap: InternalNode = { name: 'root', value: 0, childrenMap: new Map() };
 
   for (const row of rows) {
-    let current = root;
-    root.value += row.total_value;
+    let current = rootMap;
+    rootMap.value += row.total_value;
     
     // Prevent Maximum Call Stack Size Exceeded (Recursion DoS)
     const safeStackTrace = row.stack_trace.slice(0, 500);
@@ -29,16 +35,11 @@ export function buildFlamegraphTrie(rows: ProfileRow[]): FlamegraphNode {
         continue;
       }
 
-      if (!current.children) {
-        current.children = [];
-      }
-
-      // Check if we already have a child for this frame
-      let next = current.children.find(c => c.name === frameName);
+      let next = current.childrenMap.get(frameName);
 
       if (!next) {
-        next = { name: frameName, value: 0, children: [] };
-        current.children.push(next);
+        next = { name: frameName, value: 0, childrenMap: new Map() };
+        current.childrenMap.set(frameName, next);
       }
 
       next.value += row.total_value;
@@ -46,19 +47,15 @@ export function buildFlamegraphTrie(rows: ProfileRow[]): FlamegraphNode {
     }
   }
 
-  // Optional: simplify tree by removing empty children arrays
-  function cleanup(node: FlamegraphNode) {
-    if (node.children && node.children.length === 0) {
-      delete node.children;
-    } else if (node.children) {
-      for (const child of node.children) {
-        cleanup(child);
-      }
+  function toFlamegraphNode(node: InternalNode): FlamegraphNode {
+    const fn: FlamegraphNode = { name: node.name, value: node.value };
+    if (node.childrenMap.size > 0) {
+      fn.children = Array.from(node.childrenMap.values()).map(toFlamegraphNode);
     }
+    return fn;
   }
-  cleanup(root);
 
-  return root;
+  return toFlamegraphNode(rootMap);
 }
 
 export function convertTreeToFlamebearer(root: FlamegraphNode, units: string = "samples") {

@@ -40,6 +40,8 @@ async function recalculateComponentStatuses(client, componentIds) {
 export const getIncidents = async (req, res) => {
   try {
     const { projectId } = req.params;
+    const { limit = 100, offset = 0 } = req.query;
+    
     const result = await pool.query(`
       SELECT i.*, 
              COALESCE(json_agg(json_build_object('id', c.id, 'name', c.name)) FILTER (WHERE c.id IS NOT NULL), '[]') as components
@@ -49,7 +51,8 @@ export const getIncidents = async (req, res) => {
       WHERE i.project_id = $1
       GROUP BY i.id
       ORDER BY i.started_at DESC
-    `, [projectId]);
+      LIMIT $2 OFFSET $3
+    `, [projectId, Math.min(parseInt(limit), 500), parseInt(offset) || 0]);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -166,13 +169,15 @@ export const updateIncidentStatus = async (req, res) => {
 export const getIncidentUpdates = async (req, res) => {
   try {
     const { projectId, incidentId } = req.params;
+    const { limit = 100, offset = 0 } = req.query;
     // Scope by project_id to prevent cross-tenant IDOR
     const result = await pool.query(`
       SELECT u.* FROM incident_updates u
       JOIN incidents i ON i.id = u.incident_id
       WHERE u.incident_id = $1 AND i.project_id = $2
       ORDER BY u.created_at ASC
-    `, [incidentId, projectId]);
+      LIMIT $3 OFFSET $4
+    `, [incidentId, projectId, Math.min(parseInt(limit), 500), parseInt(offset) || 0]);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch updates' });

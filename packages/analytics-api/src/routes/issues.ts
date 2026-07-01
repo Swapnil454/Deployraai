@@ -4,7 +4,7 @@ import { db } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 
 export const issuesRouter: FastifyPluginAsync = async (fastify) => {
-  fastify.addHook('onRequest', requireAuth);
+  fastify.addHook('preHandler', requireAuth);
 
   fastify.get('/:projectId/:issueId/events', async (request, reply) => {
     const { projectId, issueId } = request.params as { projectId: string; issueId: string };

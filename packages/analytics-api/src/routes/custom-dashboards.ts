@@ -13,7 +13,7 @@ function getCacheKey(params: any) {
 const pendingQueries = new Map<string, Promise<any>>();
 
 export const customDashboardsRouter: FastifyPluginAsync = async (app) => {
-  app.addHook('onRequest', requireAuth);
+  app.addHook('preHandler', requireAuth);
 
   // List dashboards
   app.get('/', async (req, reply) => {
@@ -153,16 +153,16 @@ export const customDashboardsRouter: FastifyPluginAsync = async (app) => {
 
   // Query Engine for Widgets
   app.post('/query', async (req, reply) => {
-    const { eventName, aggregation, property, window = '24h' } = req.body as any;
+    const { eventName, aggregation, property, window = '24h' } = (req.body || {}) as any;
     const projectId = (req as any).user?.projectId;
     if (!projectId) return reply.status(400).send({ error: 'Missing projectId' });
     
     if (!eventName || !aggregation) {
-      return reply.status(400).send({ error: 'Missing required fields' });
+      return reply.status(400).send({ error: 'Missing required fields: eventName and aggregation are required' });
     }
 
     if (!ALLOWED_AGGREGATIONS.includes(aggregation)) {
-      return reply.status(400).send({ error: 'Invalid aggregation' });
+      return reply.status(400).send({ error: `Invalid aggregation. Must be one of: ${ALLOWED_AGGREGATIONS.join(', ')}` });
     }
 
     if (property && !/^[a-zA-Z0-9_.]{1,64}$/.test(property)) {

@@ -3,7 +3,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { sseEmitter, subscribeToChannel, unsubscribeFromChannel } from '../utils/sse-manager.js';
 
 export const tracesStreamRouter: FastifyPluginAsync = async (app) => {
-  app.addHook('onRequest', requireAuth);
+  app.addHook('preHandler', requireAuth);
 
   app.get('/stream', async (req, reply) => {
     const { projectId } = req.query as any;

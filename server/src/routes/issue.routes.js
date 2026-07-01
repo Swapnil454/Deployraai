@@ -15,16 +15,15 @@ import { createIssueFixPr } from '../controllers/issueFix.controller.js';
 const router = express.Router();
 
 router.use(requireAuth);
-router.use(verifyProjectOwnership);
 
-router.get('/:projectId/issues', getIssues);
-router.get('/:projectId/issues/:issueId', getIssue);
-router.get('/:projectId/issues/:issueId/comments', getIssueComments);
-router.post('/:projectId/issues/:issueId/comments', createIssueComment);
-router.patch('/:projectId/issues/:issueId/ignore', ignoreIssue);
-router.patch('/:projectId/issues/:issueId/resolve', resolveIssue);
-router.post('/:projectId/issues/:issueId/diagnose', diagnoseIssue);
-router.get('/:projectId/issues/:issueId/diagnose', getIssueDiagnosis);
-router.post('/:projectId/issues/:issueId/create-pr', createIssueFixPr);
+router.get('/:projectId/issues', verifyProjectOwnership, getIssues);
+router.get('/:projectId/issues/:issueId', verifyProjectOwnership, getIssue);
+router.get('/:projectId/issues/:issueId/comments', verifyProjectOwnership, getIssueComments);
+router.post('/:projectId/issues/:issueId/comments', verifyProjectOwnership, createIssueComment);
+router.patch('/:projectId/issues/:issueId/ignore', verifyProjectOwnership, ignoreIssue);
+router.patch('/:projectId/issues/:issueId/resolve', verifyProjectOwnership, resolveIssue);
+router.post('/:projectId/issues/:issueId/diagnose', verifyProjectOwnership, diagnoseIssue);
+router.get('/:projectId/issues/:issueId/diagnose', verifyProjectOwnership, getIssueDiagnosis);
+router.post('/:projectId/issues/:issueId/create-pr', verifyProjectOwnership, createIssueFixPr);
 
 export default router;

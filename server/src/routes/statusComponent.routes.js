@@ -10,11 +10,10 @@ import {
 const router = express.Router();
 
 router.use(requireAuth);
-router.use(verifyProjectOwnership);
 
-router.get('/:projectId/status-components', getComponents);
-router.post('/:projectId/status-components', createComponent);
-router.patch('/:projectId/status-components/:componentId', updateComponent);
-router.delete('/:projectId/status-components/:componentId', deleteComponent);
+router.get('/:projectId/status-components', verifyProjectOwnership, getComponents);
+router.post('/:projectId/status-components', verifyProjectOwnership, createComponent);
+router.patch('/:projectId/status-components/:componentId', verifyProjectOwnership, updateComponent);
+router.delete('/:projectId/status-components/:componentId', verifyProjectOwnership, deleteComponent);
 
 export default router;

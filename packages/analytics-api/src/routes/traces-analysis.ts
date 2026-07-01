@@ -18,27 +18,36 @@ export const tracesAnalysisRouter: FastifyPluginAsync = async (app) => {
       chInterval = '168 HOUR'; // 7 days
     }
 
+    // Helper: run a ClickHouse query and return [] on any error instead of crashing
+    const safeCH = async <T>(promise: Promise<T[]>): Promise<T[]> => {
+      try {
+        return await promise;
+      } catch (err: any) {
+        req.log.warn({ msg: err?.message }, 'ClickHouse query skipped (table may not exist yet)');
+        return [];
+      }
+    };
+
     try {
-      // 1. Traffic Timeseries (Edge vs Node)
-      const trafficP = clickhouse.query({
+      // 1. Traffic Timeseries (requires metrics_minutely_mv)
+      const trafficP = safeCH(clickhouse.query({
         query: `
           SELECT 
-            dateTrunc({trunc: String}, start_time) as bucket,
-            if(has(attributes, 'runtime'), attributes['runtime'], 'node') as runtime,
-            count() as volume
-          FROM spans
+            dateTrunc({trunc: String}, bucket) as bucket,
+            'node' as runtime,
+            sum(request_count) as volume
+          FROM metrics_minutely_mv
           WHERE project_id = {projectId: String} 
-            AND parent_span_id = ''
-            AND start_time >= now() - INTERVAL ${chInterval}
-          GROUP BY bucket, runtime
+            AND bucket >= now() - INTERVAL ${chInterval}
+          GROUP BY bucket
           ORDER BY bucket ASC
         `,
         query_params: { trunc, projectId },
         format: 'JSONEachRow'
-      }).then(r => r.json<any>());
+      }).then(r => r.json<any>()));
 
-      // 2. Status Code Distribution
-      const statusP = clickhouse.query({
+      // 2. Status Code Distribution (hits spans table — less expensive)
+      const statusP = safeCH(clickhouse.query({
         query: `
           SELECT 
             if(has(attributes, 'http.status_code'), attributes['http.status_code'], if(status_code = 2, '500', '200')) as code,
@@ -51,10 +60,10 @@ export const tracesAnalysisRouter: FastifyPluginAsync = async (app) => {
         `,
         query_params: { projectId },
         format: 'JSONEachRow'
-      }).then(r => r.json<any>());
+      }).then(r => r.json<any>()));
 
-      // 3. Latency Summary (P50, P90, P99)
-      const latencyP = clickhouse.query({
+      // 3. Latency Summary (P50, P90, P99) (hits spans table)
+      const latencyP = safeCH(clickhouse.query({
         query: `
           SELECT 
             if(has(attributes, 'runtime'), attributes['runtime'], 'node') as runtime,
@@ -70,48 +79,46 @@ export const tracesAnalysisRouter: FastifyPluginAsync = async (app) => {
         `,
         query_params: { projectId },
         format: 'JSONEachRow'
-      }).then(r => r.json<any>());
+      }).then(r => r.json<any>()));
 
-      // 4. Top Slowest Endpoints
-      const slowestP = clickhouse.query({
+      // 4. Top Slowest Endpoints (requires metrics_minutely_mv)
+      const slowestP = safeCH(clickhouse.query({
         query: `
           SELECT 
-            if(has(attributes, 'http.url'), attributes['http.url'], name) as endpoint,
-            if(has(attributes, 'http.method'), attributes['http.method'], 'UNKNOWN') as method,
-            avg(duration_ms) as avg_latency,
-            quantile(0.9)(duration_ms) as p90_latency,
-            count() as hits
-          FROM spans
+            route as endpoint,
+            method,
+            sum(total_duration_ms) / sum(request_count) as avg_latency,
+            max(p99_duration_ms) as p90_latency,
+            sum(request_count) as hits
+          FROM metrics_minutely_mv
           WHERE project_id = {projectId: String} 
-            AND parent_span_id = ''
-            AND start_time >= now() - INTERVAL ${chInterval}
+            AND bucket >= now() - INTERVAL ${chInterval}
           GROUP BY endpoint, method
           ORDER BY p90_latency DESC
           LIMIT 10
         `,
         query_params: { projectId },
         format: 'JSONEachRow'
-      }).then(r => r.json<any>());
+      }).then(r => r.json<any>()));
 
-      // 5. Most Errored Endpoints
-      const errorsP = clickhouse.query({
+      // 5. Most Errored Endpoints (requires metrics_minutely_mv)
+      const errorsP = safeCH(clickhouse.query({
         query: `
           SELECT 
-            if(has(attributes, 'http.url'), attributes['http.url'], name) as endpoint,
-            if(has(attributes, 'http.method'), attributes['http.method'], 'UNKNOWN') as method,
-            count() as error_count
-          FROM spans
+            route as endpoint,
+            method,
+            sum(error_count) as error_count
+          FROM metrics_minutely_mv
           WHERE project_id = {projectId: String} 
-            AND parent_span_id = ''
-            AND start_time >= now() - INTERVAL ${chInterval}
-            AND (status_code = 2 OR match(attributes['http.status_code'], '^5[0-9]{2}$'))
+            AND bucket >= now() - INTERVAL ${chInterval}
           GROUP BY endpoint, method
+          HAVING sum(error_count) > 0
           ORDER BY error_count DESC
           LIMIT 10
         `,
         query_params: { projectId },
         format: 'JSONEachRow'
-      }).then(r => r.json<any>());
+      }).then(r => r.json<any>()));
 
       const [trafficRes, statusRes, latencyRes, slowestRes, errorsRes] = await Promise.all([
         trafficP, statusP, latencyP, slowestP, errorsP
