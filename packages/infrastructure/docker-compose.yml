@@ -1,15 +1,6 @@
 version: '3.8'
 services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: observability
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: secret
-    ports:
-      - "5432:5432"
-    volumes:
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+# Postgres removed due to port conflict (using local Neon/local instance)
 
   clickhouse:
     image: clickhouse/clickhouse-server:24

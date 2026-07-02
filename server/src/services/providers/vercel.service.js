@@ -15,6 +15,7 @@ const vercelAPI = async (token, method, endpoint, body = null) => {
     options.body = JSON.stringify(body);
   }
 
+  options.signal = AbortSignal.timeout(15000);
   const response = await fetch(url, options);
   const text = await response.text();
 
@@ -101,7 +102,7 @@ export const triggerVercelDeploy = async (token, config) => {
   // Vercel v13 API requires the numeric GitHub repoId
   let repoId = null;
   try {
-    const githubRes = await fetch(`https://api.github.com/repos/${config.repoFullName}`);
+    const githubRes = await fetch(`https://api.github.com/repos/${config.repoFullName}`, { signal: AbortSignal.timeout(15000) });
     if (githubRes.ok) {
       const githubData = await githubRes.json();
       repoId = githubData.id;
@@ -165,6 +166,7 @@ export const getVercelDeploymentEvents = async (token, deploymentId) => {
       Authorization: `Bearer ${token}`
     }
   };
+  options.signal = AbortSignal.timeout(15000);
   const response = await fetch(url, options);
   const text = await response.text();
   try {

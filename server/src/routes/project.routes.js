@@ -1,6 +1,6 @@
 import express from "express";
 import { analyzeProject, createProject, getProjects, getProject, updateProjectConfig, enableAnalytics, disableAnalytics, getAnalyticsSummary, getProjectUsage, getAiUsage } from "../controllers/project.controller.js";
-import { autoInjectAnalytics } from "../controllers/analytics.controller.js";
+import { autoInjectAnalytics, verifyAnalytics } from "../controllers/analytics.controller.js";
 import { getProjectDeployments } from "../controllers/deployment.controller.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
 
@@ -25,5 +25,6 @@ router.get("/:id/usage", getProjectUsage);
 router.post("/:projectId/analytics/enable", enableAnalytics);
 router.post("/:projectId/analytics/disable", disableAnalytics);
 router.post("/:projectId/analytics/auto-inject", autoInjectAnalytics);
+router.post("/:projectId/analytics/verify", verifyAnalytics);
 
 export default router;

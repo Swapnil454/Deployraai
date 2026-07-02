@@ -3,18 +3,52 @@ import { db } from '../db.js';
 import { clickhouse } from '../clickhouse.js';
 import { requireAuth } from '../middleware/auth.js';
 
-// Simple in-memory cache
-const cache = new Map<string, { data: any, expiresAt: number }>();
+class BoundedCache {
+  private cache = new Map<string, { data: any, expiresAt: number }>();
+  constructor(private maxSize: number) {}
+  get(key: string) {
+    const item = this.cache.get(key);
+    if (!item) return undefined;
+    if (Date.now() > item.expiresAt) {
+      this.cache.delete(key);
+      return undefined;
+    }
+    return item.data;
+  }
+  set(key: string, data: any, ttlMs: number) {
+    if (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey !== undefined) this.cache.delete(oldestKey);
+    }
+    this.cache.set(key, { data, expiresAt: Date.now() + ttlMs });
+  }
+}
+
+const cache = new BoundedCache(1000);
+const pendingPromises = new Map<string, Promise<any>>();
 const CACHE_TTL_MS = 30 * 1000; // 30 seconds
 
 async function withCache<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   const cached = cache.get(key);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.data;
+  if (cached) {
+    return cached as T;
   }
-  const data = await fetcher();
-  cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
-  return data;
+  
+  if (pendingPromises.has(key)) {
+    return pendingPromises.get(key) as Promise<T>;
+  }
+
+  const promise = fetcher().then(data => {
+    cache.set(key, data, CACHE_TTL_MS);
+    pendingPromises.delete(key);
+    return data;
+  }).catch(err => {
+    pendingPromises.delete(key);
+    throw err;
+  });
+
+  pendingPromises.set(key, promise);
+  return promise;
 }
 
 export const metricsRouter: FastifyPluginAsync = async (app) => {
@@ -28,57 +62,38 @@ export const metricsRouter: FastifyPluginAsync = async (app) => {
     const cacheKey = `overview:${projectId}:${from}:${to}:${deployId || 'any'}`;
 
     return withCache(cacheKey, async () => {
-      const [requestsRes, errorsRes, latencyRes, uptimeRes] = await Promise.all([
-      // Total requests
-      clickhouse.query({
-        query: `
-          SELECT toString(sum(request_count)) as count
-          FROM metrics_minutely_mv
-          WHERE project_id = {projectId: String} AND bucket BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})
-        `,
-        query_params: { projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
-        format: 'JSONEachRow'
-      }).then(r => r.json<{count: string}[]>()),
-
-      // Error rate
-      clickhouse.query({
-        query: `
-          SELECT toString(round(100.0 * sum(error_count) / nullIf(sum(request_count), 0), 2)) as error_rate
-          FROM metrics_minutely_mv
-          WHERE project_id = {projectId: String} AND bucket BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})
-        `,
-        query_params: { projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
-        format: 'JSONEachRow'
-      }).then(r => r.json<{error_rate: string}[]>()),
-
-      // P99 latency across all routes
-      clickhouse.query({
-        query: `
-          SELECT toString(quantile(0.99)(duration_ms)) as p99
-          FROM spans
-          WHERE project_id = {projectId: String}
-            AND start_time BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})
-            AND parent_span_id = ''
-            AND http_method != ''
-        `,
-        query_params: { projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
-        format: 'JSONEachRow'
-      }).then(r => r.json<{p99: string}[]>()),
-
-      // Uptime (Still in Postgres for now since synthetic_checks wasn't migrated, or we can use Postgres for this one)
-      db.query<{ uptime: string }>(`
-        SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE status_code BETWEEN 200 AND 399) / NULLIF(COUNT(*), 0), 2)::text as uptime
-        FROM synthetic_checks
-        WHERE project_id = $1 AND checked_at BETWEEN $2 AND $3
-      `, [projectId, fromDate, toDate])
-    ]);
-
-      return {
-        totalRequests: parseInt((requestsRes as any)[0]?.count || '0'),
-        errorRate: parseFloat((errorsRes as any)[0]?.error_rate || '0'),
-        p99LatencyMs: parseFloat((latencyRes as any)[0]?.p99 || '0'),
-        uptime: parseFloat(uptimeRes.rows[0]?.uptime ?? '100'),
-      };
+      try {
+        const [requestsRes, errorsRes, latencyRes, uptimeRes] = await Promise.all([
+          clickhouse.query({
+            query: `SELECT toString(sum(request_count)) as count FROM metrics_minutely_mv WHERE project_id = {projectId: String} AND bucket BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})`,
+            query_params: { projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
+            format: 'JSONEachRow'
+          }).then(r => r.json<{count: string}>()),
+          clickhouse.query({
+            query: `SELECT toString(round(100.0 * sum(error_count) / nullIf(sum(request_count), 0), 2)) as error_rate FROM metrics_minutely_mv WHERE project_id = {projectId: String} AND bucket BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})`,
+            query_params: { projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
+            format: 'JSONEachRow'
+          }).then(r => r.json<{error_rate: string}>()),
+          clickhouse.query({
+            query: `SELECT toString(quantile(0.99)(duration_ms)) as p99 FROM spans WHERE project_id = {projectId: String} AND start_time BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String}) AND parent_span_id = '' AND http_method != ''`,
+            query_params: { projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
+            format: 'JSONEachRow'
+          }).then(r => r.json<{p99: string}>()),
+          db.query<{ uptime: string }>(`
+            SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE status_code BETWEEN 200 AND 399) / NULLIF(COUNT(*), 0), 2)::text as uptime
+            FROM synthetic_checks WHERE project_id = $1 AND checked_at BETWEEN $2 AND $3
+          `, [projectId, fromDate, toDate])
+        ]);
+        return {
+          totalRequests: parseInt((requestsRes as any)[0]?.count || '0'),
+          errorRate: parseFloat((errorsRes as any)[0]?.error_rate || '0'),
+          p99LatencyMs: parseFloat((latencyRes as any)[0]?.p99 || '0'),
+          uptime: parseFloat(uptimeRes.rows[0]?.uptime ?? '100'),
+        };
+      } catch (err: any) {
+        req.log.warn({ err: err.message }, 'Metrics overview: data source unavailable');
+        return { totalRequests: 0, errorRate: 0, p99LatencyMs: 0, uptime: 100, _noData: true };
+      }
     });
   });
 
@@ -93,24 +108,29 @@ export const metricsRouter: FastifyPluginAsync = async (app) => {
     const cacheKey = `timeseries:${projectId}:${metric}:${interval}:${from}:${to}:${deployId || 'any'}`;
 
     return withCache(cacheKey, async () => {
-      const res = await clickhouse.query({
-        query: `
-          SELECT
-            dateTrunc({trunc: String}, bucket) as time,
-            sum(request_count) as requests,
-            sum(error_count) as errors,
-            round(100.0 * sum(error_count) / nullIf(sum(request_count), 0), 2) as error_rate,
-            max(p99_duration_ms) as max_ms,
-            round(sum(total_duration_ms) / nullIf(sum(request_count), 0), 0) as avg_ms
-          FROM metrics_minutely_mv
-          WHERE project_id = {projectId: String} AND bucket BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})
-          GROUP BY time
-          ORDER BY time
-        `,
-        query_params: { trunc, projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
-        format: 'JSONEachRow'
-      });
-      return await res.json<any[]>();
+      try {
+        const res = await clickhouse.query({
+          query: `
+            SELECT
+              dateTrunc({trunc: String}, bucket) as time,
+              sum(request_count) as requests,
+              sum(error_count) as errors,
+              round(100.0 * sum(error_count) / nullIf(sum(request_count), 0), 2) as error_rate,
+              max(p99_duration_ms) as max_ms,
+              round(sum(total_duration_ms) / nullIf(sum(request_count), 0), 0) as avg_ms
+            FROM metrics_minutely_mv
+            WHERE project_id = {projectId: String} AND bucket BETWEEN parseDateTimeBestEffort({from: String}) AND parseDateTimeBestEffort({to: String})
+            GROUP BY time
+            ORDER BY time
+          `,
+          query_params: { trunc, projectId, from: fromDate.toISOString(), to: toDate.toISOString() },
+          format: 'JSONEachRow'
+        });
+        return await res.json<any>();
+      } catch (err: any) {
+        req.log.warn({ err: err.message }, 'Timeseries: data source unavailable');
+        return [];
+      }
     });
   });
 
@@ -140,7 +160,7 @@ export const metricsRouter: FastifyPluginAsync = async (app) => {
         query_params: { projectId },
         format: 'JSONEachRow'
       });
-      return await res.json<any[]>();
+      return await res.json<any>();
     });
   });
 
@@ -187,7 +207,7 @@ export const metricsRouter: FastifyPluginAsync = async (app) => {
       query_params: { projectId, deployId, previousDeployId },
       format: 'JSONEachRow'
     });
-    return await res.json<any[]>();
+    return await res.json<any>();
   });
 
   // GET /metrics/deploys/:projectId
@@ -197,14 +217,14 @@ export const metricsRouter: FastifyPluginAsync = async (app) => {
       query: `
         SELECT deploy_id, min(start_time) as deployed_at
         FROM spans
-        WHERE project_id = {projectId: String}
+        WHERE project_id = {projectId: String} AND start_time >= now() - INTERVAL {windowDays: UInt32} DAY
         GROUP BY deploy_id
         ORDER BY deployed_at DESC
         LIMIT 50
       `,
-      query_params: { projectId },
+      query_params: { projectId, windowDays: 30 },
       format: 'JSONEachRow'
     });
-    return await res.json<any[]>();
+    return await res.json<any>();
   });
 };

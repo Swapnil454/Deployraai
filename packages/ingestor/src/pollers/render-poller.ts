@@ -71,7 +71,12 @@ class RenderPollerRegistry {
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done || signal.aborted) break;
+        if (done) {
+            console.log(`[RenderPoller] Stream gracefully closed by provider for ${projectId}, reconnecting in 5s...`);
+            if (!signal.aborted) setTimeout(() => this.poll(projectId, token, serviceId, signal), 5000);
+            break;
+        }
+        if (signal.aborted) break;
 
         const lines = decoder.decode(value).split('\n').filter(Boolean);
         if (lines.length > 0) {

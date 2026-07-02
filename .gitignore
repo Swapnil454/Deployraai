@@ -38,6 +38,7 @@ build/
 
 # Optional ESLint cache
 .eslintcache
+.turbo/
 
 # Temporary files
 *.tmp

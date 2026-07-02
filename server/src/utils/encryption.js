@@ -23,13 +23,20 @@ export const encryptSecret = (text) => {
 
 export const decryptSecret = (text) => {
   if (!text) return null;
-  const textParts = text.split(":");
-  const iv = Buffer.from(textParts.shift(), "hex");
-  const encryptedText = Buffer.from(textParts.join(":"), "hex");
-  const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY), iv);
-  let decrypted = decipher.update(encryptedText);
-  decrypted = Buffer.concat([decrypted, decipher.final()]);
-  return decrypted.toString();
+  try {
+    const textParts = text.split(":");
+    const iv = Buffer.from(textParts.shift(), "hex");
+    const encryptedText = Buffer.from(textParts.join(":"), "hex");
+    const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY), iv);
+    let decrypted = decipher.update(encryptedText);
+    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    return decrypted.toString();
+  } catch (err) {
+    // Decryption fails when the encryption key has changed (e.g. SERVER_SECRET_KEY rotated).
+    // Return null so callers can treat it as "not connected" rather than crashing.
+    console.warn('[decryptSecret] Failed to decrypt — key mismatch or corrupted ciphertext:', err.message);
+    return null;
+  }
 };
 
 const CREDENTIAL_KEY = process.env.CREDENTIAL_ENCRYPTION_KEY 
@@ -47,11 +54,16 @@ export const encrypt = (plaintext) => {
 
 export const decrypt = (ciphertext) => {
   if (!ciphertext) return null;
-  const [ivHex, tagHex, encHex] = ciphertext.split(':');
-  const iv = Buffer.from(ivHex, 'hex');
-  const tag = Buffer.from(tagHex, 'hex');
-  const enc = Buffer.from(encHex, 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', CREDENTIAL_KEY, iv);
-  decipher.setAuthTag(tag);
-  return decipher.update(enc) + decipher.final('utf8');
+  try {
+    const [ivHex, tagHex, encHex] = ciphertext.split(':');
+    const iv = Buffer.from(ivHex, 'hex');
+    const tag = Buffer.from(tagHex, 'hex');
+    const enc = Buffer.from(encHex, 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', CREDENTIAL_KEY, iv);
+    decipher.setAuthTag(tag);
+    return decipher.update(enc) + decipher.final('utf8');
+  } catch (err) {
+    console.warn('[decrypt] Failed to decrypt — key mismatch or corrupted ciphertext:', err.message);
+    return null;
+  }
 };

@@ -4,6 +4,8 @@ import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { Resource } from '@opentelemetry/resources';
 import { trace, context, SpanStatusCode } from '@opentelemetry/api';
+import * as rrweb from 'rrweb';
+import { onLCP, onINP, onCLS, onFCP, onTTFB } from 'web-vitals';
 
 interface TracePilotContextValue {
   provider: WebTracerProvider | null;
@@ -16,19 +18,37 @@ interface TracePilotProviderProps {
   token: string;
   serviceName?: string;
   ingestorUrl?: string;
+  rumUrl?: string;
+  enableSessionReplay?: boolean;
+}
+
+let currentSessionId = crypto.randomUUID();
+let rumSequenceNum = 0;
+let __flushRRWebEvents: (() => void) | null = null;
+
+function canRegisterWebVitals() {
+  return (
+    typeof window !== 'undefined' &&
+    typeof performance !== 'undefined' &&
+    typeof performance.getEntriesByType === 'function' &&
+    typeof PerformanceObserver !== 'undefined'
+  );
 }
 
 export function TracePilotProvider({ 
   children, 
   token, 
   serviceName = 'browser-app',
-  ingestorUrl = 'https://ingest.tracepilot.ai/v1/traces'
+  ingestorUrl = 'https://ingest.tracepilot.ai/v1/traces',
+  rumUrl = 'https://ingest.tracepilot.ai/v1/rum',
+  enableSessionReplay = false
 }: TracePilotProviderProps) {
   const [provider, setProvider] = useState<WebTracerProvider | null>(null);
-
+  
   useEffect(() => {
     if (!token) return;
 
+    // --- 1. OTLP TRACING ---
     const resource = new Resource({
       'service.name': serviceName,
       'tracepilot.project.id': token,
@@ -51,10 +71,105 @@ export function TracePilotProvider({
     webProvider.register();
     setProvider(webProvider);
 
+    // --- 2. WEB VITALS ---
+    const capturedRoute = typeof window !== 'undefined' ? window.location.pathname : '';
+    
+    const reportVitals = (metric: any) => {
+      const globalTracer = trace.getTracer('tracepilot-web-vitals');
+      globalTracer.startActiveSpan('web-vitals', span => {
+        span.setAttribute('web.vital.name', metric.name);
+        span.setAttribute('web.vital.value', metric.value);
+        span.setAttribute('web.vital.rating', metric.rating);
+        span.setAttribute('http.route', capturedRoute);
+        span.setAttribute('session_id', currentSessionId);
+        span.end();
+      });
+    };
+    if (canRegisterWebVitals()) {
+      onLCP(reportVitals);
+      onINP(reportVitals);
+      onCLS(reportVitals);
+      onFCP(reportVitals);
+      onTTFB(reportVitals);
+    }
+
+    // --- 3. SESSION REPLAY (rrweb) ---
+    let stopFn: (() => void) | undefined;
+    let flushInterval: any;
+    let handleVisibilityChange: (() => void) | undefined;
+    
+    if (enableSessionReplay && typeof window !== 'undefined' && process.env.NEXT_PUBLIC_TRACEPILOT_RUM_KEY) {
+      let events: any[] = [];
+      const rumKey = process.env.NEXT_PUBLIC_TRACEPILOT_RUM_KEY;
+      
+      const recordOptions = {
+        emit(event: any) {
+          events.push(event);
+        },
+        maskInputOptions: {
+          password: true,
+          email: true,
+          tel: true,
+          text: true,
+          number: true,
+          search: true,
+        },
+        blockClass: 'tracepilot-block',
+        maskTextClass: 'tracepilot-mask',
+        blockSelector: 'input[type="password"], [data-sensitive]',
+      };
+      
+      stopFn = rrweb.record(recordOptions);
+
+      handleVisibilityChange = () => {
+        if (document.hidden) {
+          if (stopFn) {
+            stopFn();
+            stopFn = undefined;
+          }
+        } else {
+          if (!stopFn) {
+            stopFn = rrweb.record(recordOptions);
+          }
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      const flush = () => {
+        if (events.length > 0) {
+          const payload = events.splice(0, events.length);
+          const currentUrl = window.location.href;
+          
+          fetch(rumUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${rumKey}`
+            },
+            body: JSON.stringify({ 
+              sessionId: currentSessionId, 
+              sequence_num: rumSequenceNum++, 
+              events: payload,
+              url: currentUrl 
+            })
+          }).catch(err => console.error('TracePilot RUM flush failed', err));
+        }
+      };
+
+      __flushRRWebEvents = flush;
+      flushInterval = setInterval(flush, 10000);
+    }
+
     return () => {
       webProvider.forceFlush().catch(console.error);
+      if (stopFn) stopFn();
+      if (flushInterval) clearInterval(flushInterval);
+      if (typeof document !== 'undefined' && handleVisibilityChange) {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+      __flushRRWebEvents = null;
     };
-  }, [token, serviceName, ingestorUrl]);
+  }, [token, serviceName, ingestorUrl, rumUrl, enableSessionReplay]);
 
   return (
     <TracePilotContext.Provider value={{ provider }}>
@@ -89,6 +204,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    if (__flushRRWebEvents) {
+      __flushRRWebEvents();
+    }
+
     // We get the global tracer
     const tracer = trace.getTracer('tracepilot-react-error-boundary');
     
@@ -101,6 +220,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       });
       span.setAttribute('error.stack', error.stack || '');
       span.setAttribute('react.component_stack', errorInfo.componentStack || '');
+      span.setAttribute('session_id', currentSessionId);
       span.end();
     });
   }

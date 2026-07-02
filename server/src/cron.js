@@ -13,6 +13,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_mock');
 const { Pool } = pg;
 const db = new Pool({ connectionString: process.env.DATABASE_URL });
 import { triggerWorkflow } from './services/workflow.service.js';
+import { clickhouse } from './config/clickhouse.js';
 
 let monitorCronJob    = null;
 let domainHealthCronJob = null;
@@ -25,13 +26,18 @@ export const initCron = () => {
   // ── 0. Data Retention Cleanup — every day at 00:00 ─────────────────────────
   if (!dataRetentionCronJob) {
     dataRetentionCronJob = cron.schedule('0 0 * * *', async () => {
-      console.log('[Cron:data-retention] Running 30-day data cleanup...');
+      let client;
+      let lockAcquired = false;
       try {
+        client = await db.connect();
+        const { rows } = await client.query('SELECT pg_try_advisory_lock(1000) as locked');
+        if (!rows[0].locked) return; // Another instance has the lock — still releases client in finally
+        lockAcquired = true;
+
+        console.log('[Cron:data-retention] Running 30-day data cleanup...');
         const INGESTOR_API_URL = process.env.INGESTOR_API_URL || 'http://localhost:4317';
         const ADMIN_SECRET = process.env.ADMIN_SECRET || 'dev-admin-secret';
         
-        // Using dynamic import of node-fetch if global fetch is not available, 
-        // but Node 18+ has global fetch so we'll use that.
         const res = await fetch(`${INGESTOR_API_URL}/admin/cleanup`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${ADMIN_SECRET}` }
@@ -45,6 +51,11 @@ export const initCron = () => {
         }
       } catch (error) {
         console.error('[Cron:data-retention] Error:', error);
+      } finally {
+        if (client) {
+          if (lockAcquired) await client.query('SELECT pg_advisory_unlock(1000)');
+          client.release();
+        }
       }
     });
   }
@@ -52,12 +63,24 @@ export const initCron = () => {
   // ── 1. Uptime monitor — every 5 minutes ───────────────────────────────────
   if (!monitorCronJob) {
     monitorCronJob = cron.schedule('*/5 * * * *', async () => {
-      console.log('[Cron:monitors] Running all uptime monitors...');
+      let client;
+      let lockAcquired = false;
       try {
+        client = await db.connect();
+        const { rows } = await client.query('SELECT pg_try_advisory_lock(1001) as locked');
+        if (!rows[0].locked) return; // Another instance has the lock — still releases client in finally
+        lockAcquired = true;
+
+        console.log('[Cron:monitors] Running all uptime monitors...');
         await runAllMonitors();
         console.log('[Cron:monitors] Finished.');
       } catch (error) {
         console.error('[Cron:monitors] Error:', error);
+      } finally {
+        if (client) {
+          if (lockAcquired) await client.query('SELECT pg_advisory_unlock(1001)');
+          client.release();
+        }
       }
     });
   }
@@ -67,26 +90,39 @@ export const initCron = () => {
   // Transitions to "degraded" if DNS records are gone, recovers to "active" if they return.
   if (!domainHealthCronJob) {
     domainHealthCronJob = cron.schedule('*/5 * * * *', async () => {
-      console.log('[Cron:domains] Running domain health checks...');
+      let client;
+      let lockAcquired = false;
       try {
-        const domains = await DomainSetup.find({
+        client = await db.connect();
+        const { rows } = await client.query('SELECT pg_try_advisory_lock(1002) as locked');
+        if (!rows[0].locked) return; // Another instance has the lock — still releases client in finally
+        lockAcquired = true;
+
+        console.log('[Cron:domains] Running domain health checks...');
+        const domainCursor = DomainSetup.find({
           status: { $in: ['active', 'partially_active', 'degraded'] },
-        });
+        }).cursor();
 
-        console.log(`[Cron:domains] Checking ${domains.length} domain(s)...`);
-
+        let count = 0;
         // Process sequentially to avoid hammering provider APIs
-        for (const domain of domains) {
+        for await (const domain of domainCursor) {
+          count++;
           try {
             await verifyDomainLogic(domain, { fromCron: true });
           } catch (err) {
             console.error(`[Cron:domains] Error checking ${domain.rootDomain}:`, err.message);
           }
         }
+        console.log(`[Cron:domains] Checked ${count} domain(s).`);
 
         console.log('[Cron:domains] Finished domain health checks.');
       } catch (error) {
         console.error('[Cron:domains] Fatal error in domain health cron:', error);
+      } finally {
+        if (client) {
+          if (lockAcquired) await client.query('SELECT pg_advisory_unlock(1002)');
+          client.release();
+        }
       }
     });
   }
@@ -144,71 +180,114 @@ export const initCron = () => {
 
   // ── 4. SLO Burn Rate Daily — every day at 00:00 ────────────────────────────
   cron.schedule('0 0 * * *', async () => {
+    let client;
+    let lockAcquired = false;
     try {
+      client = await db.connect();
+      const { rows: lockRows } = await client.query('SELECT pg_try_advisory_lock(1003) as locked');
+      if (!lockRows[0].locked) return; // Another instance has the lock — still releases client in finally
+      lockAcquired = true;
+
       console.log('[Cron:slo] Running daily SLO burn rate calculations...');
-      const slos = await db.query('SELECT * FROM service_level_objectives');
+      let lastId = '00000000-0000-0000-0000-000000000000';
+      while (true) {
+        const slos = await client.query('SELECT * FROM service_level_objectives WHERE id > $1 ORDER BY id ASC LIMIT 500', [lastId]);
+        if (slos.rows.length === 0) break;
+        lastId = slos.rows[slos.rows.length - 1].id;
 
-      for (const slo of slos.rows) {
-        const windowStart = new Date();
-        windowStart.setDate(windowStart.getDate() - slo.window_days);
+        for (const slo of slos.rows) {
+          const windowStart = new Date();
+          windowStart.setDate(windowStart.getDate() - slo.window_days);
 
-        // Count good minutes vs total minutes in the window
-        const result = await db.query(`
-          SELECT
-            COUNT(*) FILTER (
-              WHERE CASE
-                WHEN $3 = 'availability' THEN
-                  -- good = no errors in this minute
-                  (error_count::float / NULLIF(request_count, 0)) < 0.001
-                WHEN $3 = 'latency_p99' THEN
-                  p99_duration_ms < $4
-              END
-            ) as good_minutes,
-            COUNT(*) as total_minutes
-          FROM metrics_minutely
-          WHERE project_id = $1 AND bucket >= $2
-        `, [slo.project_id, windowStart, slo.metric, slo.latency_ms]);
+          // Count good minutes vs total minutes in the window from ClickHouse
+          const result = await clickhouse.query({
+            query: `
+              SELECT
+                countIf(
+                  CASE
+                    WHEN {metric: String} = 'availability' THEN
+                      -- good = no errors in this minute
+                      (error_count / nullIf(request_count, 0)) < 0.001
+                    WHEN {metric: String} = 'latency_p99' THEN
+                      p99_duration_ms < {latencyMs: UInt32}
+                    ELSE 1
+                  END
+                ) as good_minutes,
+                count() as total_minutes
+              FROM metrics_minutely_mv
+              WHERE project_id = {projectId: String} AND bucket >= {windowStart: DateTime}
+            `,
+            query_params: {
+              projectId: slo.project_id,
+              windowStart: windowStart.getTime(),
+              metric: slo.metric,
+              latencyMs: slo.latency_ms || 200
+            },
+            format: 'JSONEachRow'
+          });
 
-        const { good_minutes, total_minutes } = result.rows[0];
-        const error_budget_total = total_minutes * (1 - slo.target_pct / 100);
-        const bad_minutes = total_minutes - good_minutes;
-        const budget_consumed = (bad_minutes / error_budget_total) * 100;
-        const burn_rate = bad_minutes / (total_minutes * (1 - slo.target_pct / 100));
+          const rows = await result.json();
+          if (rows.length === 0) continue;
+          
+          const { good_minutes, total_minutes } = rows[0];
+          const error_budget_total = total_minutes * (1 - slo.target_pct / 100);
+          const bad_minutes = total_minutes - good_minutes;
+          const budget_consumed = (bad_minutes / error_budget_total) * 100;
+          const burn_rate = bad_minutes / (total_minutes * (1 - slo.target_pct / 100));
 
-        await db.query(`
-          INSERT INTO slo_burn_rate_daily (slo_id, day, good_minutes, total_minutes, budget_consumed, burn_rate)
-          VALUES ($1, CURRENT_DATE, $2, $3, $4, $5)
-          ON CONFLICT (slo_id, day) DO UPDATE SET
-            good_minutes = EXCLUDED.good_minutes,
-            total_minutes = EXCLUDED.total_minutes,
-            budget_consumed = EXCLUDED.budget_consumed,
-            burn_rate = EXCLUDED.burn_rate
-        `, [slo.id, good_minutes, total_minutes, budget_consumed, burn_rate]);
+          await client.query(`
+            INSERT INTO slo_burn_rate_daily (slo_id, day, good_minutes, total_minutes, budget_consumed, burn_rate)
+            VALUES ($1, CURRENT_DATE, $2, $3, $4, $5)
+            ON CONFLICT (slo_id, day) DO UPDATE SET
+              good_minutes = EXCLUDED.good_minutes,
+              total_minutes = EXCLUDED.total_minutes,
+              budget_consumed = EXCLUDED.budget_consumed,
+              burn_rate = EXCLUDED.burn_rate
+          `, [slo.id, good_minutes, total_minutes, budget_consumed, burn_rate]);
+        }
       }
       console.log('[Cron:slo] Finished SLO calculations.');
     } catch (error) {
       console.error('[Cron:slo] Fatal error in SLO calculations:', error);
+    } finally {
+      if (client) {
+        if (lockAcquired) await client.query('SELECT pg_advisory_unlock(1003)');
+        client.release();
+      }
     }
   });
 
   // ── 5. Billing Aggregator — every day at 01:00 ─────────────────────────────
   cron.schedule('0 1 * * *', async () => {
+    let client;
+    let lockAcquired = false;
     try {
+      client = await db.connect();
+      const { rows } = await client.query('SELECT pg_try_advisory_lock(1004) as locked');
+      if (!rows[0].locked) return; // Another instance has the lock — still releases client in finally
+      lockAcquired = true;
+
       console.log('[Cron:billing] Running daily billing aggregator...');
-      const projects = await Project.find({ 
+      const projectCursor = Project.find({ 
         stripeSubscriptionItemId: { $exists: true },
         billingStatus: 'active'
-      });
+      }).cursor();
 
-      for (const project of projects) {
-        const result = await db.query(`
-          SELECT COUNT(*) as span_count FROM spans
-          WHERE project_id = $1
-            AND start_time >= date_trunc('day', NOW() - INTERVAL '1 day')
-            AND start_time < date_trunc('day', NOW())
-        `, [project._id]);
-
-        const spanCount = parseInt(result.rows[0].span_count);
+      let count = 0;
+      for await (const project of projectCursor) {
+        count++;
+        const result = await clickhouse.query({
+          query: `
+            SELECT sum(span_count) as span_count FROM project_spans_daily_mv
+            WHERE project_id = {projectId: String}
+              AND date = toDate(now() - INTERVAL 1 DAY)
+          `,
+          query_params: { projectId: project._id.toString() },
+          format: 'JSONEachRow'
+        });
+        
+        const rowsQuery = await result.json();
+        const spanCount = parseInt(rowsQuery[0]?.span_count || '0', 10);
         if (spanCount === 0) continue;
 
         await stripe.subscriptionItems.createUsageRecord(
@@ -220,9 +299,14 @@ export const initCron = () => {
           }
         );
       }
-      console.log('[Cron:billing] Finished billing aggregator.');
+      console.log(`[Cron:billing] Finished billing aggregator for ${count} projects.`);
     } catch (error) {
       console.error('[Cron:billing] Fatal error in billing aggregator:', error);
+    } finally {
+      if (client) {
+        if (lockAcquired) await client.query('SELECT pg_advisory_unlock(1004)');
+        client.release();
+      }
     }
   });
 

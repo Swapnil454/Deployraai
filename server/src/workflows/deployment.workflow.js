@@ -1,6 +1,8 @@
 import { defineWorkflow } from '../services/workflow.service.js';
 import Deployment from '../models/Deployment.js';
 import Project from '../models/Project.js';
+import User from '../models/User.js';
+import { sendDeploymentSuccess, sendDeploymentFailed } from '../services/notification.service.js';
 import { injectSdkViaGithub } from '../services/githubSdkInjector.js';
 import { 
   startBackendProviderDeployment, 
@@ -105,11 +107,22 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
         });
         await appendLog(existingBackendDeploymentId, 'success', '', `==> Your backend service is live 🎉`);
         await appendLog(existingBackendDeploymentId, 'success', '', `==> Available at ${backendUrl || 'provider dashboard'}`);
+        
+        const user = await User.findById(userId);
+        if (user && user.notificationPreferences?.emailEnabled !== false) {
+          await sendDeploymentSuccess(user.email, project, backendUrl || 'provider dashboard');
+        }
       });
     } else {
       await step.run("finalize_backend_failure_v1", async () => {
         await Deployment.findByIdAndUpdate(existingBackendDeploymentId, { status: 'failed', completedAt: new Date() });
         await appendLog(existingBackendDeploymentId, 'error', 'deploy_trigger', 'Backend deployment failed or did not complete successfully.');
+        
+        const user = await User.findById(userId);
+        if (user && user.notificationPreferences?.emailEnabled !== false) {
+          await sendDeploymentFailed(user.email, project, 'Backend deployment failed or timed out.');
+        }
+
         if (target === 'fullstack' && payload.existingFullDeploymentId) {
           await Deployment.findByIdAndUpdate(payload.existingFullDeploymentId, { status: 'failed', completedAt: new Date(), errorMessage: "Backend deployment failed" });
         }
@@ -194,6 +207,11 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
         await appendLog(existingFrontendDeploymentId, 'success', '', `==> Your frontend is live 🎉`);
         await appendLog(existingFrontendDeploymentId, 'success', '', `==> Available at ${frontendUrl || 'provider dashboard'}`);
         
+        const user = await User.findById(userId);
+        if (user && user.notificationPreferences?.emailEnabled !== false) {
+          await sendDeploymentSuccess(user.email, project, frontendUrl || 'provider dashboard');
+        }
+
         if (target === 'fullstack' && payload.existingFullDeploymentId) {
           await Deployment.findByIdAndUpdate(payload.existingFullDeploymentId, { 
             status: 'completed', 
@@ -219,6 +237,12 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
       await step.run("finalize_frontend_failure_v1", async () => {
         await Deployment.findByIdAndUpdate(existingFrontendDeploymentId, { status: 'failed', completedAt: new Date() });
         await appendLog(existingFrontendDeploymentId, 'error', 'deploy_trigger', 'Frontend deployment failed or did not complete successfully.');
+        
+        const user = await User.findById(userId);
+        if (user && user.notificationPreferences?.emailEnabled !== false) {
+          await sendDeploymentFailed(user.email, project, 'Frontend deployment failed or timed out.');
+        }
+
         if (target === 'fullstack' && payload.existingFullDeploymentId) {
           await Deployment.findByIdAndUpdate(payload.existingFullDeploymentId, { status: 'failed', completedAt: new Date(), errorMessage: "Frontend deployment failed" });
         }

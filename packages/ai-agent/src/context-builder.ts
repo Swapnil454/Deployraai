@@ -1,74 +1,127 @@
 import { db } from './db.js';
+import { clickhouse } from './clickhouse.js';
 import Anthropic from '@anthropic-ai/sdk';
 
 const anthropicClient = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || 'dummy_key',
+  timeout: 15000,
 });
 
 export async function buildFingerprintContext(projectId: string, fingerprint: string) {
-  const group = await db.query(`
-    SELECT exception_type, sample_stack_trace, first_seen, last_seen, occurrence_count
-    FROM error_groups
-    WHERE project_id = $1 AND fingerprint = $2
-  `, [projectId, fingerprint]);
+  try {
+    // Try the newer 'issues' table first (canonical error group table)
+    let group = await db.query(`
+      SELECT exception_type, latest_stacktrace as sample_stack_trace, first_seen_at as first_seen, last_seen_at as last_seen, event_count as occurrence_count
+      FROM issues
+      WHERE project_id = $1 AND fingerprint = $2
+      LIMIT 1
+    `, [projectId, fingerprint]);
 
-  if (group.rowCount === 0) return null;
+    // Fall back to legacy error_groups table (older projects)
+    if (!group.rowCount || group.rowCount === 0) {
+      group = await db.query(`
+        SELECT exception_type, sample_stack_trace, first_seen, last_seen, occurrence_count
+        FROM error_groups
+        WHERE project_id = $1 AND fingerprint = $2
+        LIMIT 1
+      `, [projectId, fingerprint]).catch(() => ({ rows: [], rowCount: 0 } as any));
+    }
 
-  // Get recent error logs containing this fingerprint (we attached it to span, but logs may correlate by traceId or time. We'll just fetch recent error logs near the last_seen time, or if we link fingerprint to logs later, use that).
-  // For now, fetch recent errors in the project.
-  const errorLogs = await db.query(`
-    SELECT timestamp, message
-    FROM logs
-    WHERE project_id = $1 AND level = 'error'
-    ORDER BY timestamp DESC
-    LIMIT 20
-  `, [projectId]);
+    if (!group.rowCount || group.rowCount === 0) return null;
 
-  return {
-    exceptionType: group.rows[0].exception_type,
-    stackTrace: group.rows[0].sample_stack_trace,
-    occurrenceCount: group.rows[0].occurrence_count,
-    firstSeen: group.rows[0].first_seen,
-    lastSeen: group.rows[0].last_seen,
-    errorLogs: errorLogs.rows,
-  };
+    const errorLogs = await clickhouse.query({
+      query: `
+        SELECT timestamp, message
+        FROM logs
+        WHERE project_id = {projectId: String} AND level = 'error'
+        ORDER BY timestamp DESC
+        LIMIT 20
+      `,
+      query_params: { projectId },
+      format: 'JSONEachRow'
+    }).then(res => res.json<any>()).then(rows => ({ rows })).catch(err => {
+      console.warn("ClickHouse error:", err.message);
+      return { rows: [] };
+    });
+
+    return {
+      exceptionType: group.rows[0].exception_type,
+      stackTrace: group.rows[0].sample_stack_trace,
+      occurrenceCount: group.rows[0].occurrence_count,
+      firstSeen: group.rows[0].first_seen,
+      lastSeen: group.rows[0].last_seen,
+      errorLogs: errorLogs.rows,
+    };
+  } catch (err: any) {
+    console.error('Error building fingerprint context:', err.message);
+    return null;
+  }
 }
 
 export async function buildErrorContext(projectId: string, deployId: string) {
   const [errorSpans, errorLogs, affectedRoutes] = await Promise.all([
     // Get all ERROR spans from this deploy
-    db.query(`
-      SELECT name, attributes, events, start_time, duration_ms
-      FROM spans
-      WHERE project_id = $1
-        AND deploy_id = $2
-        AND status_code = 2
-      ORDER BY start_time DESC
-      LIMIT 20
-    `, [projectId, deployId]),
+    // Get all ERROR spans from this deploy via ClickHouse
+    clickhouse.query({
+      query: `
+        SELECT name, attributes, events, start_time, duration_ms
+        FROM spans
+        WHERE project_id = {projectId: String}
+          AND deploy_id = {deployId: String}
+          AND status_code = 2
+        ORDER BY start_time DESC
+        LIMIT 20
+      `,
+      query_params: { projectId, deployId },
+      format: 'JSONEachRow'
+    }).then(res => res.json<any>()).then(rows => ({
+      rowCount: rows.length,
+      rows: rows.map(r => ({
+        ...r,
+        events: r.events && r.events !== '[]' ? JSON.parse(r.events) : []
+      }))
+    })).catch(err => {
+      console.warn("ClickHouse offline or failed to fetch spans for AI context:", err.message);
+      return { rowCount: 0, rows: [] };
+    }),
 
     // Get error logs
-    db.query(`
-      SELECT timestamp, message, request_id, region
-      FROM logs
-      WHERE project_id = $1
-        AND deploy_id = $2
-        AND level = 'error'
-      ORDER BY timestamp DESC
-      LIMIT 50
-    `, [projectId, deployId]),
+    clickhouse.query({
+      query: `
+        SELECT timestamp, message, request_id as "request_id", region
+        FROM logs
+        WHERE project_id = {projectId: String}
+          AND deploy_id = {deployId: String}
+          AND level = 'error'
+        ORDER BY timestamp DESC
+        LIMIT 50
+      `,
+      query_params: { projectId, deployId },
+      format: 'JSONEachRow'
+    }).then(res => res.json<any>()).then(rows => ({ rows })).catch(err => {
+      console.warn("ClickHouse error:", err.message);
+      return { rows: [] };
+    }),
 
     // Routes with high error rate on this deploy vs previous
-    db.query(`
-      SELECT
-        route, method,
-        SUM(error_count)::float / NULLIF(SUM(request_count), 0) as error_rate
-      FROM metrics_minutely
-      WHERE project_id = $1 AND deploy_id = $2
-      GROUP BY route, method
-      HAVING SUM(error_count)::float / NULLIF(SUM(request_count), 0) > 0.1
-      ORDER BY error_rate DESC
-    `, [projectId, deployId]),
+    clickhouse.query({
+      query: `
+        SELECT
+          route, method,
+          sum(error_count) / nullIf(sum(request_count), 0) as error_rate
+        FROM metrics_minutely_mv
+        WHERE project_id = {projectId: String} AND deploy_id = {deployId: String}
+        GROUP BY route, method
+        HAVING sum(error_count) / nullIf(sum(request_count), 0) > 0.1
+        ORDER BY error_rate DESC
+        LIMIT 20
+      `,
+      query_params: { projectId, deployId },
+      format: 'JSONEachRow'
+    }).then(res => res.json<any>()).then(rows => ({ rows })).catch(err => {
+      console.warn("ClickHouse error fetching affected routes:", err.message);
+      return { rows: [] };
+    }),
   ]);
 
   // Extract stack traces from span events

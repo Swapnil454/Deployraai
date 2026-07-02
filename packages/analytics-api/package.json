@@ -7,19 +7,24 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "dev": "ts-node-dev src/index.ts",
+    "dev": "nodemon -e ts --exec \"npx tsx --env-file=.env\" src/index.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {
     "@clickhouse/client": "^1.22.0",
-    "@fastify/rate-limit": "^11.0.0",
+    "@fastify/cors": "^8.5.0",
+    "@fastify/rate-limit": "^8.0.3",
+    "dotenv": "^17.4.2",
     "fastify": "^4.26.2",
+    "lru-cache": "^5.1.1",
     "pg": "^8.11.3",
-    "stripe": "^22.3.0"
+    "stripe": "^22.3.0",
+    "@ai-agents/shared": "*"
   },
   "devDependencies": {
     "@types/node": "^20.11.24",
     "@types/pg": "^8.11.2",
+    "nodemon": "^3.1.0",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.0"
   }

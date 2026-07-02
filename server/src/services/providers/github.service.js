@@ -9,6 +9,7 @@ export class GitHubService {
         Authorization: `Bearer ${token}`,
         Accept: 'application/vnd.github.v3+json',
       },
+      timeout: 15000,
     });
   }
 

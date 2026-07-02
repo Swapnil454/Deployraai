@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TracePilot Session Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/rrweb@2.0.0-alpha.11/dist/rrweb.min.js"></script>
+  <style>
+    body { font-family: system-ui; text-align: center; padding: 50px; background: #000; color: #fff; }
+    button { padding: 10px 20px; font-size: 16px; margin: 10px; cursor: pointer; background: #3b82f6; border: none; color: #fff; border-radius: 5px;}
+    button:hover { background: #2563eb; }
+    .box { width: 100px; height: 100px; background: #eab308; margin: 20px auto; transition: all 0.3s; }
+    .box:hover { transform: scale(1.2) rotate(45deg); background: #f59e0b; }
+  </style>
+</head>
+<body>
+  <h1>Session Replay Test Area</h1>
+  <p>Move your mouse around, click the buttons, and interact with the elements below.</p>
+  
+  <button onclick="document.body.style.background = '#1a1a1a'">Darken Background</button>
+  <button onclick="document.body.style.background = '#000'">Reset Background</button>
+  
+  <div class="box"></div>
+  
+  <p id="status" style="color: #10b981; font-weight: bold; margin-top: 30px;">Starting recording...</p>
+  <p id="error" style="color: #ef4444; margin-top: 10px; display: none;"></p>
+  <p id="counter" style="color: #6b7280; font-size: 13px; margin-top: 5px;">Batches sent: 0</p>
+
+  <script>
+    const PROJECT_ID = "6a2c3b57d3a51ae19d6450da";
+    const WRITE_KEY = "trc_rum_681f7258c62ef56fa9154a263a4811fe";
+    const INGESTOR_URL = "http://localhost:4317/v1/rum";
+    
+    // Generate a stable session ID for this browser tab
+    const sessionId = "sess_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+    
+    let events = [];
+
+    // Start recording
+    rrweb.record({
+      emit(event) {
+        events.push(event);
+      },
+    });
+
+    let batches = 0;
+
+    // Flush every 5 seconds
+    setInterval(async () => {
+      if (events.length === 0) return;
+      
+      const payload = {
+        projectId: PROJECT_ID,
+        sessionId: sessionId,
+        events: events
+      };
+      
+      // Clear the events array
+      events = [];
+      
+      try {
+        const res = await fetch(INGESTOR_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-rum-key": WRITE_KEY
+          },
+          body: JSON.stringify(payload)
+        });
+        
+        if (res.ok) {
+          batches++;
+          document.getElementById('status').innerText = `✅ Recording... (Last batch sent at ${new Date().toLocaleTimeString()})`;
+          document.getElementById('counter').innerText = `Batches sent: ${batches}`;
+          document.getElementById('error').style.display = 'none';
+          console.log("Successfully sent batch to TracePilot Ingestor");
+        } else {
+          const body = await res.json().catch(() => ({}));
+          document.getElementById('error').style.display = 'block';
+          document.getElementById('error').innerText = `❌ Ingestor error ${res.status}: ${JSON.stringify(body)}`;
+        }
+      } catch (err) {
+        document.getElementById('error').style.display = 'block';
+        document.getElementById('error').innerText = `❌ Network error: ${err.message}. Is the ingestor running on port 4317?`;
+      }
+    }, 5000);
+  </script>
+</body>
+</html>

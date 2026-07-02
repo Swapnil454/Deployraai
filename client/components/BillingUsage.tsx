@@ -75,8 +75,8 @@ export default function BillingUsage({ projectId }: { projectId: string }) {
       
       <div className="h-3 w-full bg-zinc-800 rounded-full overflow-hidden mb-4">
         <div 
-          className={\`h-full \${isCritical ? 'bg-red-500' : isWarning ? 'bg-yellow-500' : 'bg-emerald-500'}\`} 
-          style={{ width: \`\${usagePercent}%\` }}
+          className={`h-full ${isCritical ? 'bg-red-500' : isWarning ? 'bg-yellow-500' : 'bg-emerald-500'}`} 
+          style={{ width: `${usagePercent}%` }}
         ></div>
       </div>
 

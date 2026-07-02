@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Loader2, ArrowLeft, BarChart2, MousePointerClick, Globe, Monitor, Smartphone, Code, Wand2, GitBranch, ExternalLink, CheckCircle2, MoreHorizontal, Copy, Check, ChevronDown, Calendar } from "lucide-react";
 import { ProjectAvatar } from "@/components/dashboard/ProjectAvatar";
+import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
 
 export default function ProjectAnalyticsPage() {
   const router = useRouter();
@@ -20,8 +21,6 @@ export default function ProjectAnalyticsPage() {
   const [range, setRange] = useState("7d");
   const [environment, setEnvironment] = useState("all");
 
-  const [injecting, setInjecting] = useState(false);
-  const [injectResult, setInjectResult] = useState<any>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [userDismissed, setUserDismissed] = useState(false);
 
@@ -86,26 +85,7 @@ export default function ProjectAnalyticsPage() {
     fetchSummary();
   }, [fetchSummary]);
 
-  const handleAutoInject = async () => {
-    setInjecting(true);
-    setInjectResult(null);
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${projectId}/analytics/auto-inject`, {
-        method: 'POST',
-        credentials: "include"
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setInjectResult({ success: true, ...data });
-      } else {
-        setInjectResult({ success: false, error: data.error || "Failed to auto inject." });
-      }
-    } catch (err: any) {
-      setInjectResult({ success: false, error: err.message });
-    } finally {
-      setInjecting(false);
-    }
-  };
+
 
   const enableAnalytics = async () => {
     setEnabling(true);
@@ -138,6 +118,9 @@ export default function ProjectAnalyticsPage() {
     }
   };
 
+
+
+
   if (loading) {
     return (
       <div className="w-full flex-1 flex items-center justify-center bg-black">
@@ -150,7 +133,7 @@ export default function ProjectAnalyticsPage() {
     return <div className="p-8 text-white">Project not found</div>;
   }
 
-  const isEnabled = project.analytics?.enabled;
+  const isVerified = project.analytics?.verified;
 
   const getDomainStr = () => {
     return project.domains?.[0]?.domain 
@@ -186,66 +169,12 @@ export default function ProjectAnalyticsPage() {
   return (
     <div className="w-full flex-1 flex flex-col bg-black min-h-screen">
       <div className="max-w-[1440px] w-full mx-auto px-8 py-8 flex-1">
-        {!isEnabled ? (
-          <div className="flex flex-col mt-8">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 items-start mb-16">
-              <div>
-                <h2 className="text-[32px] font-bold text-white mb-4">Web Analytics</h2>
-                <p className="text-[15px] text-zinc-400 leading-relaxed mb-8">
-                  Collect valuable insights on user behavior and site performance with detailed page view metrics. Gain knowledge on top pages. <a href="#" className="text-blue-400 hover:underline">Learn more</a>
-                </p>
-                <div className="flex items-center gap-6">
-                  <button
-                    onClick={enableAnalytics}
-                    disabled={enabling}
-                    className="bg-white text-black hover:bg-zinc-200 font-medium text-[14px] px-5 py-2 rounded-[6px] transition-colors flex items-center gap-2"
-                  >
-                    {enabling ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                    {enabling ? "Enabling..." : "Enable"}
-                  </button>
-                  <a href="#" className="text-[13px] font-medium text-zinc-300 hover:text-white flex items-center gap-1 transition-colors">
-                    Limits & Pricing <ExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="bg-[#0a0a0a] border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-colors">
-                  <div className="text-zinc-400 mb-4">
-                    <BarChart2 className="h-5 w-5" />
-                  </div>
-                  <h3 className="text-[14px] font-semibold text-white mb-2">Real-time insights into your traffic</h3>
-                  <p className="text-[13px] text-zinc-400 leading-relaxed">Ensure smooth performance with real-time bandwidth analysis.</p>
-                </div>
-                <div className="bg-[#0a0a0a] border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-colors">
-                  <div className="text-zinc-400 mb-4">
-                    <Code className="h-5 w-5" />
-                  </div>
-                  <h3 className="text-[14px] font-semibold text-white mb-2">Deeper insights with custom events</h3>
-                  <p className="text-[13px] text-zinc-400 leading-relaxed">Track whatever is relevant for your website.</p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="w-full border border-zinc-800 rounded-xl overflow-hidden relative">
-              <div className="absolute inset-0 bg-gradient-to-t from-[#000] via-[#000]/60 to-transparent z-10 pointer-events-none" />
-              <div className="absolute top-4 right-4 bg-[#111] border border-zinc-800 text-zinc-500 px-3 py-1 rounded-full text-[12px] font-medium z-20">Demo Data</div>
-              
-              <div className="grid grid-cols-3 divide-x divide-zinc-800 bg-[#0a0a0a] border-b border-zinc-800 relative z-20">
-                {['Visitors', 'Page Views', 'Bounce Rate'].map((t, idx) => (
-                  <div key={t} className={`p-4 sm:p-6 opacity-30 ${idx === 0 ? 'border-b-2 border-b-zinc-400 -mb-[1px]' : ''}`}>
-                    <div className="text-[12px] sm:text-sm text-zinc-500 mb-2">{t}</div>
-                    <div className="text-xl sm:text-2xl font-semibold text-zinc-300">--</div>
-                  </div>
-                ))}
-              </div>
-              <div className="h-[300px] bg-[#0a0a0a] p-0 flex flex-col justify-end relative">
-                <svg className="w-full h-full opacity-30" viewBox="0 0 100 100" preserveAspectRatio="none">
-                  <path d="M0,80 L10,75 L20,85 L30,60 L40,65 L50,40 L60,50 L70,30 L80,35 L90,10 L100,20 L100,100 L0,100 Z" fill="rgba(59,130,246,0.1)" />
-                  <path d="M0,80 L10,75 L20,85 L30,60 L40,65 L50,40 L60,50 L70,30 L80,35 L90,10 L100,20" fill="none" stroke="rgba(59,130,246,0.5)" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
-                </svg>
-              </div>
-            </div>
+        {!isVerified ? (
+          <div className="mt-8">
+            <ObservabilitySetup 
+              project={project}
+              onVerified={fetchProject}
+            />
           </div>
         ) : (
           <div className="flex flex-col gap-8">
@@ -364,121 +293,11 @@ export default function ProjectAnalyticsPage() {
 
             {/* Integration Section */}
             {((!hasData && !userDismissed) || showSetup) && (
-              <div className="flex flex-col gap-6">
-                <div className="bg-[#0a0a0a] border border-zinc-800 rounded-xl p-6 lg:p-8">
-                  <h3 className="text-xl font-semibold text-white mb-2">Get Started</h3>
-                  <p className="text-zinc-400 text-[14px] mb-8">To start counting visitors and page views, follow these steps.</p>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-[#111] border border-zinc-800 rounded-lg p-6">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="h-6 w-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">1</div>
-                        <h4 className="text-white font-medium">Copy our script</h4>
-                      </div>
-                      <p className="text-[13px] text-zinc-400 mb-4">Start by copying the DeployAI tracking script for your project.</p>
-                      
-                      <div className="bg-black border border-zinc-800 rounded-md overflow-hidden">
-                        <div className="flex items-center bg-[#1a1a1a] px-3 py-2 border-b border-zinc-800">
-                          <span className="text-[12px] text-zinc-400 font-medium bg-zinc-800/50 px-2 py-0.5 rounded">HTML</span>
-                          <button onClick={() => {
-                            navigator.clipboard.writeText(`<script defer src="${process.env.NEXT_PUBLIC_API_URL || "https://api.deployai.in"}/analytics.js" data-tracking-id="${project.analytics.trackingId}"></script>`);
-                            setCopied(true);
-                            setTimeout(() => setCopied(false), 2000);
-                          }} className="ml-auto text-zinc-400 hover:text-white transition-colors">
-                            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                          </button>
-                        </div>
-                        <div className="p-3 overflow-x-auto text-[12px] font-mono text-zinc-300 whitespace-nowrap">
-                          {`<script defer src="..." data-tracking-id="${project.analytics.trackingId}"></script>`}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-[#111] border border-zinc-800 rounded-lg p-6">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="h-6 w-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">2</div>
-                        <h4 className="text-white font-medium">Add to your layout</h4>
-                      </div>
-                      <p className="text-[13px] text-zinc-400 mb-4">Inject the script into the <code>&lt;head&gt;</code> of your app's layout file.</p>
-                      
-                      <div className="bg-black border border-zinc-800 rounded-md overflow-hidden">
-                         <div className="p-3 text-[12px] font-mono text-zinc-300 leading-loose">
-                           <span className="text-purple-400">Next.js:</span> app/layout.tsx<br/>
-                           <span className="text-purple-400">React/Vite:</span> index.html
-                         </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-[#111] border border-zinc-800 rounded-lg p-6">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="h-6 w-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">3</div>
-                        <h4 className="text-white font-medium">Deploy & Visit your Site</h4>
-                      </div>
-                      <p className="text-[13px] text-zinc-400 leading-relaxed">
-                        Deploy your changes and visit the deployment to collect your page views.<br/><br/>
-                        If you don't see data after 30 seconds, please check for content blockers and try to navigate between pages on your site.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="pt-8 mt-2 border-t border-zinc-800/50">
-                    <div className="flex items-center gap-2 mb-4 text-zinc-500 text-[13px]">
-                      Or, install automatically with AI Agent (free).
-                    </div>
-
-                    {/* Auto Inject Box */}
-                    <div className="bg-[#111] border border-zinc-800 rounded-lg overflow-hidden flex flex-col">
-                      {injectResult?.success ? (
-                        <div className="p-6 lg:p-8 flex flex-col">
-                          <p className="text-white font-medium mb-6">Implemented Web Analytics for this project</p>
-                          <h4 className="text-[14px] font-semibold text-white mb-3">Changes Made</h4>
-                          <p className="text-[14px] text-zinc-400 mb-10">1. Injected tracking script into the HTML layout.</p>
-                          <div className="flex items-center justify-between border-t border-zinc-800 pt-6 mt-auto">
-                            <div className="flex items-center gap-2">
-                              <Wand2 className="h-4 w-4 text-purple-500" />
-                              <span className="text-sm font-medium text-white">Generation Complete</span>
-                              <span className="bg-purple-500/20 text-purple-400 text-[10px] px-1.5 py-0.5 rounded font-medium ml-1">Beta</span>
-                            </div>
-                            <a 
-                              href={injectResult.prUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="bg-white text-black hover:bg-zinc-200 text-sm font-medium px-4 py-2 rounded-md transition-colors"
-                            >
-                              View Pull Request
-                            </a>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="p-8 flex flex-col items-center justify-center min-h-[250px]">
-                          <button
-                            onClick={handleAutoInject}
-                            disabled={injecting}
-                            className="bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-white font-medium px-4 py-2 rounded-md transition-colors flex items-center gap-2"
-                          >
-                            {injecting ? <Loader2 className="h-4 w-4 animate-spin text-zinc-400" /> : <Wand2 className="h-4 w-4 text-zinc-400" />}
-                            <span className="text-[13px]">Implement with AI Agent</span>
-                          </button>
-                          <p className="text-[13px] text-zinc-400 mt-6 max-w-md text-center">
-                            Automatically generate a pull request with <strong>Web Analytics</strong> configured for your project — at no charge.
-                          </p>
-                          {injectResult?.error && (
-                             <div className="mt-4 text-red-400 text-sm bg-red-500/10 p-2 px-4 rounded-md border border-red-500/20 text-center">
-                               {injectResult.error}
-                             </div>
-                          )}
-                        </div>
-                      )}
-                      {!injectResult?.success && (
-                        <div className="bg-black border-t border-zinc-800 px-6 py-4 flex items-center gap-2">
-                          <Wand2 className="h-4 w-4 text-zinc-400" />
-                          <span className="text-sm font-medium text-zinc-400">AI Agent</span>
-                          <span className="bg-zinc-800 text-zinc-300 text-[10px] px-1.5 py-0.5 rounded font-medium ml-1">Beta</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+              <div className="mb-4">
+                <ObservabilitySetup 
+                  project={project}
+                  onVerified={fetchProject}
+                />
               </div>
             )}
 

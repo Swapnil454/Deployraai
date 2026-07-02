@@ -23,6 +23,7 @@ export const renderAPI = async (token, method, endpoint, body = null) => {
     options.body = JSON.stringify(body);
   }
 
+  options.signal = AbortSignal.timeout(15000);
   const response = await fetch(`${url}${endpoint}`, options);
   
   const text = await response.text();

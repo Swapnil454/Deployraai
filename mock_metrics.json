@@ -1,0 +1,40 @@
+{
+  "resourceMetrics": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "host.name", "value": { "stringValue": "node-1" } },
+          { "key": "k8s.pod.name", "value": { "stringValue": "api-server-xyz" } },
+          { "key": "k8s.namespace.name", "value": { "stringValue": "production" } },
+          { "key": "container.name", "value": { "stringValue": "api" } }
+        ]
+      },
+      "scopeMetrics": [
+        {
+          "metrics": [
+            {
+              "name": "system.cpu.utilization",
+              "gauge": {
+                "dataPoints": [
+                  {
+                    "timeUnixNano": "1738200000000000000",
+                    "asDouble": 85.5,
+                    "attributes": [
+                      { "key": "cpu", "value": { "stringValue": "cpu0" } }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "http.server.duration",
+              "histogram": {
+                "dataPoints": []
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

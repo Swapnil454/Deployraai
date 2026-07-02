@@ -1,15 +1,14 @@
 import { FastifyPluginAsync } from 'fastify';
 import { Octokit } from '@octokit/rest';
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI, Schema, SchemaType } from '@google/generative-ai';
 import { buildFingerprintContext } from '../context-builder.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-const anthropicClient = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || 'dummy_key',
-});
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'dummy_key');
 
 export const githubRouter: FastifyPluginAsync = async (app) => {
-  app.post('/pr', async (req, reply) => {
+  app.post('/pr', { preHandler: requireAuth }, async (req, reply) => {
     const { projectId, deployId, fingerprint, repoOwner, repoName } = req.body as any;
     
     if (!projectId || !fingerprint || !repoOwner || !repoName) {
@@ -27,18 +26,41 @@ You are analyzing a deployment error.
 EXCEPTION: ${context.exceptionType}
 STACK: ${context.stackTrace}
 
-Return a JSON object with: { "rootCause": string, "fix": [{ "file": string, "originalCode": string, "fixedCode": string }] }
-Make sure the fixedCode represents the ENTIRE file replacement or at least the exact syntax required.
+Provide the root cause and a code fix. Ensure the fixedCode represents the ENTIRE file replacement or exact syntax.
 `;
+
+    const fixSchema: Schema = {
+      type: SchemaType.OBJECT,
+      properties: {
+        rootCause: { type: SchemaType.STRING },
+        fix: {
+          type: SchemaType.ARRAY,
+          items: {
+            type: SchemaType.OBJECT,
+            properties: {
+              file: { type: SchemaType.STRING },
+              originalCode: { type: SchemaType.STRING },
+              fixedCode: { type: SchemaType.STRING },
+            },
+            required: ['file', 'originalCode', 'fixedCode']
+          }
+        }
+      },
+      required: ['rootCause', 'fix']
+    };
 
     let generated;
     try {
-      const response = await anthropicClient.messages.create({
-        model: 'claude-3-5-sonnet-20240620',
-        max_tokens: 4096,
-        messages: [{ role: 'user', content: prompt }],
+      const model = genAI.getGenerativeModel({ 
+        model: 'gemini-2.5-flash',
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: fixSchema,
+        }
       });
-      generated = JSON.parse((response.content[0] as any).text);
+      
+      const response = await model.generateContent(prompt);
+      generated = JSON.parse(response.response.text());
     } catch (err) {
       app.log.error(err);
       return reply.status(422).send({ error: 'AI generation failed or returned malformed JSON' });
@@ -76,7 +98,7 @@ Make sure the fixedCode represents the ENTIRE file replacement or at least the e
       });
       const branchSha = branchRefData.object.sha;
 
-      // 2. Build the tree
+      // 4. Build the tree
       const tree = await Promise.all(generated.fix.map(async (f: any) => {
         // Validation step (stubbed here, assume using acorn or ts API)
         try {
@@ -110,7 +132,7 @@ Make sure the fixedCode represents the ENTIRE file replacement or at least the e
         parents: [branchSha],
       });
 
-      // 4. Update Reference
+      // 6. Update Reference
       await octokit.rest.git.updateRef({
         owner: repoOwner,
         repo: repoName,
@@ -118,7 +140,7 @@ Make sure the fixedCode represents the ENTIRE file replacement or at least the e
         sha: commitData.sha,
       });
 
-      // 5. Create PR
+      // 7. Create PR
       const { data: prData } = await octokit.rest.pulls.create({
         owner: repoOwner,
         repo: repoName,
@@ -127,6 +149,31 @@ Make sure the fixedCode represents the ENTIRE file replacement or at least the e
         base: 'main',
         body: `### Auto-generated fix by TracePilot\n\n**Error Fingerprint:** \`${fingerprint}\`\n**Root Cause:** ${generated.rootCause}\n\n*Opened by TracePilot on behalf of the user.*`,
       });
+
+      // 8. Notify User Internally
+      try {
+        const notifyUrl = process.env.INTERNAL_API_URL || 'http://localhost:5000';
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        
+        fetch(`${notifyUrl}/api/internal/notify`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Internal-Secret': process.env.INTERNAL_API_SECRET || ''
+          },
+          body: JSON.stringify({
+            event: 'pr_created',
+            projectId,
+            data: { prUrl: prData.html_url, exceptionType: context.exceptionType }
+          }),
+          signal: controller.signal
+        }).catch(err => {
+          app.log.error(`[Notification] Background notification failed: ${err.message}`);
+        }).finally(() => clearTimeout(timeout));
+      } catch (notifyErr) {
+        app.log.error(`[Notification] Sync setup failed: ${notifyErr}`);
+      }
 
       return reply.send({ prUrl: prData.html_url });
 
@@ -139,3 +186,4 @@ Make sure the fixedCode represents the ENTIRE file replacement or at least the e
     }
   });
 };
+

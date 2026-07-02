@@ -12,6 +12,7 @@ export async function createLinearIssue(apiKey: string, teamId: string, alert: a
           priority: currentValue > alert.threshold * 2 ? 1 : 2, // 1=urgent, 2=high
         }
       }
-    })
+    }),
+    signal: AbortSignal.timeout(5000)
   });
 }
