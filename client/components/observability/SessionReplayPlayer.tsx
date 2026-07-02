@@ -7,6 +7,15 @@ interface SessionReplayPlayerProps {
   events: any[];
 }
 
+function isResizeEvent(event: unknown): event is { width: number; height: number } {
+  return (
+    typeof event === 'object' &&
+    event !== null &&
+    typeof (event as { width?: unknown }).width === 'number' &&
+    typeof (event as { height?: unknown }).height === 'number'
+  );
+}
+
 export function SessionReplayPlayer({ events }: SessionReplayPlayerProps) {
   const outerRef = useRef<HTMLDivElement>(null);   // measured for container width
   const mountRef = useRef<HTMLDivElement>(null);   // rrweb mounts here
@@ -51,9 +60,11 @@ export function SessionReplayPlayer({ events }: SessionReplayPlayerProps) {
       replayerRef.current = replayer;
 
       // rrweb fires 'resize' with the original recorded viewport dimensions
-      replayer.on('resize', ({ width, height }: { width: number; height: number }) => {
+      replayer.on('resize', event => {
+        if (!isResizeEvent(event)) return;
         if (!outerRef.current || !mountRef.current) return;
 
+        const { width, height } = event;
         const containerW = outerRef.current.clientWidth;
         const s = Math.min(containerW / width, 1); // never upscale
         const scaledW = Math.round(width * s);
