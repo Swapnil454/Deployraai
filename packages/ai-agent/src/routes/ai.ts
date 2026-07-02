@@ -1,14 +1,13 @@
 import { FastifyPluginAsync } from 'fastify';
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { redis } from '../index.js';
 import { buildFingerprintContext } from '../context-builder.js';
+import { requireAuth } from '../middleware/auth.js';
 
-const anthropicClient = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || 'dummy_key',
-});
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'dummy_key');
 
 export const aiRouter: FastifyPluginAsync = async (app) => {
-  app.post('/explain', async (req, reply) => {
+  app.post('/explain', { preHandler: requireAuth }, async (req, reply) => {
     const { projectId, fingerprint } = req.body as { projectId: string, fingerprint: string };
     if (!projectId || !fingerprint) {
       return reply.status(400).send({ error: 'Missing projectId or fingerprint' });
@@ -51,28 +50,42 @@ Based on this data, provide a clear, concise explanation of what likely caused t
     reply.raw.setHeader('Connection', 'keep-alive');
     reply.raw.setHeader('X-Accel-Buffering', 'no'); // Prevent Nginx buffering
 
-    const stream = await anthropicClient.messages.stream({
-      model: 'claude-3-5-sonnet-20240620',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }],
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    
+    // Support aborting the request if the client disconnects early
+    const abortController = new AbortController();
+    
+    req.raw.on('close', () => {
+      app.log.info('Client closed connection early. Aborting Gemini generation.');
+      abortController.abort();
     });
 
-    stream.on('text', (text) => {
-      reply.raw.write(`data: ${JSON.stringify({ text })}\n\n`);
-    });
+    try {
+      const result = await model.generateContentStream(
+        { contents: [{ role: 'user', parts: [{ text: prompt }] }] },
+        { signal: abortController.signal }
+      );
 
-    stream.on('end', () => {
+      for await (const chunk of result.stream) {
+        const text = chunk.text();
+        reply.raw.write(`data: ${JSON.stringify({ text })}\n\n`);
+      }
+
       reply.raw.write('data: [DONE]\n\n');
       reply.raw.end();
-    });
-
-    stream.on('error', (err) => {
-      app.log.error(err, 'AI Stream Error');
-      reply.raw.write(`data: ${JSON.stringify({ error: 'AI generation failed' })}\n\n`);
-      reply.raw.end();
-    });
+    } catch (err: any) {
+      if (err.name === 'AbortError' || err.message?.includes('abort')) {
+        app.log.info('Gemini stream aborted successfully.');
+        reply.raw.end();
+      } else {
+        app.log.error(err, 'AI Stream Error');
+        reply.raw.write(`data: ${JSON.stringify({ error: 'AI generation failed' })}\n\n`);
+        reply.raw.end();
+      }
+    }
 
     // Don't send a standard fastify response since we used reply.raw
     return reply;
   });
 };
+

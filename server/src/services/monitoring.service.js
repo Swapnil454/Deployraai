@@ -6,9 +6,49 @@ import DomainSetup from '../models/DomainSetup.js';
 import Deployment from '../models/Deployment.js';
 import User from '../models/User.js';
 import { v4 as uuidv4 } from 'uuid';
+import dns from 'dns';
+import { promisify } from 'util';
 
+const resolve4 = promisify(dns.resolve4);
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const ALERT_FROM_EMAIL = process.env.ALERT_FROM_EMAIL || 'DeployAI <alerts@deployai.test>';
+
+// Security: Prevent SSRF (Server-Side Request Forgery)
+// We must not allow monitors to probe internal cloud metadata, loopback, or private networks
+async function validateMonitorUrl(targetUrl) {
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`Unsupported protocol: ${parsed.protocol}`);
+    }
+
+    const hostname = parsed.hostname;
+    // Fast fail for obvious bad hosts
+    if (hostname === 'localhost' || hostname.includes('127.0.0.') || hostname.includes('169.254.')) {
+      throw new Error('Private or reserved IP ranges are not allowed');
+    }
+
+    // Resolve DNS and check actual IP to prevent DNS rebinding or obfuscated IPs
+    const ips = await resolve4(hostname);
+    if (!ips || ips.length === 0) throw new Error('DNS resolution failed');
+
+    for (const ip of ips) {
+      const parts = ip.split('.').map(Number);
+      if (
+        parts[0] === 10 || // 10.0.0.0/8
+        (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || // 172.16.0.0/12
+        (parts[0] === 192 && parts[1] === 168) || // 192.168.0.0/16
+        (parts[0] === 127) || // Loopback
+        (parts[0] === 169 && parts[1] === 254) // Link-local / Cloud metadata
+      ) {
+        throw new Error(`Resolved IP ${ip} is in a forbidden private/reserved range`);
+      }
+    }
+    return true;
+  } catch (err) {
+    throw new Error(`URL Validation failed: ${err.message}`);
+  }
+}
 
 export const createDefaultMonitors = async (projectId, passedFrontendUrl = null, passedBackendUrl = null) => {
   const project = await Project.findById(projectId);
@@ -138,27 +178,35 @@ export const runMonitorCheck = async (monitorId) => {
   let errorMessage = null;
 
   try {
+    // SECURITY: Prevent SSRF
+    await validateMonitorUrl(targetUrl);
+
     const controller = new AbortController();
     const timeout = setTimeout(() => { controller.abort(); }, 10000);
     
     // Add retry for /health -> /api/health then /
     let res = await fetch(targetUrl, { 
       headers: { 'User-Agent': 'DeployAI-Monitor/1.0' },
-      signal: controller.signal
+      signal: controller.signal,
+      redirect: 'manual'
     });
 
     if (monitor.type === 'backend' && res.status === 404 && monitor.healthPath === '/health') {
        // Retry with /api/health
        const apiHealthUrl = monitor.url.endsWith('/') ? monitor.url + 'api/health' : monitor.url + '/api/health';
+       await validateMonitorUrl(apiHealthUrl); // Validate retries too
        res = await fetch(apiHealthUrl, { 
          headers: { 'User-Agent': 'DeployAI-Monitor/1.0' },
-         signal: controller.signal
+         signal: controller.signal,
+         redirect: 'manual'
        });
        if (res.status === 404) {
          // Fallback to /
+         await validateMonitorUrl(monitor.url); // Validate fallback
          res = await fetch(monitor.url, { 
            headers: { 'User-Agent': 'DeployAI-Monitor/1.0' },
-           signal: controller.signal
+           signal: controller.signal,
+           redirect: 'manual'
          });
        }
     }
@@ -245,7 +293,20 @@ export const runProjectMonitors = async (projectId) => {
 };
 
 export const runAllMonitors = async () => {
-  const monitors = await Monitor.find({ isEnabled: true });
-  // Process in batches or parallel
-  await Promise.all(monitors.map(m => runMonitorCheck(m._id).catch(console.error)));
+  const cursor = Monitor.find({ isEnabled: true }).cursor();
+  const chunk = [];
+  const CHUNK_SIZE = 50;
+
+  for await (const monitor of cursor) {
+    chunk.push(monitor);
+    if (chunk.length >= CHUNK_SIZE) {
+      await Promise.all(chunk.map(m => runMonitorCheck(m._id).catch(console.error)));
+      chunk.length = 0;
+    }
+  }
+
+  // Process any remaining in the final chunk
+  if (chunk.length > 0) {
+    await Promise.all(chunk.map(m => runMonitorCheck(m._id).catch(console.error)));
+  }
 };

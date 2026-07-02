@@ -71,10 +71,14 @@
     "@opentelemetry/sdk-trace-node": "^1.26.0",
     "@opentelemetry/sdk-trace-web": "^1.26.0",
     "@opentelemetry/semantic-conventions": "^1.27.0",
+    "@pyroscope/nodejs": "^0.4.13",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "pprof": "^4.0.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "rrweb": "^2.0.1",
+    "web-vitals": "^5.3.0"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.1",

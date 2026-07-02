@@ -7,6 +7,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -26,10 +27,47 @@ func normalizeEndpoint(endpoint string) string {
 	return endpoint
 }
 
-// Init initializes the TracePilot OpenTelemetry exporter.
-// It sets the global TracerProvider which can be used by standard OpenTelemetry instrumentations.
-// Returns a Shutdown function that should be deferred to ensure spans are flushed.
+// Config holds TracePilot configuration.
+type Config struct {
+	Profiler ProfilerConfig
+}
+
+// Option applies a configuration to Config.
+type Option func(*Config)
+
+// WithProfiling enables continuous CPU profiling.
+func WithProfiling(enabled bool) Option {
+	return func(c *Config) {
+		c.Profiler.Enable = enabled
+	}
+}
+
+// WithProfilerRate sets the CPU sampling rate (default 100 Hz).
+func WithProfilerRate(rateHz int) Option {
+	return func(c *Config) {
+		c.Profiler.CPUProfileRate = rateHz
+	}
+}
+
+// WithProfilerFlushInterval sets how often profiles are flushed to the ingestor.
+func WithProfilerFlushInterval(d time.Duration) Option {
+	return func(c *Config) {
+		c.Profiler.FlushInterval = d
+	}
+}
+
+// Init initializes the TracePilot OpenTelemetry exporter with default options.
 func Init(ctx context.Context) (func(context.Context) error, error) {
+	return InitWithOptions(ctx)
+}
+
+// InitWithOptions initializes the TracePilot OpenTelemetry exporter and optional modules.
+// Returns a Shutdown function that should be deferred to ensure spans are flushed.
+func InitWithOptions(ctx context.Context, opts ...Option) (func(context.Context) error, error) {
+	config := &Config{}
+	for _, opt := range opts {
+		opt(config)
+	}
 	projectID := os.Getenv("TRACEPILOT_TOKEN")
 
 	// Silent disable pattern
@@ -49,7 +87,7 @@ func Init(ctx context.Context) (func(context.Context) error, error) {
 		serviceName = "go-service"
 	}
 
-	opts := []otlptracehttp.Option{
+	otelOpts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpoint(normalizeEndpoint(ingestorURL)),
 		otlptracehttp.WithHeaders(map[string]string{
 			"x-tracepilot-project-id": projectID,
@@ -58,11 +96,11 @@ func Init(ctx context.Context) (func(context.Context) error, error) {
 
 	// Use insecure connection if the original URL is HTTP
 	if strings.HasPrefix(strings.TrimSpace(ingestorURL), "http://") {
-		opts = append(opts, otlptracehttp.WithInsecure())
+		otelOpts = append(otelOpts, otlptracehttp.WithInsecure())
 	}
 
 	// Create OTLP HTTP Exporter
-	exporter, err := otlptracehttp.New(ctx, opts...)
+	exporter, err := otlptracehttp.New(ctx, otelOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +123,11 @@ func Init(ctx context.Context) (func(context.Context) error, error) {
 
 	// Set as global
 	otel.SetTracerProvider(tp)
+
+	// Start Continuous Profiler if enabled
+	if config.Profiler.Enable {
+		startProfiler(ctx, config.Profiler, projectID, ingestorURL, serviceName)
+	}
 
 	return tp.Shutdown, nil
 }

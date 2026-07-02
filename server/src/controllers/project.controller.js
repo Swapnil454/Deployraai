@@ -1,6 +1,20 @@
 import axios from "axios";
+import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import { decryptSecret } from "../utils/encryption.js";
+
+function generateProjectToken(projectId) {
+  if (!process.env.INGESTOR_JWT_SECRET) {
+    console.warn("WARNING: INGESTOR_JWT_SECRET not set, falling back to secure random hex");
+    return `da_${crypto.randomBytes(16).toString("hex")}`;
+  }
+  return jwt.sign(
+    { projectId, type: 'ingestor', iat: Math.floor(Date.now() / 1000) },
+    process.env.INGESTOR_JWT_SECRET,
+    { expiresIn: '90d' }
+  );
+}
 
 const getGithubToken = async (userId) => {
   const user = await User.findById(userId);
@@ -170,6 +184,23 @@ export const createProject = async (req, res) => {
       status: 'analyzed'
     });
 
+    try {
+      const { syncProjectToPostgres } = await import('../utils/postgresSync.js');
+      await syncProjectToPostgres(project);
+    } catch (err) {
+      console.error("Failed to sync project to Postgres:", err.message);
+    }
+
+    try {
+      const { pool } = await import('../config/postgres.js');
+      await pool.query(`
+        INSERT INTO alert_rules (project_id, name, event_type, severity, threshold, window_minutes, cooldown_minutes, route_type)
+        VALUES ($1, 'Critical frontend errors', 'exception', 'critical', 1, 5, 15, 'dashboard')
+      `, [project._id.toString()]);
+    } catch (err) {
+      console.error("Failed to create default alert rule:", err.message);
+    }
+
     res.status(201).json({ projectId: project._id });
   } catch (error) {
     console.error("Create Project Error:", error.message);
@@ -197,7 +228,7 @@ export const getProjects = async (req, res) => {
       sort = { repoName: 1 };
     }
 
-    const projects = await Project.find(query).sort(sort).lean();
+    const projects = await Project.find(query).sort(sort).limit(50).lean();
 
     const Deployment = (await import('../models/Deployment.js')).default;
     const Monitor = (await import('../models/Monitor.js')).default;
@@ -225,11 +256,40 @@ export const getProjects = async (req, res) => {
 
 export const getProject = async (req, res) => {
   try {
-    const project = await Project.findOne({ _id: req.params.id, userId: req.user.userId }).lean();
-    if (!project) {
+    if (!req.params.id || req.params.id === 'undefined') {
+      return res.status(400).json({ error: "Invalid project ID" });
+    }
+    let projectDoc = await Project.findOne({ _id: req.params.id, userId: req.user.userId });
+    if (!projectDoc) {
       return res.status(404).json({ error: "Project not found" });
     }
 
+    let saveRequired = false;
+    if (!projectDoc.analytics) {
+      projectDoc.analytics = {};
+    }
+    
+    if (!projectDoc.analytics.trackingId) {
+      projectDoc.analytics.trackingId = generateProjectToken(projectDoc._id.toString());
+      saveRequired = true;
+    }
+
+    if (!projectDoc.analytics.rumWriteKey) {
+      projectDoc.analytics.rumWriteKey = `trc_rum_${crypto.randomBytes(16).toString('hex')}`;
+      saveRequired = true;
+    }
+
+    if (saveRequired) {
+      await projectDoc.save();
+      try {
+        const { syncProjectToPostgres } = await import('../utils/postgresSync.js');
+        await syncProjectToPostgres(projectDoc);
+      } catch (err) {
+        console.error("Failed to sync project to Postgres during analytics init:", err.message);
+      }
+    }
+
+    const project = projectDoc.toObject();
     const Deployment = (await import('../models/Deployment.js')).default;
     const latestDeployment = await Deployment.findOne({ 
       projectId: project._id,
@@ -243,12 +303,23 @@ export const getProject = async (req, res) => {
 
     // Decrypt values for the frontend as per user request
     if (project.configuration?.envVariables) {
-      const safeEnv = (envs) => envs?.map(env => ({
-        key: env.key,
-        hasValue: !!env.valueEncrypted,
-        value: env.valueEncrypted ? decryptSecret(env.valueEncrypted) : "",
-        isSecret: env.isSecret
-      })) || [];
+      const safeEnv = (envs) => envs?.map(env => {
+        let val = "";
+        if (env.valueEncrypted) {
+          try {
+            val = decryptSecret(env.valueEncrypted);
+          } catch (e) {
+            console.error(`Failed to decrypt env var ${env.key}:`, e.message);
+            val = "error_decrypting";
+          }
+        }
+        return {
+          key: env.key,
+          hasValue: !!env.valueEncrypted,
+          value: val,
+          isSecret: env.isSecret
+        };
+      }) || [];
 
       project.configuration.envVariables = {
         frontend: safeEnv(project.configuration.envVariables.frontend),
@@ -301,7 +372,7 @@ export const disconnectProject = async (req, res) => {
     try {
       // In a real microservice arch, the server would hit the ingestor over HTTP to stop the poller.
       // We will leave this comment as an integration point, but if they are the same process, we'd import it.
-      await axios.delete(`${process.env.INGESTOR_URL || 'http://localhost:3002'}/internal/pollers/render/${projectId}`).catch(()=> {});
+      await axios.delete(`${process.env.INGESTOR_API_URL || 'http://localhost:4317'}/internal/pollers/render/${projectId}`).catch(()=> {});
     } catch(err) {}
 
     await Project.findByIdAndDelete(projectId);
@@ -353,9 +424,30 @@ export const updateProjectConfig = async (req, res) => {
       };
     }
 
-    project.configuration = configuration;
+    // --- Security: Only allow user-editable fields to be updated ---
+    // System-managed provider IDs (vercelProjectId, renderServiceId, railwayProjectId)
+    // MUST NOT be overwritten by user input. An attacker could otherwise set their
+    // project's IDs to those belonging to another user, gaining access to that
+    // user's provider infrastructure.
+    const USER_EDITABLE_CONFIG_FIELDS = [
+      'frontendPlatform', 'backendPlatform', 'databasePlatform', 'storagePlatform',
+      'frontendRoot', 'backendRoot',
+      'frontendBuildCommand', 'backendBuildCommand', 'backendStartCommand',
+      'installCommand', 'outputDirectory',
+    ];
+
+    for (const field of USER_EDITABLE_CONFIG_FIELDS) {
+      if (configuration[field] !== undefined) {
+        project.configuration[field] = configuration[field];
+      }
+    }
+
+    // Env variables are the only nested object the user controls
+    if (configuration.envVariables !== undefined) {
+      project.configuration.envVariables = configuration.envVariables;
+    }
+
     project.status = 'configured';
-    
     await project.save();
 
     res.json({ success: true, message: "Configuration saved successfully" });
@@ -364,21 +456,6 @@ export const updateProjectConfig = async (req, res) => {
     res.status(500).json({ error: "Failed to save configuration" });
   }
 };
-
-import crypto from "crypto";
-import jwt from "jsonwebtoken";
-
-function generateProjectToken(projectId) {
-  if (!process.env.INGESTOR_JWT_SECRET) {
-    console.warn("WARNING: INGESTOR_JWT_SECRET not set, falling back to secure random hex");
-    return `da_${crypto.randomBytes(16).toString("hex")}`;
-  }
-  return jwt.sign(
-    { projectId, type: 'ingestor', iat: Math.floor(Date.now() / 1000) },
-    process.env.INGESTOR_JWT_SECRET,
-    { expiresIn: '90d' }
-  );
-}
 
 export const enableAnalytics = async (req, res) => {
   try {
@@ -406,6 +483,13 @@ export const enableAnalytics = async (req, res) => {
     }
 
     await project.save();
+
+    try {
+      const { syncProjectToPostgres } = await import('../utils/postgresSync.js');
+      await syncProjectToPostgres(project);
+    } catch (err) {
+      console.error("Failed to sync project to Postgres during analytics enable:", err.message);
+    }
 
     res.json({
       success: true,
@@ -534,20 +618,11 @@ export const getAnalyticsSummary = async (req, res) => {
 
     const [
       pageViews,
-      visitorsResult,
       bounceResult,
       timeseries,
-      topPages,
-      topReferrers,
-      topHostnames,
-      topCountries,
-      topDevices,
-      topBrowsers,
-      topOS
+      topListsResult
     ] = await Promise.all([
       AnalyticsEvent.countDocuments(baseMatch),
-      
-      AnalyticsEvent.distinct("visitorHash", baseMatch),
       
       AnalyticsEvent.aggregate([
         { $match: baseMatch },
@@ -570,59 +645,61 @@ export const getAnalyticsSummary = async (req, res) => {
 
       AnalyticsEvent.aggregate([
         { $match: baseMatch },
-        { $group: { _id: "$path", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      AnalyticsEvent.aggregate([
-        { $match: { ...baseMatch, referrer: { $ne: null, $ne: "" } } },
-        { $group: { _id: "$referrer", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      AnalyticsEvent.aggregate([
-        { $match: { ...baseMatch, hostname: { $ne: null, $ne: "" } } },
-        { $group: { _id: "$hostname", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      AnalyticsEvent.aggregate([
-        { $match: { ...baseMatch, country: { $ne: null, $ne: "" } } },
-        { $group: { _id: "$country", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      AnalyticsEvent.aggregate([
-        { $match: { ...baseMatch, device: { $ne: null, $ne: "" } } },
-        { $group: { _id: "$device", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      AnalyticsEvent.aggregate([
-        { $match: { ...baseMatch, browser: { $ne: null, $ne: "" } } },
-        { $group: { _id: "$browser", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      AnalyticsEvent.aggregate([
-        { $match: { ...baseMatch, os: { $ne: null, $ne: "" } } },
-        { $group: { _id: "$os", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
+        {
+          $facet: {
+            topPages: [
+              { $group: { _id: "$path", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ],
+            topReferrers: [
+              { $match: { referrer: { $ne: null, $ne: "" } } },
+              { $group: { _id: "$referrer", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ],
+            topHostnames: [
+              { $match: { hostname: { $ne: null, $ne: "" } } },
+              { $group: { _id: "$hostname", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ],
+            topCountries: [
+              { $match: { country: { $ne: null, $ne: "" } } },
+              { $group: { _id: "$country", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ],
+            topDevices: [
+              { $match: { device: { $ne: null, $ne: "" } } },
+              { $group: { _id: "$device", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ],
+            topBrowsers: [
+              { $match: { browser: { $ne: null, $ne: "" } } },
+              { $group: { _id: "$browser", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ],
+            topOS: [
+              { $match: { os: { $ne: null, $ne: "" } } },
+              { $group: { _id: "$os", count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+              { $limit: 10 }
+            ]
+          }
+        }
       ])
     ]);
 
-    const visitors = visitorsResult.length;
+    const visitors = bounceResult.length > 0 ? bounceResult[0].totalVisitors : 0;
     let bounceRate = 0;
     if (bounceResult.length > 0 && bounceResult[0].totalVisitors > 0) {
       bounceRate = Math.round((bounceResult[0].bouncedVisitors / bounceResult[0].totalVisitors) * 100);
     }
+    
+    const { topPages, topReferrers, topHostnames, topCountries, topDevices, topBrowsers, topOS } = topListsResult[0] || {};
 
     res.json({
       success: true,
@@ -763,7 +840,28 @@ export const getAiUsage = async (req, res) => {
     
     query.createdAt = { $gte: startDate };
 
-    const usages = await AiUsage.find(query).sort({ createdAt: -1 }).populate('projectId', 'repoName repoFullName');
+    // 1. Offload chart data to native MongoDB aggregation
+    const aggPipeline = [
+      { $match: query },
+      { 
+        $group: {
+          _id: {
+            $dateToString: { 
+              format: isHourly ? "%Y-%m-%dT%H:00:00.000Z" : "%Y-%m-%d", 
+              date: "$createdAt" 
+            }
+          },
+          count: { $sum: 1 }
+        }
+      }
+    ];
+
+    const [statusCounts, recentActivity] = await Promise.all([
+      AiUsage.aggregate(aggPipeline),
+      feature === 'total' 
+        ? AiUsage.find(query).sort({ createdAt: -1 }).limit(10).populate('projectId', 'repoName repoFullName') 
+        : Promise.resolve([])
+    ]);
     
     // Calculate chart data map
     const chartDataMap = {};
@@ -788,28 +886,16 @@ export const getAiUsage = async (req, res) => {
 
     let totalUsage = 0;
 
-    usages.forEach(u => {
-      totalUsage += 1;
-      
-      let key = "";
-      if (isHourly) {
-        const d = new Date(u.createdAt);
-        d.setMinutes(0, 0, 0);
-        key = d.toISOString();
-      } else {
-        key = u.createdAt.toISOString().split('T')[0];
-      }
-
+    for (const sc of statusCounts) {
+      totalUsage += sc.count;
+      const key = sc._id;
       if (chartDataMap[key] !== undefined) {
-        chartDataMap[key].value += 1;
+        chartDataMap[key].value += sc.count;
       }
-    });
+    }
 
     const chartData = Object.values(chartDataMap);
     
-    // We only need recentActivity for the 'total' feature to avoid duplicate logs in the UI
-    const recentActivity = feature === 'total' ? usages.slice(0, 10) : [];
-
     return res.json({ success: true, total: totalUsage, chartData, recentActivity });
   } catch (error) {
     console.error("Get AI Usage Error:", error);

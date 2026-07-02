@@ -87,7 +87,12 @@ export const connectProvider = async (req, res) => {
   }
 
   const state = crypto.randomBytes(16).toString("hex");
-  const returnTo = req.query.returnTo || `${process.env.FRONTEND_URL}/dashboard`;
+  let returnTo = req.query.returnTo || `${process.env.FRONTEND_URL}/dashboard`;
+  
+  // Prevent Open Redirect: Ensure returnTo begins with the configured FRONTEND_URL
+  if (!returnTo.startsWith(process.env.FRONTEND_URL)) {
+    returnTo = `${process.env.FRONTEND_URL}/dashboard`;
+  }
   
   res.cookie(`oauth_state_${provider}`, state, { httpOnly: true, maxAge: 10 * 60 * 1000 });
   res.cookie(`oauth_return_${provider}`, returnTo, { httpOnly: true, maxAge: 10 * 60 * 1000 });
@@ -102,8 +107,10 @@ export const callbackProvider = async (req, res) => {
   const { code, state, error, error_description } = req.query;
   const config = getOauthProviders()[provider];
 
-  const storedState = req.cookies[`oauth_state_${provider}`];
-  const returnTo = req.cookies[`oauth_return_${provider}`] || process.env.FRONTEND_URL;
+  let returnTo = req.cookies[`oauth_return_${provider}`] || process.env.FRONTEND_URL;
+  if (!returnTo.startsWith(process.env.FRONTEND_URL)) {
+    returnTo = process.env.FRONTEND_URL;
+  }
 
   // Clear cookies
   res.clearCookie(`oauth_state_${provider}`);

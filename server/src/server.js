@@ -1,11 +1,11 @@
+import 'dotenv/config'; // MUST BE FIRST
 import app from "./app.js";
 import connect from "./connect.js";
-import dotenv from "dotenv";
 import { initCron } from "./cron.js";
 import http from "http";
 import { Server } from "socket.io";
-
-dotenv.config({ override: true });
+import jwt from "jsonwebtoken";
+import HumanSupportCase from "./models/HumanSupportCase.js";
 
 // ── Startup environment guard ────────────────────────────────────────────────
 const REQUIRED_ENV = ["JWT_SECRET", "MONGO_URI"];
@@ -38,12 +38,41 @@ connect(process.env.MONGO_URI)
         // Make io accessible in routes via req.app.get('io')
         app.set('io', io);
 
+        // WebSocket Authentication Middleware
+        io.use((socket, next) => {
+          try {
+            // Check auth token (from handshake auth or query)
+            const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+            if (!token) return next(new Error("Authentication error: No token provided"));
+
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            socket.user = decoded;
+            next();
+          } catch (err) {
+            next(new Error("Authentication error: Invalid token"));
+          }
+        });
+
         io.on("connection", (socket) => {
-          console.log(`[Socket] Client connected: ${socket.id}`);
+          console.log(`[Socket] Client connected: ${socket.id} (User: ${socket.user?.userId})`);
           
-          socket.on("join_case", (caseId) => {
-            socket.join(caseId);
-            console.log(`[Socket] ${socket.id} joined case room ${caseId}`);
+          socket.on("join_case", async (caseId) => {
+            try {
+              if (!socket.user) return;
+              
+              // Prevent IDOR: Check if user owns the case or is admin
+              const supportCase = await HumanSupportCase.findById(caseId).select('userId');
+              if (!supportCase) return;
+
+              if (socket.user.role === 'admin' || supportCase.userId.toString() === socket.user.userId) {
+                socket.join(caseId);
+                console.log(`[Socket] User ${socket.user.userId} joined case room ${caseId}`);
+              } else {
+                console.warn(`[Socket] User ${socket.user.userId} attempted to join unauthorized case room ${caseId}`);
+              }
+            } catch (err) {
+              console.error("[Socket] Error joining case:", err.message);
+            }
           });
 
           socket.on("disconnect", () => {

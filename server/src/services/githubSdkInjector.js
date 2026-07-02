@@ -7,7 +7,7 @@ export async function injectSdkViaGithub(project) {
     const user = await User.findById(project.userId);
     if (!user || !user.githubAccessTokenEncrypted) {
       console.log('Skipping SDK injection: No GitHub token available');
-      return;
+      return { success: false, error: 'No GitHub token available' };
     }
 
     const token = decryptSecret(user.githubAccessTokenEncrypted);
@@ -25,20 +25,20 @@ export async function injectSdkViaGithub(project) {
     const pkgRes = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/contents/package.json?ref=${selectedBranch}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    if (!pkgRes.ok) return; // Project might not be Node.js, skip
+    if (!pkgRes.ok) return { success: false, error: 'Project does not appear to be Node.js (no package.json found)' };
     const pkgData = await pkgRes.json();
     
     let pkgJson;
     try {
       pkgJson = JSON.parse(Buffer.from(pkgData.content, 'base64').toString('utf8'));
     } catch (e) {
-      return;
+      return { success: false, error: 'Failed to parse package.json' };
     }
 
     // Check if already injected
     if (pkgJson.dependencies && pkgJson.dependencies['@swapnil454/tracepilot']) {
       console.log('SDK already injected');
-      return;
+      return { success: false, error: 'SDK is already installed in package.json' };
     }
 
     pkgJson.dependencies = pkgJson.dependencies || {};
@@ -90,15 +90,45 @@ export async function injectSdkViaGithub(project) {
     });
     const commitData = await commitRes.json();
 
-    // 5. Update Ref
-    await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/git/refs/heads/${selectedBranch}`, {
-      method: 'PATCH',
+    // 5. Create new branch ref
+    const newBranchName = `deployai/setup-observability-${Date.now()}`;
+    const refRes = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/git/refs`, {
+      method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sha: commitData.sha })
+      body: JSON.stringify({
+        ref: `refs/heads/${newBranchName}`,
+        sha: commitData.sha
+      })
     });
+    
+    if (!refRes.ok) {
+      const errTxt = await refRes.text();
+      throw new Error(`Failed to create branch ref: ${errTxt}`);
+    }
 
-    console.log('Successfully injected SDK via GitHub');
+    // 6. Create Pull Request
+    const prRes = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/pulls`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Configure Web Analytics (DeployAI)',
+        body: 'This PR automatically injects the `@swapnil454/tracepilot` SDK to enable Web Analytics and Observability for your project.',
+        head: newBranchName,
+        base: selectedBranch
+      })
+    });
+    
+    if (!prRes.ok) {
+      const errTxt = await prRes.text();
+      throw new Error(`Failed to create PR: ${errTxt}`);
+    }
+    
+    const prData = await prRes.json();
+    console.log('Successfully created PR via GitHub:', prData.html_url);
+    
+    return { success: true, prUrl: prData.html_url };
   } catch (error) {
     console.error('Failed to inject SDK via GitHub:', error);
+    return { success: false, error: error.message };
   }
 }

@@ -34,7 +34,7 @@ export async function aggregateBilling() {
         format: 'JSONEachRow'
       });
 
-      const data = await chRes.json<any[]>();
+      const data = await chRes.json<any>();
       const totalSpans = parseInt((data[0] as any)?.total_spans || '0', 10);
 
       if (totalSpans > 0) {
@@ -44,7 +44,7 @@ export async function aggregateBilling() {
         // 3. Push to Stripe Metered Billing API (V2 Meter Events)
         // Ensure idempotency for the given day to prevent double-billing
         const todayStr = new Date().toISOString().split('T')[0];
-        const idempotencyKey = \`spans_\${project.id}_\${todayStr}\`;
+        const idempotencyKey = `spans_${project.id}_${todayStr}`;
 
         await (stripe.billing.meterEvents as any).create({
           event_name: 'spans_ingested',

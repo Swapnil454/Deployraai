@@ -16,7 +16,8 @@ export const railwayGraphQL = async (token, query, variables = {}) => {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`
     },
-    body: JSON.stringify({ query, variables })
+    body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(15000)
   });
 
   const text = await response.text();

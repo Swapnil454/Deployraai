@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Link2, Loader2, ExternalLink, Copy, Check, AlertCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Link2, Loader2, ExternalLink, Copy, Check, AlertCircle, Server } from "lucide-react";
 
 export default function DeployPage() {
   const router = useRouter();
@@ -411,23 +411,37 @@ export default function DeployPage() {
         </div>
 
         {/* Monitoring Section */}
-        {monitors && monitors.length > 0 && (
-          <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+        <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
             <div className="flex items-center justify-between border-b border-zinc-800 bg-black/40 px-6 py-4">
               <div>
                 <h3 className="text-sm font-semibold text-white">Monitoring</h3>
                 <p className="text-xs text-zinc-500 mt-1">Status of your deployed services.</p>
               </div>
-              <button
-                onClick={() => router.push(`/dashboard/projects/${projectId}/monitoring`)}
-                className="flex items-center gap-2 rounded bg-zinc-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 transition-colors"
-              >
-                View Dashboard <ExternalLink className="h-3 w-3" />
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => router.push(`/dashboard/projects/${projectId}/infrastructure`)}
+                  className="flex items-center gap-2 rounded bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 transition-colors"
+                >
+                  <Server className="h-3 w-3" /> Infra Metrics
+                </button>
+                <button
+                  onClick={() => router.push(`/dashboard/projects/${projectId}/logs/settings`)}
+                  className="flex items-center gap-2 rounded bg-teal-500/10 px-3 py-1.5 text-xs font-medium text-teal-400 border border-teal-500/20 hover:bg-teal-500/20 transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Log Rules
+                </button>
+                <button
+                  onClick={() => router.push(`/dashboard/projects/${projectId}/monitoring`)}
+                  className="flex items-center gap-2 rounded bg-zinc-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 transition-colors"
+                >
+                  View Dashboard <ExternalLink className="h-3 w-3" />
+                </button>
+              </div>
             </div>
             
             <div className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {monitors && monitors.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {monitors.map((monitor: any, index: number) => (
                   <div key={index} className="rounded-lg border border-zinc-800 bg-black/50 p-4 relative">
                     <div className="flex justify-between items-start mb-2">
@@ -465,9 +479,13 @@ export default function DeployPage() {
                   </div>
                 ))}
               </div>
+            ) : (
+              <div className="text-center py-6 text-sm text-zinc-500 border border-dashed border-zinc-800 rounded-lg">
+                No active services deployed yet. Deploy your project to start monitoring uptime.
+              </div>
+            )}
             </div>
           </div>
-        )}
 
         {/* Instant Loading Card while POST request is running */}
         {deploying && !activeDeploymentId && (

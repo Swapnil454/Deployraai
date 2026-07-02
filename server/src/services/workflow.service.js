@@ -107,7 +107,7 @@ export const triggerWorkflow = async (projectId, name, payload, existingRunId = 
           { _id: run._id }, 
           { 
             $set: { [`ledger.${stepName}`]: run.ledger[stepName] },
-            $push: { events: { stepName, ...run.ledger[stepName] } }
+            $push: { events: { $each: [{ stepName, ...run.ledger[stepName] }], $slice: -1000 } }
           }
         );
         return result;
@@ -134,7 +134,7 @@ export const triggerWorkflow = async (projectId, name, payload, existingRunId = 
             { _id: run._id }, 
             { 
               $set: { [`ledger.${stepName}`]: run.ledger[stepName] },
-              $push: { events: { stepName, ...run.ledger[stepName] } }
+              $push: { events: { $each: [{ stepName, ...run.ledger[stepName] }], $slice: -1000 } }
             }
           );
           
@@ -154,7 +154,7 @@ export const triggerWorkflow = async (projectId, name, payload, existingRunId = 
             { _id: run._id }, 
             { 
               $set: { [`ledger.${stepName}`]: run.ledger[stepName] },
-              $push: { events: { stepName, ...run.ledger[stepName] } }
+              $push: { events: { $each: [{ stepName, ...run.ledger[stepName] }], $slice: -1000 } }
             }
           );
           throw err; // Stop execution, will be caught by outer try-catch
@@ -178,7 +178,7 @@ export const triggerWorkflow = async (projectId, name, payload, existingRunId = 
           { _id: run._id },
           { 
             $set: { [`ledger.${stepName}`]: run.ledger[stepName] },
-            $push: { events: { stepName, ...run.ledger[stepName] } }
+            $push: { events: { $each: [{ stepName, ...run.ledger[stepName] }], $slice: -1000 } }
           }
         );
         return;
@@ -201,7 +201,7 @@ export const triggerWorkflow = async (projectId, name, payload, existingRunId = 
           status: 'sleeping',
           resumeAt
         },
-        $push: { events: { stepName, ...run.ledger[stepName] } }
+        $push: { events: { $each: [{ stepName, ...run.ledger[stepName] }], $slice: -1000 } }
       }
     );
     console.log(`[Workflow:${run._id}] Sleeping at ${stepName} until ${resumeAt.toISOString()}`);

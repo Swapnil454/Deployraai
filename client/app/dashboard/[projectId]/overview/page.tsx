@@ -22,22 +22,27 @@ export default function OverviewPage() {
     { i: 'custom-1', x: 0, y: 0, w: 4, h: 6 },
     { i: 'custom-2', x: 4, y: 0, w: 8, h: 6 }
   ]);
-  const customWidgetsConfig = {
-    'custom-1': {
-      title: "Errors by Route",
-      dimensions: ["http_route"],
-      metrics: ["count()"],
-      chartType: "bar" as const,
-      timeRange: { from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), to: new Date().toISOString() }
-    },
-    'custom-2': {
-      title: "Average Latency",
-      dimensions: ["http_route"],
-      metrics: ["avg(duration_ms)"],
-      chartType: "line" as const,
-      timeRange: { from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), to: new Date().toISOString() }
-    }
-  };
+
+  const customWidgetsConfig = React.useMemo(() => {
+    const to = new Date().toISOString();
+    const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    return {
+      'custom-1': {
+        title: "Errors by Route",
+        dimensions: ["http_route"],
+        metrics: ["count()"],
+        chartType: "bar" as const,
+        timeRange: { from, to }
+      },
+      'custom-2': {
+        title: "Average Latency",
+        dimensions: ["http_route"],
+        metrics: ["avg(duration_ms)"],
+        chartType: "line" as const,
+        timeRange: { from, to }
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const fetchMetrics = async () => {

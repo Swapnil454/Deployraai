@@ -6,6 +6,13 @@ const EnvVariableSchema = new mongoose.Schema({
   isSecret: { type: Boolean, default: true }
 }, { _id: false });
 
+const LogPipelineSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  patternType: { type: String, enum: ['regex', 'grok'], required: true },
+  pattern: { type: String, required: true },
+  active: { type: Boolean, default: true }
+});
+
 const ProjectSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   repoProvider: { type: String, default: 'github' },
@@ -45,8 +52,19 @@ const ProjectSchema = new mongoose.Schema({
       unique: true,
       sparse: true,
     },
+    rumWriteKey: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    verified: {
+      type: Boolean,
+      default: false,
+    },
     enabledAt: Date,
   },
+
+  logPipelines: [LogPipelineSchema],
 
   configuration: {
     frontendPlatform: { type: String, enum: ['vercel', 'netlify', 'none'], default: 'none' },
@@ -75,5 +93,7 @@ const ProjectSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+ProjectSchema.index({ userId: 1, createdAt: -1 });
 
 export default mongoose.model("Project", ProjectSchema);

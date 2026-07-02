@@ -1,11 +1,13 @@
 import { FastifyPluginAsync } from 'fastify';
 import { verifyWebhookSecret } from '../middleware/webhook.js';
+import { checkUsageCap } from '../middleware/usage-check.js';
 import { logWriter } from '../writers/logs.js';
+import { parseMessage } from '../services/logParser.js';
 
 export const logsRouter: FastifyPluginAsync = async (app) => {
   // Vercel log drain
   app.post('/vercel/:projectId', {
-    preHandler: verifyWebhookSecret('vercel'),
+    preHandler: [verifyWebhookSecret('vercel'), checkUsageCap],
   }, async (req, reply) => {
     const { projectId } = req.params as { projectId: string };
     const lines = req.body as any[];
@@ -22,13 +24,21 @@ export const logsRouter: FastifyPluginAsync = async (app) => {
       raw: line,
     }));
 
+    // Apply custom log parsing pipelines concurrently
+    await Promise.all(logs.map(async (log) => {
+      const attributes = await parseMessage(log.projectId, log.message);
+      if (attributes) {
+        (log as any).attributes = attributes;
+      }
+    }));
+
     logWriter.write(logs).catch(() => {});
     reply.status(202).send();
   });
 
   // Netlify log drain
   app.post('/netlify/:projectId', {
-    preHandler: verifyWebhookSecret('netlify'),
+    preHandler: [verifyWebhookSecret('netlify'), checkUsageCap],
   }, async (req, reply) => {
     const { projectId } = req.params as { projectId: string };
     const payload = req.body as any;
@@ -40,7 +50,7 @@ export const logsRouter: FastifyPluginAsync = async (app) => {
 
   // Railway log drain
   app.post('/railway/:projectId', {
-    preHandler: verifyRailwayWebhook,
+    preHandler: [verifyRailwayWebhook, checkUsageCap],
   }, async (req, reply) => {
     const { projectId } = req.params as { projectId: string };
     const payload = req.body as any[];
@@ -55,6 +65,14 @@ export const logsRouter: FastifyPluginAsync = async (app) => {
       region: line.attributes?.region ?? 'unknown',
       deployId: line.attributes?.deploymentId ?? 'unknown',
       raw: line,
+    }));
+
+    // Apply custom log parsing pipelines concurrently
+    await Promise.all(logs.map(async (log) => {
+      const attributes = await parseMessage(log.projectId, log.message);
+      if (attributes) {
+        (log as any).attributes = attributes;
+      }
     }));
 
     logWriter.write(logs).catch(() => {});

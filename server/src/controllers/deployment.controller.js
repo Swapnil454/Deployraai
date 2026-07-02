@@ -4,6 +4,7 @@ import DomainSetup from "../models/DomainSetup.js";
 import Project from "../models/Project.js";
 import ConnectedAccount from "../models/ConnectedAccount.js";
 import { decryptSecret, encryptSecret } from "../utils/encryption.js";
+import { escapeRegex } from "../utils/regex.js";
 import User from "../models/User.js";
 import { captureDeploymentScreenshot } from "../services/screenshot.service.js";
 import { triggerWorkflow } from "../services/workflow.service.js";
@@ -398,8 +399,11 @@ export const getUserDeployments = async (req, res) => {
   try {
     const { type, projectId, environment, branch, status, days, startDate, endDate, author } = req.query;
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 0; // 0 means no limit if not specified to maintain backward compatibility, or we can default to 20 if passed. Wait, if I default to 20, it breaks other pages that expect all deployments.
-    // Actually, I'll only apply pagination if limit is provided.
+    
+    // Enforce strict pagination limits to prevent memory exhaustion (OOM)
+    let limit = parseInt(req.query.limit);
+    if (isNaN(limit) || limit <= 0) limit = 50;
+    if (limit > 100) limit = 100;
     
     let query = { userId: req.user.userId };
 
@@ -432,10 +436,11 @@ export const getUserDeployments = async (req, res) => {
     }
 
     if (author && author !== 'all') {
+      const safeAuthor = escapeRegex(author);
       query.$and.push({
         $or: [
-          { 'source.repoOwner': { $regex: new RegExp(`^${author}$`, 'i') } },
-          { 'source.repoFullName': { $regex: new RegExp(`^${author}/`, 'i') } },
+          { 'source.repoOwner': { $regex: new RegExp(`^${safeAuthor}$`, 'i') } },
+          { 'source.repoFullName': { $regex: new RegExp(`^${safeAuthor}/`, 'i') } },
         ]
       });
     }
@@ -498,56 +503,70 @@ export const getUserDeployments = async (req, res) => {
     }
 
     // Enrich deployments with real commit messages from GitHub
-    const enriched = await Promise.all(deployments.map(async (dep) => {
-      const obj = dep.toObject();
+    // Cap enrichment to 50 max to prevent API rate limits and MongoDB connection exhaustion
+    const MAX_ENRICH = 50;
+    const CHUNK_SIZE = 5;
+    
+    const toEnrich = deployments.slice(0, MAX_ENRICH);
+    const others = deployments.slice(MAX_ENRICH).map(dep => dep.toObject());
+    const enrichedPart = [];
 
-      // Skip if we already have the commit message stored
-      if (obj.source?.commitMessage) return obj;
+    for (let i = 0; i < toEnrich.length; i += CHUNK_SIZE) {
+      const chunk = toEnrich.slice(i, i + CHUNK_SIZE);
+      const enrichedChunk = await Promise.all(chunk.map(async (dep) => {
+        const obj = dep.toObject();
 
-      const repoFullName = obj.source?.repoFullName || obj.projectId?.repoFullName;
-      if (!repoFullName || !githubToken) return obj;
+        // Skip if we already have the commit message stored
+        if (obj.source?.commitMessage) return obj;
 
-      try {
-        let sha = obj.source?.commitSha;
-        let commitMessage = null;
+        const repoFullName = obj.source?.repoFullName || obj.projectId?.repoFullName;
+        if (!repoFullName || !githubToken) return obj;
 
-        if (sha) {
-          // We have a SHA — look up that specific commit
-          const ghRes = await fetch(`https://api.github.com/repos/${repoFullName}/commits/${sha}`, {
-            headers: { Authorization: `Bearer ${githubToken}`, Accept: 'application/vnd.github.v3+json' }
-          });
-          if (ghRes.ok) {
-            const data = await ghRes.json();
-            commitMessage = data.commit?.message?.split('\n')[0] || null;
+        try {
+          let sha = obj.source?.commitSha;
+          let commitMessage = null;
+
+          if (sha) {
+            // We have a SHA — look up that specific commit
+            const ghRes = await fetch(`https://api.github.com/repos/${repoFullName}/commits/${sha}`, {
+              headers: { Authorization: `Bearer ${githubToken}`, Accept: 'application/vnd.github.v3+json' }
+            });
+            if (ghRes.ok) {
+              const data = await ghRes.json();
+              commitMessage = data.commit?.message?.split('\n')[0] || null;
+            }
+          } else {
+            // No SHA stored — fetch the latest commit from the deployment's branch
+            const branch = obj.source?.branch || 'main';
+            const ghRes = await fetch(`https://api.github.com/repos/${repoFullName}/commits/${branch}`, {
+              headers: { Authorization: `Bearer ${githubToken}`, Accept: 'application/vnd.github.v3+json' }
+            });
+            if (ghRes.ok) {
+              const data = await ghRes.json();
+              sha = data.sha || null;
+              commitMessage = data.commit?.message?.split('\n')[0] || null;
+            }
           }
-        } else {
-          // No SHA stored — fetch the latest commit from the deployment's branch
-          const branch = obj.source?.branch || 'main';
-          const ghRes = await fetch(`https://api.github.com/repos/${repoFullName}/commits/${branch}`, {
-            headers: { Authorization: `Bearer ${githubToken}`, Accept: 'application/vnd.github.v3+json' }
-          });
-          if (ghRes.ok) {
-            const data = await ghRes.json();
-            sha = data.sha || null;
-            commitMessage = data.commit?.message?.split('\n')[0] || null;
+
+          if (commitMessage) {
+            obj.source.commitMessage = commitMessage;
+            if (sha) obj.source.commitSha = sha;
+            // Persist so we don't hit GitHub again on future requests
+            await Deployment.findByIdAndUpdate(dep._id, {
+              'source.commitMessage': commitMessage,
+              ...(sha && { 'source.commitSha': sha })
+            });
           }
+        } catch (ghErr) {
+          console.warn(`Could not fetch commit for ${repoFullName}:`, ghErr.message);
         }
 
-        if (commitMessage) {
-          obj.source.commitMessage = commitMessage;
-          if (sha) obj.source.commitSha = sha;
-          // Persist so we don't hit GitHub again on future requests
-          await Deployment.findByIdAndUpdate(dep._id, {
-            'source.commitMessage': commitMessage,
-            ...(sha && { 'source.commitSha': sha })
-          });
-        }
-      } catch (ghErr) {
-        console.warn(`Could not fetch commit for ${repoFullName}:`, ghErr.message);
-      }
+        return obj;
+      }));
+      enrichedPart.push(...enrichedChunk);
+    }
 
-      return obj;
-    }));
+    const enriched = [...enrichedPart, ...others];
 
     // Find the latest production deployments by type for each project to calculate isLatestProd accurately
     const projectIds = [...new Set(enriched.map(d => d.projectId?._id?.toString()).filter(Boolean))];
@@ -663,7 +682,7 @@ export const getProjectDeployments = async (req, res) => {
         { orchestrationGroupId: { $exists: false } },
         { orchestrationGroupId: null }
       ]
-    }).sort({ createdAt: -1 });
+    }).sort({ createdAt: -1 }).limit(100);
     res.json(deployments);
   } catch (error) {
     console.error("Get project deployments error:", error);

@@ -13,7 +13,9 @@ interface CustomQueryRequest {
 export const customQueriesRouter: FastifyPluginAsync = async (app) => {
 
   app.post('/metrics/query', { preHandler: requireAuth }, async (req, reply) => {
-    const { projectId, dimensions, metrics, timeRange, filters } = req.body as CustomQueryRequest;
+    const { dimensions, metrics, timeRange, filters } = req.body as CustomQueryRequest;
+    const projectId = (req as any).user?.projectId;
+    if (!projectId) return reply.status(400).send({ error: 'Missing projectId' });
     
     // Safety check - we must constrain what users can query directly to prevent SQL injection
     // In production, we should validate 'dimensions' and 'metrics' against an allowlist.
@@ -59,13 +61,17 @@ export const customQueriesRouter: FastifyPluginAsync = async (app) => {
     
     queryStr += ` ORDER BY m0 DESC LIMIT 50`;
 
-    const res = await clickhouse.query({
-      query: queryStr,
-      query_params: queryParams,
-      format: 'JSONEachRow'
-    });
-
-    const data = await res.json<any[]>();
-    return data;
+    try {
+      const res = await clickhouse.query({
+        query: queryStr,
+        query_params: queryParams,
+        format: 'JSONEachRow'
+      });
+      const data = await res.json<any>();
+      return data;
+    } catch (err: any) {
+      req.log.error({ err }, 'Custom query failed');
+      return reply.status(500).send({ error: 'Query execution failed', detail: err.message });
+    }
   });
 };

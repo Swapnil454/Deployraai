@@ -77,7 +77,7 @@ export default function SLOWidget({ projectId }: { projectId: string }) {
             <div key={slo.id} className="border border-zinc-800 rounded-lg p-4 bg-zinc-900/30">
               <div className="flex justify-between items-center mb-2">
                 <span className="font-medium capitalize text-sm">{slo.metric.replace('_', ' ')} (Last {slo.windowDays}d)</span>
-                <span className={\`text-xs px-2 py-1 rounded-full \${slo.isMet ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}\`}>
+                <span className={`text-xs px-2 py-1 rounded-full ${slo.isMet ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
                   {slo.currentPerformance}% / {slo.target}%
                 </span>
               </div>
@@ -89,8 +89,8 @@ export default function SLOWidget({ projectId }: { projectId: string }) {
                 </div>
                 <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden">
                   <div 
-                    className={\`h-full \${budgetPercent > 50 ? 'bg-emerald-500' : budgetPercent > 20 ? 'bg-yellow-500' : 'bg-red-500'}\`} 
-                    style={{ width: \`\${budgetPercent}%\` }}
+                    className={`h-full ${budgetPercent > 50 ? 'bg-emerald-500' : budgetPercent > 20 ? 'bg-yellow-500' : 'bg-red-500'}`} 
+                    style={{ width: `${budgetPercent}%` }}
                   ></div>
                 </div>
                 {budgetPercent <= 20 && (

@@ -17,6 +17,8 @@ export const CustomWidget: React.FC<CustomWidgetProps> = ({ projectId, config })
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const configString = JSON.stringify(config);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -48,7 +50,7 @@ export const CustomWidget: React.FC<CustomWidgetProps> = ({ projectId, config })
       }
     };
     fetchData();
-  }, [projectId, config]);
+  }, [projectId, configString]);
 
   if (loading) {
     return (

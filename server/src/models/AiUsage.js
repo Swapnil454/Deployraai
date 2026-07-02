@@ -25,4 +25,6 @@ const aiUsageSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+aiUsageSchema.index({ projectId: 1, createdAt: -1 });
+
 export default mongoose.models.AiUsage || mongoose.model("AiUsage", aiUsageSchema);

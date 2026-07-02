@@ -1,3 +1,5 @@
+import os from "os";
+import fs from "fs";
 import express from "express";
 import { requireAuth } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
@@ -9,8 +11,13 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import multer from "multer";
 import { v2 as cloudinary } from "cloudinary";
 import axios from "axios";
+import { escapeRegex } from "../utils/regex.js";
+import { BoundedCache } from '../utils/BoundedCache.js';
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ 
+  dest: os.tmpdir(),
+  limits: { fileSize: 30 * 1024 * 1024 } // 30MB limit
+});
 
 const router = express.Router();
 
@@ -28,24 +35,27 @@ router.post("/upload", requireAuth, upload.single('file'), async (req, res) => {
     const isImage = req.file.mimetype.startsWith('image/');
     const resourceType = isImage ? 'image' : 'raw';
     
-    const uploadStream = cloudinary.uploader.upload_stream(
-        { folder: 'support_attachments', resource_type: resourceType },
-        (error, result) => {
-            if (error) {
-                console.error("Cloudinary upload error:", error);
-                return res.status(500).json({ error: "Upload failed" });
-            }
-            res.json({
-                url: result.secure_url,
-                type: isImage ? 'image' : 'file',
-                name: req.file.originalname
-            });
-        }
-    );
-    uploadStream.end(req.file.buffer);
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      folder: 'support_attachments',
+      resource_type: resourceType,
+      use_filename: true,
+      unique_filename: true
+    });
+
+    res.json({
+        url: result.secure_url,
+        type: isImage ? 'image' : 'file',
+        name: req.file.originalname
+    });
   } catch (err) {
-    console.error(err);
+    console.error("Cloudinary upload error:", err);
     res.status(500).json({ error: "Server upload error" });
+  } finally {
+    if (req.file && req.file.path) {
+      fs.unlink(req.file.path, (err) => {
+        if (err) console.error("Failed to delete temp file:", err);
+      });
+    }
   }
 });
 
@@ -67,9 +77,10 @@ router.get("/", requireAuth, async (req, res) => {
     let query = { userId };
     
     if (search) {
+      const safeSearch = escapeRegex(search);
       query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
+        { title: { $regex: safeSearch, $options: 'i' } },
+        { description: { $regex: safeSearch, $options: 'i' } }
       ];
     }
     
@@ -80,7 +91,7 @@ router.get("/", requireAuth, async (req, res) => {
     if (sort === 'createdAt') sortOptions = { createdAt: -1 };
     else if (sort === 'severity') sortOptions = { severity: 1, updatedAt: -1 };
     
-    const cases = await HumanSupportCase.find(query).sort(sortOptions);
+    const cases = await HumanSupportCase.find(query).select('-messages').sort(sortOptions).limit(100);
     // Make sure we inject caseType for UI consistency
     const formattedCases = cases.map(c => ({ ...c.toObject(), caseType: 'human' }));
     res.json(formattedCases);
@@ -179,6 +190,10 @@ router.post("/:id/followup", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Original case not found." });
     }
 
+    if (oldCase.userId.toString() !== userId.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Unauthorized access to this case." });
+    }
+
     if (oldCase.status !== 'closed') {
       oldCase.status = 'closed';
       oldCase.messages.push({
@@ -256,6 +271,11 @@ router.post("/:id/message", requireAuth, async (req, res) => {
     let messageRole = "user";
     if (supportCase.userId.toString() !== userId.toString() && req.user.role === 'admin') {
       messageRole = "admin";
+    }
+
+    // Prevent 16MB BSON limit crash
+    if (supportCase.messages.length >= 100) {
+      return res.status(429).json({ error: "This case has reached the maximum message limit. Please open a new case to continue." });
     }
 
     // Add user message to DB
@@ -388,7 +408,7 @@ router.post("/:id/message", requireAuth, async (req, res) => {
     // Prevents API billing abuse via rapid-fire message flooding.
     // In-memory store (upgrade to Redis for multi-instance prod).
     // ─────────────────────────────────────────────────────────────
-    if (!global._aiRateLimit) global._aiRateLimit = new Map();
+    if (!global._aiRateLimit) global._aiRateLimit = new BoundedCache(5000);
     const RATE_WINDOW_MS = 60 * 1000;
     const RATE_MAX = 10;
     const userKey = userId.toString();
@@ -399,7 +419,7 @@ router.post("/:id/message", requireAuth, async (req, res) => {
       return sendRefusal(`⏳ You're sending messages too quickly. Please wait a moment before sending another message (limit: ${RATE_MAX} per minute).`);
     }
     userRateHistory.push(nowMs);
-    global._aiRateLimit.set(userKey, userRateHistory);
+    global._aiRateLimit.set(userKey, userRateHistory, RATE_WINDOW_MS);
 
     // ─────────────────────────────────────────────────────────────
     // LAYER 5 ▸ Semantic Guard Model (AI-as-Classifier)
@@ -460,7 +480,7 @@ Reply with one word only: ALLOW or BLOCK`;
       // Image path: pre-fetch images from the current message ONCE.
       // No separate Gemini vision guard call — saves quota.
       // The system prompt instructs the main model to handle relevance.
-      if (!global._imgCache) global._imgCache = new Map();
+      if (!global._imgCache) global._imgCache = new BoundedCache(100);
       for (const att of currentAtts) {
         if (att.type === 'image' && att.url && !global._imgCache.has(att.url)) {
           try {
@@ -468,13 +488,15 @@ Reply with one word only: ALLOW or BLOCK`;
             global._imgCache.set(att.url, {
               data: Buffer.from(imgResp.data, 'binary').toString('base64'),
               mimeType: imgResp.headers['content-type'] || 'image/jpeg'
-            });
+            }, 1000 * 60 * 60); // 1 hour cache
           } catch (fetchErr) {
             console.error(`[SECURITY-L5] Pre-fetch failed for ${att.url}:`, fetchErr.message);
           }
         }
       }
     }
+
+    try {
 
     // ─────────────────────────────────────────────────────────────
     // LAYER 6 ▸ Hardened Prompt + Response Validation
@@ -688,6 +710,19 @@ When the user sends an image:
     }
 
     res.json({ reply: savedModelMessage });
+    } finally {
+      // ─────────────────────────────────────────────────────────────
+      // LAYER 7 ▸ Resource Cleanup
+      // Ensure we don't leak memory if an error was thrown or we returned early
+      // ─────────────────────────────────────────────────────────────
+      if (global._imgCache) {
+        for (const att of currentAtts) {
+          if (att.url) {
+            global._imgCache.delete(att.url);
+          }
+        }
+      }
+    }
   } catch (error) {
     console.error("AI Support Chat Error:", error);
     res.status(500).json({ error: "Failed to process chat response.", details: error.message });
@@ -758,18 +793,19 @@ router.get("/admin/cases", requireAuth, async (req, res) => {
     }
     
     if (search) {
+       const safeSearch = escapeRegex(search);
        const users = await User.find({ 
-           $or: [ { name: { $regex: search, $options: 'i' } }, { email: { $regex: search, $options: 'i' } } ] 
-       }).select('_id');
+           $or: [ { name: { $regex: safeSearch, $options: 'i' } }, { email: { $regex: safeSearch, $options: 'i' } } ] 
+       }).select('_id').limit(50);
        const userIds = users.map(u => u._id);
        
        query.$or = [
-          { title: { $regex: search, $options: 'i' } },
+          { title: { $regex: safeSearch, $options: 'i' } },
           { userId: { $in: userIds } }
        ];
     }
 
-    const cases = await HumanSupportCase.find(query).populate('userId', 'name email').sort({ updatedAt: -1 });
+    const cases = await HumanSupportCase.find(query).select('-messages').populate('userId', 'name email').sort({ updatedAt: -1 }).limit(100);
     const formattedCases = cases.map(c => ({ ...c.toObject(), caseType: 'human' }));
     res.json(formattedCases);
   } catch (error) {

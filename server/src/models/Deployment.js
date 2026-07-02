@@ -152,4 +152,10 @@ const DeploymentSchema = new mongoose.Schema({
   completedAt: { type: Date }
 }, { timestamps: true });
 
+DeploymentSchema.index({ projectId: 1, createdAt: -1 });
+DeploymentSchema.index({ userId: 1, createdAt: -1 });
+DeploymentSchema.index({ status: 1 });
+DeploymentSchema.index({ status: 1, createdAt: -1 });
+DeploymentSchema.index({ status: 1, platform: 1 });
+
 export default mongoose.model("Deployment", DeploymentSchema);

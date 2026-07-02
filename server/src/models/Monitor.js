@@ -28,6 +28,8 @@ const monitorSchema = new mongoose.Schema({
 
 // Prevent duplicate monitors per project/type/url
 monitorSchema.index({ projectId: 1, type: 1, url: 1 }, { unique: true });
+monitorSchema.index({ status: 1 });
+monitorSchema.index({ createdAt: -1 });
 
 const Monitor = mongoose.model("Monitor", monitorSchema);
 export default Monitor;

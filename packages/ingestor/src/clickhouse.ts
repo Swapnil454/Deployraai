@@ -5,4 +5,5 @@ export const clickhouse = createClient({
   username: process.env.CLICKHOUSE_USER || 'default',
   password: process.env.CLICKHOUSE_PASSWORD || '',
   database: process.env.CLICKHOUSE_DB || 'default',
+  request_timeout: 15000, // Enforce a 15-second network timeout on massive queries
 });
