@@ -26,6 +26,15 @@ let currentSessionId = crypto.randomUUID();
 let rumSequenceNum = 0;
 let __flushRRWebEvents: (() => void) | null = null;
 
+function canRegisterWebVitals() {
+  return (
+    typeof window !== 'undefined' &&
+    typeof performance !== 'undefined' &&
+    typeof performance.getEntriesByType === 'function' &&
+    typeof PerformanceObserver !== 'undefined'
+  );
+}
+
 export function TracePilotProvider({ 
   children, 
   token, 
@@ -76,11 +85,13 @@ export function TracePilotProvider({
         span.end();
       });
     };
-    onLCP(reportVitals);
-    onINP(reportVitals);
-    onCLS(reportVitals);
-    onFCP(reportVitals);
-    onTTFB(reportVitals);
+    if (canRegisterWebVitals()) {
+      onLCP(reportVitals);
+      onINP(reportVitals);
+      onCLS(reportVitals);
+      onFCP(reportVitals);
+      onTTFB(reportVitals);
+    }
 
     // --- 3. SESSION REPLAY (rrweb) ---
     let stopFn: (() => void) | undefined;
