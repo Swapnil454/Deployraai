@@ -5,6 +5,7 @@ import { auth } from '../lib/firebase';
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
+  GithubAuthProvider,
   signInWithEmailAndPassword, 
   sendEmailVerification
 } from 'firebase/auth';
@@ -62,6 +63,22 @@ export default function LoginPage() {
       setLoading(true);
       setError('');
       const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const idToken = await result.user.getIdToken();
+      await handleFirebaseToken(idToken);
+    } catch (err: any) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  const handleGithubLogin = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const provider = new GithubAuthProvider();
+      provider.addScope('read:user');
+      provider.addScope('user:email');
       const result = await signInWithPopup(auth, provider);
       const idToken = await result.user.getIdToken();
       await handleFirebaseToken(idToken);
@@ -215,13 +232,15 @@ export default function LoginPage() {
           <div className="flex-grow border-t border-zinc-800"></div>
         </div>
 
-        <a
-          href={`${process.env.NEXT_PUBLIC_API_URL}/auth/github`}
+        <button
+          type="button"
+          onClick={handleGithubLogin}
+          disabled={loading}
           className="flex w-full items-center justify-center gap-3 rounded-lg bg-[#24292e] px-4 py-3 text-sm font-semibold text-white transition-all hover:bg-[#2f363d] active:scale-[0.98] disabled:opacity-50"
         >
           <GithubIcon className="h-5 w-5" />
           Continue with GitHub
-        </a>
+        </button>
         
         <p className="mt-8 text-center text-sm text-zinc-400">
           Don't have an account?{' '}

@@ -1,5 +1,5 @@
 {
   "buildCommand": "cd .. && npx turbo run build --filter=client",
-  "outputDirectory": "../.next",
+  "outputDirectory": ".next",
   "framework": "nextjs"
 }
