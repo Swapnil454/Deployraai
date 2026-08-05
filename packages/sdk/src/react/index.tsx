@@ -104,8 +104,9 @@ export function TracePilotProvider({
       
       const recordOptions = {
         emit(event: any) {
-          events.push(event);
+          events.push(event); // Storing purely as object format events
         },
+        maskAllInputs: true,
         maskInputOptions: {
           password: true,
           email: true,
@@ -114,9 +115,18 @@ export function TracePilotProvider({
           number: true,
           search: true,
         },
+        // Optimize payload size using sampling (reduces event size drastically)
+        sampling: {
+          mousemove: true,      // Throttles mouse movements
+          mouseInteraction: true,
+          scroll: 150,          // Throttle scroll events to 150ms
+          input: 'last' as const, // Only capture the final input string rather than every keystroke
+        },
         blockClass: 'tracepilot-block',
+        ignoreClass: 'tracepilot-ignore',
         maskTextClass: 'tracepilot-mask',
-        blockSelector: 'input[type="password"], [data-sensitive]',
+        // Specifically block sensitive PII like credit cards and passwords
+        blockSelector: 'input[type="password"], input[name*="cc-"], input[name*="card"], input[autocomplete="cc-number"], [data-sensitive]',
       };
       
       stopFn = rrweb.record(recordOptions);
