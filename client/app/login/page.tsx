@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { auth } from '../lib/firebase';
+import { getFirebaseAuth } from '../lib/firebase';
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
@@ -63,6 +63,7 @@ export default function LoginPage() {
       setLoading(true);
       setError('');
       const provider = new GoogleAuthProvider();
+      const auth = getFirebaseAuth();
       const result = await signInWithPopup(auth, provider);
       const idToken = await result.user.getIdToken();
       await handleFirebaseToken(idToken);
@@ -79,6 +80,7 @@ export default function LoginPage() {
       const provider = new GithubAuthProvider();
       provider.addScope('read:user');
       provider.addScope('user:email');
+      const auth = getFirebaseAuth();
       const result = await signInWithPopup(auth, provider);
       const idToken = await result.user.getIdToken();
       await handleFirebaseToken(idToken);
@@ -98,6 +100,7 @@ export default function LoginPage() {
     try {
       setLoading(true);
       setError('');
+      const auth = getFirebaseAuth();
       
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       
@@ -129,6 +132,7 @@ export default function LoginPage() {
     try {
       setLoading(true);
       setError('');
+      const auth = getFirebaseAuth();
       
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       
