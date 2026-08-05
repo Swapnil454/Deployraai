@@ -47,5 +47,9 @@
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4.3.0",
     "typescript": "^5"
+  },
+  "optionalDependencies": {
+    "@tailwindcss/oxide-linux-x64-gnu": "4.3.0",
+    "lightningcss-linux-x64-gnu": "1.32.0"
   }
 }
