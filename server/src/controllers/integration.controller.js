@@ -108,6 +108,8 @@ export const callbackProvider = async (req, res) => {
   const config = getOauthProviders()[provider];
 
   let returnTo = req.cookies[`oauth_return_${provider}`] || process.env.FRONTEND_URL;
+  const storedState = req.cookies[`oauth_state_${provider}`];
+  
   if (!returnTo.startsWith(process.env.FRONTEND_URL)) {
     returnTo = process.env.FRONTEND_URL;
   }

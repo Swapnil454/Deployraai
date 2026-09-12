@@ -29,6 +29,10 @@ export const firebaseLogin = async (req, res) => {
     if (signInProvider === 'google.com') providerName = 'firebase_google';
     if (signInProvider === 'github.com') providerName = 'github';
 
+    if (providerName === 'firebase_email' && !decodedToken.email_verified) {
+      return res.status(403).json({ error: "Email not verified. Please verify your email before logging in." });
+    }
+
     // 2. Email-first lookup
     let user = await User.findOne({ email });
 

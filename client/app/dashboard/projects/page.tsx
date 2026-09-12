@@ -110,6 +110,18 @@ export default function ProjectsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
+  useEffect(() => {
+    const savedMode = localStorage.getItem('deployai_projects_view_mode') as 'grid' | 'list';
+    if (savedMode === 'grid' || savedMode === 'list') {
+      setViewMode(savedMode);
+    }
+  }, []);
+
+  const handleViewModeChange = (mode: 'grid' | 'list') => {
+    setViewMode(mode);
+    localStorage.setItem('deployai_projects_view_mode', mode);
+  };
+
   const lastUpdated = useRef(Date.now());
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -159,41 +171,47 @@ export default function ProjectsPage() {
   }, [fetchProjects]);
 
   return (
-    <div className="w-full flex flex-col min-h-full">
-      <div className="p-8 w-full flex-1">
+    <div className="relative w-full flex flex-col min-h-full overflow-hidden">
+      {/* Page Ambient Glows */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-900/10 via-transparent to-transparent pointer-events-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_var(--tw-gradient-stops))] from-indigo-900/10 via-transparent to-transparent pointer-events-none" />
+      
+      <div className="relative z-10 p-8 w-full flex-1">
         <div className="max-w-[1440px] w-full mx-auto">
           {/* Toolbar */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8">
-            <div className="relative w-full flex-1">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-zinc-500" />
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8 border-b border-zinc-800/60 pb-8">
+            <div className="relative w-full flex-1 max-w-xl">
+              <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none z-10">
+                <Search className="h-5 w-5 text-zinc-400" />
+              </div>
               <input
                 type="text"
                 placeholder="Search Projects..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-[#0a0a0a] hover:bg-[#111] border border-zinc-800 rounded-lg h-11 pl-[42px] pr-4 text-base font-medium text-zinc-200 placeholder-zinc-500 placeholder:font-medium focus:outline-none focus:border-zinc-600 focus:bg-[#111] transition-all"
+                className="w-full bg-zinc-800/40 hover:bg-zinc-800/60 border border-zinc-700/50 rounded-xl h-12 pl-[44px] pr-4 text-[15px] text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-zinc-500 focus:bg-zinc-800/80 focus:ring-1 focus:ring-zinc-500 transition-all backdrop-blur-md shadow-sm relative z-0"
               />
             </div>
             <div className="flex items-center gap-3 w-full sm:w-auto">
-              <div className="flex items-center p-1 bg-[#0a0a0a] border border-zinc-800 rounded-lg h-11 shrink-0">
+              <div className="flex items-center p-1 bg-zinc-800/40 backdrop-blur-md border border-zinc-700/50 rounded-xl h-12 shrink-0">
                 <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white'}`}
+                  onClick={() => handleViewModeChange('grid')}
+                  className={`p-2 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-zinc-700 text-white shadow-sm' : 'text-zinc-400 hover:text-white hover:bg-zinc-700/50'}`}
                 >
-                  <LayoutGrid className="h-4 w-4" />
+                  <LayoutGrid className="h-[18px] w-[18px]" />
                 </button>
                 <button
-                  onClick={() => setViewMode('list')}
-                  className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white'}`}
+                  onClick={() => handleViewModeChange('list')}
+                  className={`p-2 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-zinc-700 text-white shadow-sm' : 'text-zinc-400 hover:text-white hover:bg-zinc-700/50'}`}
                 >
-                  <List className="h-4 w-4" />
+                  <List className="h-[18px] w-[18px]" />
                 </button>
               </div>
               <button 
                 onClick={() => router.push('/dashboard/new-deployment')}
-                className="h-11 px-4 bg-white hover:bg-zinc-200 text-black rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
+                className="h-12 px-5 bg-white hover:bg-zinc-200 text-black rounded-xl text-sm font-bold transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(255,255,255,0.15)] hover:shadow-[0_0_25px_rgba(255,255,255,0.3)] whitespace-nowrap shrink-0"
               >
-                <Plus className="h-4 w-4" /> Add New...
+                <Plus className="h-4 w-4" /> Add New Project
               </button>
             </div>
           </div>
@@ -202,80 +220,110 @@ export default function ProjectsPage() {
           <div className="w-full">
             {loadingProjects ? (
               <div className="flex justify-center items-center py-20">
-                <Loader2 className="h-8 w-8 animate-spin text-zinc-500" />
+                <Loader2 className="h-8 w-8 animate-spin text-blue-500 drop-shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
               </div>
             ) : projects.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-center border border-zinc-800 rounded-lg border-dashed">
-                <div className="h-12 w-12 rounded-full bg-zinc-900 flex items-center justify-center mb-4">
-                  <Search className="h-6 w-6 text-zinc-500" />
+              <div className="w-full relative flex flex-col items-center justify-center py-24 px-4 text-center overflow-hidden bg-transparent">
+                {/* Background Grid Pattern */}
+                <svg className="absolute inset-0 w-full h-full opacity-[0.03]" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <pattern id="grid-pattern" width="40" height="40" patternUnits="userSpaceOnUse">
+                      <path d="M0 40V0H40" fill="none" stroke="white" strokeWidth="1"/>
+                    </pattern>
+                  </defs>
+                  <rect width="100%" height="100%" fill="url(#grid-pattern)"/>
+                </svg>
+                
+                {/* Subtle Emerald Glow */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[250px] h-[250px] bg-emerald-500/5 blur-[80px] rounded-full pointer-events-none" />
+
+                <div className="relative z-10 h-16 w-16 rounded-[1rem] bg-gradient-to-br from-zinc-700/80 to-zinc-900 border border-zinc-600/50 flex items-center justify-center mb-5 shadow-lg shadow-black/50">
+                   {searchQuery ? (
+                     <Search className="h-6 w-6 text-zinc-300" />
+                   ) : (
+                     <svg className="h-8 w-8 text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.3)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                     </svg>
+                   )}
                 </div>
-                <h3 className="text-lg font-medium text-white mb-2">No projects found</h3>
-                <p className="text-zinc-400 max-w-sm mb-6">
-                  {searchQuery ? "We couldn't find any projects matching your search." : "You haven't created any projects yet."}
+                
+                <h3 className="relative z-10 text-xl md:text-2xl font-extrabold text-white mb-3 tracking-tight">
+                  {searchQuery ? "No projects found" : "Ready to deploy?"}
+                </h3>
+                
+                <p className="relative z-10 text-sm md:text-[15px] text-zinc-400 max-w-md mb-8 leading-relaxed">
+                  {searchQuery 
+                    ? `We couldn't find any projects matching "${searchQuery}". Please try a different search term.` 
+                    : "You haven't created any projects yet. Connect a repository and deploy your first full-stack application in minutes."}
                 </p>
+                
                 {!searchQuery && (
                   <button 
                     onClick={() => router.push('/dashboard/new-deployment')}
-                    className="px-4 py-2 bg-white text-black rounded-md text-sm font-medium hover:bg-zinc-200 transition-colors"
+                    className="relative z-10 group px-6 py-2.5 bg-white text-black rounded-xl text-sm font-bold hover:bg-zinc-100 transition-all duration-300 active:scale-95 flex items-center gap-2 shadow-[0_0_20px_rgba(255,255,255,0.1)] hover:shadow-[0_0_30px_rgba(255,255,255,0.2)] border border-transparent"
                   >
-                    Create your first project
+                    <Plus className="h-4 w-4" />
+                    Create New Project
+                    <svg className="h-4 w-4 opacity-0 -ml-5 group-hover:opacity-100 group-hover:ml-0 transition-all duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
                   </button>
                 )}
               </div>
             ) : (
-              <div className={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" : "flex flex-col rounded-lg border border-zinc-800 overflow-hidden"}>
+              <div className={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6" : "flex flex-col rounded-xl border border-zinc-700/50 bg-zinc-800/20 backdrop-blur-md overflow-hidden shadow-xl"}>
                 {projects.map((project: any) => (
                   viewMode === 'grid' ? (
                     <div 
                       key={project._id} 
-                      className="group flex flex-col border border-zinc-800 bg-[#0a0a0a] rounded-xl hover:border-zinc-700 transition-all cursor-pointer overflow-hidden hover:shadow-lg hover:shadow-black/50 h-[220px]"
+                      className="group flex flex-col border border-zinc-700/50 bg-gradient-to-b from-zinc-800/40 to-zinc-900/60 backdrop-blur-xl rounded-2xl hover:border-zinc-600/80 hover:from-zinc-700/40 hover:to-zinc-800/60 transition-all duration-300 cursor-pointer overflow-hidden hover:shadow-[0_8px_30px_rgba(0,0,0,0.5)] hover:-translate-y-1 h-[220px]"
                       onClick={() => router.push(`/dashboard/projects/${project._id}/${project.status === 'configured' ? 'deploy' : 'overview'}`)}
                     >
                       <div className="p-6 flex-1 flex flex-col">
                         <div className="flex items-start justify-between mb-4">
                           <div className="flex items-center gap-4">
-                            <div className="h-10 w-10 shrink-0 flex items-center justify-center overflow-hidden rounded-full">
+                            <div className="h-10 w-10 shrink-0 flex items-center justify-center overflow-hidden rounded-full shadow-inner border border-zinc-600/50 bg-zinc-800/50">
                               <ProjectAvatar project={project} />
                             </div>
                             <div>
-                              <h3 className="font-semibold text-white text-[15px] group-hover:text-zinc-300 transition-colors leading-tight mb-1">{project.repoName}</h3>
-                              <p className="text-[13px] text-zinc-500">{project.repoName}.deployai.app</p>
+                              <h3 className="font-bold text-white text-[16px] group-hover:text-blue-400 transition-colors leading-tight mb-1 drop-shadow-sm">{project.repoName}</h3>
+                              <p className="text-[13px] text-zinc-400 font-medium">{project.repoName}.deployai.app</p>
                             </div>
                           </div>
                           
                           <div className="flex items-center gap-2">
                             {(project.status === 'deploying' || ['queued', 'running'].includes(project.latestDeployment?.status)) ? (
-                              <div className="h-6 w-6 rounded-full border border-zinc-700 flex items-center justify-center bg-black" title="Deploying...">
-                                <Loader2 className="h-3 w-3 text-zinc-400 animate-spin" />
+                              <div className="h-6 w-6 rounded-full border border-zinc-600 flex items-center justify-center bg-zinc-900" title="Deploying...">
+                                <Loader2 className="h-3 w-3 text-blue-500 animate-spin" />
                               </div>
                             ) : (
                               <ProductionChecklistStatus project={project} />
                             )}
-                            <button className="h-6 w-6 rounded-full flex items-center justify-center hover:bg-zinc-800 transition-colors text-zinc-400">
+                            <button className="h-7 w-7 rounded-full flex items-center justify-center hover:bg-zinc-700/60 transition-colors text-zinc-400 group-hover:text-white">
                               <MoreHorizontal className="h-4 w-4" />
                             </button>
                           </div>
                         </div>
                         
-                        <div className="mt-auto pt-4 border-t border-zinc-800/50">
+                        <div className="mt-auto pt-4 border-t border-zinc-700/50">
                           <a 
                             href={`https://github.com/${project.repoFullName}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-200 px-3 py-1.5 rounded-full text-xs font-medium font-mono transition-colors"
+                            className="inline-flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-full text-xs font-medium font-mono transition-colors border border-zinc-600/50 shadow-sm"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current text-white" aria-hidden="true"><path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.48 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.45-1.15-1.1-1.46-1.1-1.46-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0012 2z"></path></svg>
                             <span className="truncate max-w-[200px]">{project.repoFullName}</span>
                           </a>
                           
-                          <div className="flex flex-col gap-1 mt-3">
+                          <div className="flex flex-col gap-1 mt-3.5">
                             {project.latestDeployment?.source?.commitMessage ? (
                               <a 
                                 href={`https://github.com/${project.repoFullName}/commit/${project.latestDeployment.source.commitSha}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="truncate text-sm font-medium text-zinc-200 hover:text-indigo-400 hover:underline transition-colors"
+                                className="truncate text-sm font-medium text-zinc-200 hover:text-blue-400 hover:underline transition-colors"
                                 onClick={(e) => e.stopPropagation()}
                                 title={project.latestDeployment.source.commitMessage}
                               >
@@ -298,38 +346,41 @@ export default function ProjectsPage() {
                   ) : (
                     <div 
                       key={project._id} 
-                      className="group flex items-center justify-between border-b border-zinc-800 bg-black p-4 hover:bg-zinc-900/40 transition-all cursor-pointer last:border-b-0"
+                      className="group flex items-center justify-between border-b border-zinc-700/50 bg-transparent px-6 py-5 hover:bg-gradient-to-r hover:from-zinc-800/60 hover:to-transparent transition-all duration-300 cursor-pointer last:border-b-0 relative overflow-hidden"
                       onClick={() => router.push(`/dashboard/projects/${project._id}/${project.status === 'configured' ? 'deploy' : 'overview'}`)}
                     >
-                      <div className="flex items-center gap-4 w-[30%] min-w-0">
-                        <div className="h-8 w-8 shrink-0 flex items-center justify-center overflow-hidden rounded-full">
+                      {/* Hover Highlight Bar */}
+                      <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-blue-500 opacity-0 group-hover:opacity-100 transition-all duration-300 shadow-[0_0_10px_rgba(59,130,246,0.8)]" />
+                      
+                      <div className="flex items-center gap-4 w-[30%] min-w-0 transition-transform duration-300 group-hover:translate-x-1">
+                        <div className="h-10 w-10 shrink-0 flex items-center justify-center overflow-hidden rounded-full shadow-inner border border-zinc-600/50 bg-zinc-800/50">
                           <ProjectAvatar project={project} />
                         </div>
                         <div className="overflow-hidden">
-                          <h3 className="font-semibold text-white text-[15px] truncate group-hover:text-zinc-300 transition-colors">{project.repoName}</h3>
-                          <p className="text-[13px] text-zinc-500 truncate">{project.repoName}.deployai.app</p>
+                          <h3 className="font-bold text-white text-[15px] truncate group-hover:text-blue-400 transition-colors drop-shadow-sm">{project.repoName}</h3>
+                          <p className="text-[13px] text-zinc-400 truncate font-medium">{project.repoName}.deployai.app</p>
                         </div>
                       </div>
 
-                      <div className="flex flex-col gap-0.5 w-[35%] min-w-0 hidden md:flex">
+                      <div className="flex flex-col gap-1 w-[35%] min-w-0 hidden md:flex transition-transform duration-300 group-hover:translate-x-1">
                         {project.latestDeployment?.source?.commitMessage ? (
                           <a 
                             href={`https://github.com/${project.repoFullName}/commit/${project.latestDeployment.source.commitSha}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="truncate text-[13px] font-medium text-zinc-200 hover:text-indigo-400 hover:underline transition-colors"
+                            className="truncate text-[13.5px] font-medium text-zinc-200 hover:text-blue-400 hover:underline transition-colors"
                             onClick={(e) => e.stopPropagation()}
                             title={project.latestDeployment.source.commitMessage}
                           >
                             {project.latestDeployment.source.commitMessage}
                           </a>
                         ) : (
-                          <span className="truncate text-[13px] font-medium text-zinc-500 italic">No deployments yet</span>
+                          <span className="truncate text-[13.5px] font-medium text-zinc-500 italic">No deployments yet</span>
                         )}
-                        <div className="flex items-center gap-1.5 text-[12px] font-medium text-zinc-500">
+                        <div className="flex items-center gap-1.5 text-[12px] font-medium text-zinc-400">
                           <span>{formatRelativeTime(project.updatedAt)}</span>
                           <span>on</span>
-                          <span className="flex items-center gap-1 text-zinc-400 font-medium">
+                          <span className="flex items-center gap-1 text-zinc-300 font-medium">
                             <GitBranch className="h-3 w-3" /> {project.selectedBranch || 'main'}
                           </span>
                         </div>
@@ -340,22 +391,22 @@ export default function ProjectsPage() {
                           href={`https://github.com/${project.repoFullName}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 bg-zinc-800/50 hover:bg-zinc-700/80 text-zinc-300 px-3 py-1 rounded-full text-xs font-medium font-mono transition-colors hidden xl:flex"
+                          className="inline-flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-full text-xs font-medium font-mono transition-colors hidden xl:flex border border-zinc-600/50 shadow-sm"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <svg viewBox="0 0 24 24" className="h-3 w-3 fill-current text-white" aria-hidden="true"><path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.48 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.45-1.15-1.1-1.46-1.1-1.46-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0012 2z"></path></svg>
+                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current text-white" aria-hidden="true"><path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.48 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.45-1.15-1.1-1.46-1.1-1.46-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0012 2z"></path></svg>
                           <span className="truncate max-w-[150px]">{project.repoFullName}</span>
                         </a>
                         
                         <div className="flex items-center gap-3">
                           {(project.status === 'deploying' || ['queued', 'running'].includes(project.latestDeployment?.status)) ? (
                             <div className="h-6 w-6 rounded-full border border-zinc-700 flex items-center justify-center bg-black" title="Deploying...">
-                              <Loader2 className="h-3 w-3 text-zinc-400 animate-spin" />
+                              <Loader2 className="h-3 w-3 text-blue-500 animate-spin" />
                             </div>
                           ) : (
                             <ProductionChecklistStatus project={project} />
                           )}
-                          <button className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-zinc-800 transition-colors text-zinc-400">
+                          <button className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-zinc-800 transition-colors text-zinc-400 group-hover:text-white">
                             <MoreHorizontal className="h-4 w-4" />
                           </button>
                         </div>
