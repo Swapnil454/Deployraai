@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import ConnectedAccount from "../models/ConnectedAccount.js";
 import User from "../models/User.js";
-import { encryptSecret } from "../utils/encryption.js";
+import { encryptSecret, decryptSecret } from "../utils/encryption.js";
 import { validateRenderToken } from '../services/providers/render.service.js';
 import { validateRailwayToken } from '../services/providers/railway.service.js';
 import { validateCloudflareToken, getCloudflareZones as fetchCloudflareZones, getCloudflareToken } from '../services/providers/cloudflare.service.js';
@@ -63,8 +63,9 @@ export const getIntegrationStatus = async (req, res) => {
 
     for (const acc of accounts) {
       if (status[acc.provider]) {
+        const decryptedToken = decryptSecret(acc.accessTokenEncrypted);
         status[acc.provider] = {
-          connected: acc.status === "connected",
+          connected: acc.status === "connected" && !!decryptedToken,
           providerType: acc.providerType,
           accountName: acc.providerAccountName || null
         };
@@ -227,8 +228,10 @@ export const disconnectProvider = async (req, res) => {
 export const connectApiKey = async (req, res) => {
   try {
     const { provider } = req.params;
-    const { apiKey } = req.body;
-    if (!apiKey) return res.status(400).json({ error: "API key is required" });
+    let { apiKey } = req.body;
+    if (!apiKey || !apiKey.trim()) return res.status(400).json({ error: "API key is required" });
+    
+    apiKey = apiKey.trim();
     if (!['render', 'railway', 'vercel', 'cloudflare'].includes(provider)) {
       return res.status(400).json({ error: "Invalid provider for API key connection" });
     }

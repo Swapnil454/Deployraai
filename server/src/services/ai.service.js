@@ -37,7 +37,7 @@ Format your response exactly as follows:
 [Provide a code snippet showing how to fix the issue]
 `;
 
-  const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"];
+  const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.6-flash"];
   let lastError;
   
   const AI_TIMEOUT_MS = 15000;

@@ -44,10 +44,10 @@ export default function SettingsPage() {
     try {
       setSavingKey(true);
       setModalStatus('idle');
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/integrations/${activeModalProvider}/key`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/integrations/${activeModalProvider}/connect-api-key`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey }),
+        body: JSON.stringify({ apiKey: apiKey.trim() }),
         credentials: "include"
       });
       if (res.ok) {
@@ -150,7 +150,7 @@ export default function SettingsPage() {
                   <p className="text-[13px] text-zinc-400">Connect your version control and cloud providers to enable deployments.</p>
                 </div>
               </div>
-              <button className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-black/40 px-4 py-2 text-[13px] font-medium text-zinc-300 hover:text-white hover:bg-black/60 transition-all">
+              <button onClick={() => router.push('/docs/integrations')} className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-black/40 px-4 py-2 text-[13px] font-medium text-zinc-300 hover:text-white hover:bg-black/60 transition-all">
                 View Documentation <ExternalLink className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -244,6 +244,12 @@ export default function SettingsPage() {
               <div className="absolute right-4 top-4 text-zinc-600">
                  <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
               </div>
+            </div>
+            
+            <div className="mb-2 text-right">
+              <a href={`/docs/integrations/${activeModalProvider}`} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-emerald-400 hover:text-emerald-300 transition-colors inline-flex items-center gap-1">
+                How to get this? <ExternalLink className="h-3 w-3" />
+              </a>
             </div>
 
             {/* Error or Success message area */}

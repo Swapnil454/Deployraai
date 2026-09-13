@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, Activity, Clock, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
+import { ArrowLeft, Loader2, Activity, Clock, CheckCircle2, XCircle, AlertCircle, Sparkles, GitPullRequest } from "lucide-react";
+import ReactMarkdown from 'react-markdown';
 
 export default function MonitoringPage() {
   const params = useParams();
@@ -11,6 +12,10 @@ export default function MonitoringPage() {
 
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<any>(null);
+
+  const [analyzingCheckId, setAnalyzingCheckId] = useState<string | null>(null);
+  const [fixingCheckId, setFixingCheckId] = useState<string | null>(null);
+  const [expandedCheckId, setExpandedCheckId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchSummary();
@@ -28,6 +33,46 @@ export default function MonitoringPage() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAnalyze = async (check: any) => {
+    try {
+      setAnalyzingCheckId(check._id);
+      setExpandedCheckId(check._id);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/monitor-checks/${check._id}/analyze`, { method: 'POST', credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setSummary((prev: any) => ({
+          ...prev,
+          recentChecks: prev.recentChecks.map((c: any) => c._id === check._id ? { ...c, aiAnalysis: data.aiAnalysis } : c)
+        }));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAnalyzingCheckId(null);
+    }
+  };
+
+  const handleFix = async (check: any) => {
+    try {
+      setFixingCheckId(check._id);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/monitor-checks/${check._id}/create-pr`, { method: 'POST', credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setSummary((prev: any) => ({
+          ...prev,
+          recentChecks: prev.recentChecks.map((c: any) => c._id === check._id ? { ...c, aiAnalysis: { ...c.aiAnalysis, fix_pr_url: data.pr_url } } : c)
+        }));
+      } else {
+        const errData = await res.json().catch(() => ({ error: 'Unknown error' }));
+        alert(`Auto-Fix Error: ${errData.error}`);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setFixingCheckId(null);
     }
   };
 
@@ -88,12 +133,14 @@ export default function MonitoringPage() {
                   <th className="px-6 py-3">Status</th>
                   <th className="px-6 py-3">Response</th>
                   <th className="px-6 py-3">Error</th>
+                  <th className="px-6 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800 bg-black/20">
                 {summary?.recentChecks && summary.recentChecks.length > 0 ? (
                   summary.recentChecks.map((check: any, i: number) => (
-                    <tr key={i} className="hover:bg-zinc-800/30 transition-colors">
+                  <React.Fragment key={i}>
+                    <tr className="hover:bg-zinc-800/30 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
                         {new Date(check.checkedAt).toLocaleString()}
                       </td>
@@ -121,11 +168,90 @@ export default function MonitoringPage() {
                       <td className="px-6 py-4 text-xs">
                         {check.errorMessage || '-'}
                       </td>
+                      <td className="px-6 py-4 text-right">
+                        {(check.status === 'degraded' || check.status === 'offline') && (
+                          <button
+                            onClick={() => handleAnalyze(check)}
+                            disabled={analyzingCheckId === check._id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-md hover:bg-indigo-500/20 transition-colors"
+                          >
+                            {analyzingCheckId === check._id ? (
+                              <><Loader2 className="w-3 h-3 animate-spin" /> Analyzing...</>
+                            ) : (
+                              <><Sparkles className="w-3 h-3" /> Analyze Issue</>
+                            )}
+                          </button>
+                        )}
+                      </td>
                     </tr>
+                    {expandedCheckId === check._id && (
+                      <tr className="bg-indigo-950/20 border-b border-indigo-900/30">
+                        <td colSpan={6} className="px-6 py-6">
+                          <div className="flex flex-col gap-4">
+                            <h4 className="text-indigo-400 font-medium flex items-center gap-2">
+                              <Sparkles className="w-4 h-4" /> AI Root Cause Analysis
+                            </h4>
+                            {analyzingCheckId === check._id ? (
+                              <div className="flex items-center gap-3 text-zinc-400 text-sm">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Analyzing recent stack traces and monitor logs...
+                              </div>
+                            ) : check.aiAnalysis ? (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-4">
+                                  <div>
+                                    <div className="text-xs font-semibold text-zinc-500 uppercase mb-1">Summary</div>
+                                    <div className="text-sm text-zinc-300">{check.aiAnalysis.summary}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-xs font-semibold text-zinc-500 uppercase mb-1">Root Cause</div>
+                                    <div className="text-sm text-zinc-300 prose prose-sm prose-invert max-w-none">
+                                      <ReactMarkdown>{check.aiAnalysis.likelyCause}</ReactMarkdown>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="space-y-4 border-l border-indigo-900/50 pl-6">
+                                  <div>
+                                    <div className="text-xs font-semibold text-zinc-500 uppercase mb-1">Suggested Fix</div>
+                                    <div className="text-sm text-zinc-300 prose prose-sm prose-invert max-w-none">
+                                      <ReactMarkdown>{check.aiAnalysis.suggestedFix}</ReactMarkdown>
+                                    </div>
+                                  </div>
+                                  {check.aiAnalysis.canAutoFix && (
+                                    <div className="pt-2">
+                                      {check.aiAnalysis.fix_pr_url ? (
+                                        <a href={check.aiAnalysis.fix_pr_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-md hover:bg-emerald-500/30 transition-colors text-sm font-medium">
+                                          <GitPullRequest className="w-4 h-4" /> View Pull Request
+                                        </a>
+                                      ) : (
+                                        <button
+                                          onClick={() => handleFix(check)}
+                                          disabled={fixingCheckId === check._id}
+                                          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors text-sm font-medium"
+                                        >
+                                          {fixingCheckId === check._id ? (
+                                            <><Loader2 className="w-4 h-4 animate-spin" /> Rewriting Code & Creating PR...</>
+                                          ) : (
+                                            <><GitPullRequest className="w-4 h-4" /> Auto-Fix with AI</>
+                                          )}
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-zinc-500 text-sm">Analysis failed or not available.</div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5} className="px-6 py-8 text-center text-zinc-500">
+                    <td colSpan={6} className="px-6 py-8 text-center text-zinc-500">
                       No recent checks available. Click "Check Now" on the deploy page to trigger a check.
                     </td>
                   </tr>

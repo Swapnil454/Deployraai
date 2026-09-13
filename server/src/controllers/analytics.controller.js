@@ -106,7 +106,7 @@ export const autoInjectAnalytics = async (req, res) => {
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const generateWithRetry = async (promptText) => {
-      const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"];
+      const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.6-flash"];
       for (const modelName of fallbackModels) {
         const currentModel = genAI.getGenerativeModel({ model: modelName });
         for (let i = 0; i < 3; i++) {

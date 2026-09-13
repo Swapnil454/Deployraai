@@ -56,10 +56,21 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
     const backendDeploy = await Deployment.findById(existingBackendDeploymentId);
 
     // 2. init_backend_deploy
-    backendProviderCtx = await step.run("init_backend_deploy_v1", async () => {
-      await Deployment.findByIdAndUpdate(existingBackendDeploymentId, { status: 'running' });
-      return await startBackendProviderDeployment(backendDeploy, project, injectedEnvVars);
-    });
+    try {
+      backendProviderCtx = await step.run("init_backend_deploy_v1", async () => {
+        await Deployment.findByIdAndUpdate(existingBackendDeploymentId, { status: 'running' });
+        return await startBackendProviderDeployment(backendDeploy, project, injectedEnvVars);
+      });
+    } catch (err) {
+      await step.run("mark_backend_init_failed_v1", async () => {
+        await Deployment.findByIdAndUpdate(existingBackendDeploymentId, { status: 'failed', completedAt: new Date(), errorMessage: err.message });
+        await appendLog(existingBackendDeploymentId, 'error', 'deploy_trigger', `Backend deployment failed: ${err.message}`);
+        if (target === 'fullstack' && payload.existingFullDeploymentId) {
+          await Deployment.findByIdAndUpdate(payload.existingFullDeploymentId, { status: 'failed', completedAt: new Date(), errorMessage: `Backend deployment failed: ${err.message}` });
+        }
+      });
+      throw err;
+    }
 
     // 3. wait_backend_deploy
     let backendDone = false;
@@ -152,10 +163,22 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
     }
 
     // 7. init_frontend_deploy
-    const frontendProviderCtx = await step.run("init_frontend_deploy_v1", async () => {
-      await Deployment.findByIdAndUpdate(existingFrontendDeploymentId, { status: 'running' });
-      return await startFrontendProviderDeployment(frontendDeploy, project, finalInjectedVars);
-    });
+    let frontendProviderCtx = null;
+    try {
+      frontendProviderCtx = await step.run("init_frontend_deploy_v1", async () => {
+        await Deployment.findByIdAndUpdate(existingFrontendDeploymentId, { status: 'running' });
+        return await startFrontendProviderDeployment(frontendDeploy, project, finalInjectedVars);
+      });
+    } catch (err) {
+      await step.run("mark_frontend_init_failed_v1", async () => {
+        await Deployment.findByIdAndUpdate(existingFrontendDeploymentId, { status: 'failed', completedAt: new Date(), errorMessage: err.message });
+        await appendLog(existingFrontendDeploymentId, 'error', 'deploy_trigger', `Frontend deployment failed: ${err.message}`);
+        if (target === 'fullstack' && payload.existingFullDeploymentId) {
+          await Deployment.findByIdAndUpdate(payload.existingFullDeploymentId, { status: 'failed', completedAt: new Date(), errorMessage: `Frontend deployment failed: ${err.message}` });
+        }
+      });
+      throw err;
+    }
 
     const pollStartTime = Date.now() - 30000;
 

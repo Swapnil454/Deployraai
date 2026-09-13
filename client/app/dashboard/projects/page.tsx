@@ -277,7 +277,7 @@ export default function ProjectsPage() {
                     <div 
                       key={project._id} 
                       className="group flex flex-col border border-zinc-700/50 bg-gradient-to-b from-zinc-800/40 to-zinc-900/60 backdrop-blur-xl rounded-2xl hover:border-zinc-600/80 hover:from-zinc-700/40 hover:to-zinc-800/60 transition-all duration-300 cursor-pointer overflow-hidden hover:shadow-[0_8px_30px_rgba(0,0,0,0.5)] hover:-translate-y-1 h-[220px]"
-                      onClick={() => router.push(`/dashboard/projects/${project._id}/${project.status === 'configured' ? 'deploy' : 'overview'}`)}
+                      onClick={() => router.push(`/dashboard/projects/${project._id}/${['created', 'analyzed'].includes(project.status) ? 'configure' : 'deploy'}`)}
                     >
                       <div className="p-6 flex-1 flex flex-col">
                         <div className="flex items-start justify-between mb-4">
@@ -347,7 +347,7 @@ export default function ProjectsPage() {
                     <div 
                       key={project._id} 
                       className="group flex items-center justify-between border-b border-zinc-700/50 bg-transparent px-6 py-5 hover:bg-gradient-to-r hover:from-zinc-800/60 hover:to-transparent transition-all duration-300 cursor-pointer last:border-b-0 relative overflow-hidden"
-                      onClick={() => router.push(`/dashboard/projects/${project._id}/${project.status === 'configured' ? 'deploy' : 'overview'}`)}
+                      onClick={() => router.push(`/dashboard/projects/${project._id}/${['created', 'analyzed'].includes(project.status) ? 'configure' : 'deploy'}`)}
                     >
                       {/* Hover Highlight Bar */}
                       <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-blue-500 opacity-0 group-hover:opacity-100 transition-all duration-300 shadow-[0_0_10px_rgba(59,130,246,0.8)]" />

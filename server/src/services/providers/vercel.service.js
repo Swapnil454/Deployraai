@@ -215,6 +215,7 @@ export const validateVercelToken = async (token) => {
     await vercelAPI(token, 'GET', `/v2/user`);
     return true;
   } catch (error) {
+    console.error('Vercel validation error:', error.message || error);
     return false;
   }
 };

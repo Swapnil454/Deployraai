@@ -131,7 +131,7 @@ export default function NewDeploymentPage() {
   };
 
   return (
-    <div className="relative flex min-h-[calc(100vh-64px)] flex-col bg-black px-4 sm:px-6 lg:px-8 py-10 overflow-hidden">
+    <div className="relative flex min-h-[calc(100vh-64px)] flex-col bg-black px-4 sm:px-6 lg:px-8 py-10 overflow-x-hidden">
       {/* Page Ambient Glows */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-900/20 via-transparent to-transparent pointer-events-none" />
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_var(--tw-gradient-stops))] from-indigo-900/20 via-transparent to-transparent pointer-events-none" />
@@ -278,7 +278,7 @@ export default function NewDeploymentPage() {
                 <div className="flex py-12 justify-center"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
               ) : (
                 <div className="space-y-6">
-                  <div className="grid gap-3 mt-4">
+                  <div className="grid gap-3 mt-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                     {branches.map(branch => (
                       <button
                         key={branch.name}
@@ -319,48 +319,60 @@ export default function NewDeploymentPage() {
               <div className="space-y-4">
                 
                 {/* Structure / Monorepo Flag */}
-                <div className="rounded-lg bg-zinc-800/40 p-4 border border-zinc-800">
-                  <span className="text-xs uppercase tracking-wider text-zinc-500 font-semibold mb-1 block">Architecture</span>
-                  <p className="text-white font-medium">{analysis.isMonorepo ? "Monorepo (Client & Server detected)" : "Single Application"}</p>
+                <div className="relative group rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-zinc-500/50 hover:bg-zinc-800/80 hover:shadow-[0_0_30px_rgba(161,161,170,0.15)] overflow-hidden">
+                  <div className="absolute inset-0 bg-gradient-to-br from-zinc-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  <div className="relative">
+                    <span className="text-xs uppercase tracking-wider text-zinc-500 font-semibold mb-2 block">Architecture</span>
+                    <p className="text-white font-medium text-lg">{analysis.isMonorepo ? "Monorepo (Client & Server detected)" : "Single Application"}</p>
+                  </div>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   {/* Frontend Details */}
                   {analysis.frontend.detected && (
-                    <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/5 p-4">
-                      <h3 className="mb-3 font-semibold text-indigo-400 flex items-center gap-2">
-                        <CheckCircle2 className="h-4 w-4" /> Frontend Detected
-                      </h3>
-                      <div className="space-y-2 text-sm text-zinc-300">
-                        <p><span className="text-zinc-500">Framework:</span> {analysis.frontend.framework}</p>
-                        <p><span className="text-zinc-500">Path:</span> {analysis.frontend.path}</p>
-                        <p><span className="text-zinc-500">Build:</span> {analysis.frontend.buildCommand}</p>
+                    <div className="relative group rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-indigo-500/50 hover:bg-zinc-800/80 hover:shadow-[0_0_30px_rgba(99,102,241,0.15)] overflow-hidden">
+                      <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                      <div className="relative">
+                        <h3 className="mb-4 font-semibold text-indigo-400 flex items-center gap-2 text-lg">
+                          <CheckCircle2 className="h-5 w-5" /> Frontend Detected
+                        </h3>
+                        <div className="space-y-2.5 text-sm text-zinc-300">
+                          <p><span className="text-zinc-500 font-medium">Framework:</span> {analysis.frontend.framework}</p>
+                          <p><span className="text-zinc-500 font-medium">Path:</span> {analysis.frontend.path}</p>
+                          <p><span className="text-zinc-500 font-medium">Build:</span> {analysis.frontend.buildCommand}</p>
+                        </div>
                       </div>
                     </div>
                   )}
 
                   {/* Backend Details */}
                   {analysis.backend.detected && (
-                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
-                      <h3 className="mb-3 font-semibold text-emerald-400 flex items-center gap-2">
-                        <CheckCircle2 className="h-4 w-4" /> Backend Detected
-                      </h3>
-                      <div className="space-y-2 text-sm text-zinc-300">
-                        <p><span className="text-zinc-500">Framework:</span> {analysis.backend.framework}</p>
-                        <p><span className="text-zinc-500">Path:</span> {analysis.backend.path}</p>
-                        <p><span className="text-zinc-500">Start:</span> {analysis.backend.startCommand}</p>
+                    <div className="relative group rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-emerald-500/50 hover:bg-zinc-800/80 hover:shadow-[0_0_30px_rgba(16,185,129,0.15)] overflow-hidden">
+                      <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                      <div className="relative">
+                        <h3 className="mb-4 font-semibold text-emerald-400 flex items-center gap-2 text-lg">
+                          <CheckCircle2 className="h-5 w-5" /> Backend Detected
+                        </h3>
+                        <div className="space-y-2.5 text-sm text-zinc-300">
+                          <p><span className="text-zinc-500 font-medium">Framework:</span> {analysis.backend.framework}</p>
+                          <p><span className="text-zinc-500 font-medium">Path:</span> {analysis.backend.path}</p>
+                          <p><span className="text-zinc-500 font-medium">Start:</span> {analysis.backend.startCommand}</p>
+                        </div>
                       </div>
                     </div>
                   )}
 
                   {/* DB Details */}
                   {analysis.database.detected && (
-                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 sm:col-span-2">
-                      <h3 className="mb-3 font-semibold text-amber-400 flex items-center gap-2">
-                        <CheckCircle2 className="h-4 w-4" /> Database Detected
-                      </h3>
-                      <div className="space-y-2 text-sm text-zinc-300">
-                        <p><span className="text-zinc-500">Type:</span> {analysis.database.type} ({analysis.database.orm})</p>
+                    <div className="relative group rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-amber-500/50 hover:bg-zinc-800/80 hover:shadow-[0_0_30px_rgba(245,158,11,0.15)] overflow-hidden sm:col-span-2">
+                      <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                      <div className="relative">
+                        <h3 className="mb-4 font-semibold text-amber-400 flex items-center gap-2 text-lg">
+                          <CheckCircle2 className="h-5 w-5" /> Database Detected
+                        </h3>
+                        <div className="space-y-2.5 text-sm text-zinc-300">
+                          <p><span className="text-zinc-500 font-medium">Type:</span> {analysis.database.type} ({analysis.database.orm})</p>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -368,11 +380,16 @@ export default function NewDeploymentPage() {
 
                 {/* Warnings */}
                 {analysis.warnings.length > 0 && (
-                  <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-4 mt-6">
-                    <h3 className="mb-2 font-semibold text-yellow-500 text-sm">Warnings</h3>
-                    <ul className="list-disc pl-4 space-y-1 text-sm text-yellow-200/80">
-                      {analysis.warnings.map((w: string, i: number) => <li key={i}>{w}</li>)}
-                    </ul>
+                  <div className="relative group rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-yellow-500/50 hover:bg-zinc-800/80 hover:shadow-[0_0_30px_rgba(234,179,8,0.15)] overflow-hidden mt-6">
+                    <div className="absolute inset-0 bg-gradient-to-br from-yellow-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    <div className="relative">
+                      <h3 className="mb-4 font-semibold text-yellow-500 flex items-center gap-2 text-lg">
+                        <AlertCircle className="h-5 w-5" /> Warnings
+                      </h3>
+                      <ul className="list-disc pl-5 space-y-1.5 text-sm text-zinc-300">
+                        {analysis.warnings.map((w: string, i: number) => <li key={i}>{w}</li>)}
+                      </ul>
+                    </div>
                   </div>
                 )}
 
