@@ -8,7 +8,8 @@ import {
   checkMonitorNow,
   pauseMonitor,
   resumeMonitor,
-  getProjectMonitorSummary
+  getProjectMonitorSummary,
+  getMonitorHistory
 } from '../controllers/monitoring.controller.js';
 
 const router = express.Router();
@@ -18,6 +19,7 @@ router.use(requireAuth);
 router.post('/projects/:projectId/monitors/create-default', createMonitors);
 router.get('/projects/:projectId/monitors', getProjectMonitors);
 router.get('/projects/:projectId/monitor-summary', getProjectMonitorSummary);
+router.get('/projects/:projectId/monitor-checks/history', getMonitorHistory);
 
 router.get('/monitors/:monitorId', getMonitor);
 router.post('/monitors/:monitorId/check-now', checkMonitorNow);

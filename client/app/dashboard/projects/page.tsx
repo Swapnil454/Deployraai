@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, LayoutGrid, List, Search, GitBranch, CheckCircle2, MoreHorizontal, Plus, Check, CheckCheck } from "lucide-react";
+import { Loader2, LayoutGrid, List, Search, GitBranch, CheckCircle2, MoreHorizontal, Plus, Check, CheckCheck, Trash2 } from "lucide-react";
 import { ProjectAvatar } from "@/components/dashboard/ProjectAvatar";
 
 const ProductionChecklistStatus = ({ project }: { project: any }) => {
@@ -104,11 +104,37 @@ const formatRelativeTime = (dateString: string) => {
 
 export default function ProjectsPage() {
   const router = useRouter();
-  const [projects, setProjects] = useState([]);
+  const [projects, setProjects] = useState<any[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
+  const [projectToDelete, setProjectToDelete] = useState<any>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (deleteConfirmText !== projectToDelete?.repoFullName) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${projectToDelete._id}`, { 
+        method: "DELETE",
+        credentials: "include" 
+      });
+      if (res.ok) {
+        setProjects(projects.filter(p => p._id !== projectToDelete._id));
+        setProjectToDelete(null);
+        setDeleteConfirmText("");
+      } else {
+        console.error("Failed to delete project");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
   
   useEffect(() => {
     const savedMode = localStorage.getItem('deployai_projects_view_mode') as 'grid' | 'list';
@@ -299,6 +325,13 @@ export default function ProjectsPage() {
                             ) : (
                               <ProductionChecklistStatus project={project} />
                             )}
+                            <button 
+                              className="h-7 w-7 rounded-full flex items-center justify-center hover:bg-red-500/20 transition-colors text-zinc-400 hover:text-red-400 z-10"
+                              onClick={(e) => { e.stopPropagation(); setProjectToDelete(project); }}
+                              title="Delete Project"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
                             <button className="h-7 w-7 rounded-full flex items-center justify-center hover:bg-zinc-700/60 transition-colors text-zinc-400 group-hover:text-white">
                               <MoreHorizontal className="h-4 w-4" />
                             </button>
@@ -406,6 +439,13 @@ export default function ProjectsPage() {
                           ) : (
                             <ProductionChecklistStatus project={project} />
                           )}
+                          <button 
+                            className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-red-500/20 transition-colors text-zinc-400 hover:text-red-400 z-10"
+                            onClick={(e) => { e.stopPropagation(); setProjectToDelete(project); }}
+                            title="Delete Project"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                           <button className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-zinc-800 transition-colors text-zinc-400 group-hover:text-white">
                             <MoreHorizontal className="h-4 w-4" />
                           </button>
@@ -419,6 +459,48 @@ export default function ProjectsPage() {
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {projectToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => !isDeleting && setProjectToDelete(null)}>
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-white mb-2">Delete Project</h3>
+            <p className="text-zinc-400 text-sm mb-4 leading-relaxed">
+              This action cannot be undone. This will permanently delete the project from Deployra, and remove all associated deployments, databases, and services from your cloud providers.
+            </p>
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-zinc-300 mb-2">
+                Please type <span className="font-mono text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded border border-red-500/20 select-all">{projectToDelete.repoFullName}</span> to confirm.
+              </label>
+              <input
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg h-11 px-3 text-sm text-white focus:outline-none focus:border-red-500/50 transition-colors font-mono"
+                placeholder={projectToDelete.repoFullName}
+                autoFocus
+              />
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => { setProjectToDelete(null); setDeleteConfirmText(""); }}
+                disabled={isDeleting}
+                className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting || deleteConfirmText !== projectToDelete.repoFullName}
+                className="px-4 py-2 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 hover:border-red-500 rounded-lg text-sm font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                {isDeleting ? "Deleting..." : "Delete Project"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

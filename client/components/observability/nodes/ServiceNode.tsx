@@ -10,9 +10,9 @@ interface ServiceNodeData {
   requestCount: number;
 }
 
-export function ServiceNode({ data }: { data: ServiceNodeData }) {
-  const isHighError = data.errorRate > 0.05; // > 5% errors
-  const isHighLatency = data.avgLatency > 1000; // > 1s avg latency
+export function ServiceNode({ data, targetPosition = Position.Left, sourcePosition = Position.Right }: any) {
+  const isHighError = data.errorRate > 0.05;
+  const isHighLatency = data.avgLatency > 1000;
   const isUnhealthy = isHighError || isHighLatency;
 
   const Icon = data.serviceType === 'database' ? Database : 
@@ -20,42 +20,43 @@ export function ServiceNode({ data }: { data: ServiceNodeData }) {
                data.label.includes('api') ? Server : Box;
 
   return (
-    <div className={`px-4 py-3 rounded-xl border-2 bg-zinc-950 shadow-xl min-w-[180px] transition-all
-      ${isUnhealthy ? 'border-red-500/80 shadow-red-900/20' : 'border-zinc-800 shadow-black/50'}
-    `}>
-      {/* Handles for connections */}
-      <Handle type="target" position={Position.Top} className="w-2 h-2 bg-zinc-600 border-none" />
+    <div className="flex flex-col p-6 bg-[#0a0a0a] border border-[#222] rounded-2xl w-[240px] h-[200px] shadow-2xl relative">
+      <Handle type="target" position={targetPosition} className="w-2 h-2 bg-zinc-700 border-none opacity-0" />
       
-      <div className="flex items-center gap-3">
-        <div className={`p-2 rounded-lg ${isUnhealthy ? 'bg-red-500/20 text-red-400' : 'bg-indigo-500/20 text-indigo-400'}`}>
+      <div className="flex items-center gap-3 mb-4">
+        <div className={`p-2.5 rounded-xl ${isUnhealthy ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'bg-[#111] text-zinc-300 border border-[#333]'}`}>
           <Icon className="w-5 h-5" />
         </div>
-        <div>
-          <h3 className="font-semibold text-zinc-100 text-sm tracking-tight">{data.label}</h3>
-          <p className="text-xs text-zinc-500 uppercase tracking-wider mt-0.5">{data.serviceType}</p>
+        <div className="flex flex-col">
+          <h3 className="font-semibold text-zinc-100 text-[15px] tracking-tight">{data.label}</h3>
+          <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-medium mt-0.5">{data.serviceType}</p>
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-        <div className="bg-zinc-900 rounded p-1.5 flex flex-col items-center">
-          <span className="text-zinc-500 mb-0.5">Latency</span>
-          <span className={`font-mono font-medium ${isHighLatency ? 'text-red-400' : 'text-zinc-300'}`}>
+      <div className="flex-1 flex flex-col justify-end gap-3 mt-2">
+        <div className="flex justify-between items-center text-sm border-b border-[#222] pb-2">
+          <span className="text-[11px] text-zinc-500 font-medium tracking-wide">Requests</span>
+          <span className="font-mono text-zinc-300 font-medium text-[13px]">{data.requestCount?.toLocaleString() || 0}</span>
+        </div>
+        <div className="flex justify-between items-center text-sm border-b border-[#222] pb-2">
+          <span className="text-[11px] text-zinc-500 font-medium tracking-wide">Latency</span>
+          <span className={`font-mono font-medium text-[13px] ${isHighLatency ? 'text-red-400' : 'text-zinc-300'}`}>
             {Math.round(data.avgLatency)}ms
           </span>
         </div>
-        <div className="bg-zinc-900 rounded p-1.5 flex flex-col items-center">
-          <span className="text-zinc-500 mb-0.5">Errors</span>
-          <span className={`font-mono font-medium ${isHighError ? 'text-red-400' : 'text-zinc-300'}`}>
-            {(data.errorRate * 100).toFixed(1)}%
+        <div className="flex justify-between items-center text-sm">
+          <span className="text-[11px] text-zinc-500 font-medium tracking-wide">Errors</span>
+          <span className={`font-mono font-medium text-[13px] ${isHighError ? 'text-red-400' : 'text-zinc-300'}`}>
+            {(data.errorRate * 100).toFixed(2)}%
           </span>
         </div>
       </div>
 
       {isUnhealthy && (
-        <div className="absolute -inset-1 bg-red-500/20 rounded-xl blur-md -z-10 animate-pulse" />
+        <div className="absolute -inset-[1px] border border-red-500/30 rounded-2xl -z-10 bg-red-500/5 animate-pulse" />
       )}
 
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2 bg-zinc-600 border-none" />
+      <Handle type="source" position={sourcePosition} className="w-2 h-2 bg-zinc-700 border-none opacity-0" />
     </div>
   );
 }

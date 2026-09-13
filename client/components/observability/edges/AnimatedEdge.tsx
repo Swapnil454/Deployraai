@@ -1,5 +1,5 @@
 import React from 'react';
-import { BaseEdge, Edge, EdgeProps, getBezierPath } from '@xyflow/react';
+import { BaseEdge, Edge, EdgeProps, getSmoothStepPath } from '@xyflow/react';
 
 interface AnimatedEdgeData extends Record<string, unknown> {
   errorRate?: number;
@@ -18,7 +18,7 @@ export function AnimatedEdge({
   markerEnd,
   data,
 }: EdgeProps<AnimatedEdgeType>) {
-  const [edgePath] = getBezierPath({
+  const [edgePath] = getSmoothStepPath({
     sourceX,
     sourceY,
     sourcePosition,

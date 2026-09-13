@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@pyroscope/flamegraph": "^0.35.6",
+    "@radix-ui/react-tooltip": "^1.2.16",
     "@types/d3": "^7.4.3",
     "@types/dagre": "^0.7.54",
     "@types/react-syntax-highlighter": "^15.5.13",

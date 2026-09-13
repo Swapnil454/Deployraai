@@ -902,3 +902,77 @@ export const getAiUsage = async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to fetch AI usage metrics", error: error.message });
   }
 };
+
+export const deleteProject = async (req, res) => {
+  try {
+    const projectId = req.params.projectId || req.params.id;
+    const userId = req.user.userId;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    // 1. Fetch Tokens for Cloud Providers
+    const [vercelToken, renderToken, railwayToken] = await Promise.all([
+      import('../services/providers/vercel.service.js').then(m => m.getVercelToken(userId)).catch(() => null),
+      import('../services/providers/render.service.js').then(m => m.getRenderToken(userId)).catch(() => null),
+      import('../services/providers/railway.service.js').then(m => m.getRailwayToken(userId)).catch(() => null)
+    ]);
+
+    // 2. Trigger Deletions from Cloud Providers if configuration exists
+    const config = project.configuration || {};
+
+    if (config.vercelProjectId && vercelToken) {
+      try {
+        const { deleteVercelProject } = await import('../services/providers/vercel.service.js');
+        await deleteVercelProject(vercelToken, config.vercelProjectId);
+      } catch (err) {
+        console.warn(`Failed to delete Vercel project ${config.vercelProjectId}:`, err.message);
+      }
+    }
+
+    if (config.renderServiceId && renderToken) {
+      try {
+        const { deleteRenderService } = await import('../services/providers/render.service.js');
+        await deleteRenderService(renderToken, config.renderServiceId);
+      } catch (err) {
+        console.warn(`Failed to delete Render service ${config.renderServiceId}:`, err.message);
+      }
+    }
+
+    if (config.railwayProjectId && railwayToken) {
+      try {
+        const { deleteRailwayProject } = await import('../services/providers/railway.service.js');
+        await deleteRailwayProject(railwayToken, config.railwayProjectId);
+      } catch (err) {
+        console.warn(`Failed to delete Railway project ${config.railwayProjectId}:`, err.message);
+      }
+    }
+
+    // 3. Delete from Local Database
+    const Deployment = (await import('../models/Deployment.js')).default;
+    const Monitor = (await import('../models/Monitor.js')).default;
+    const MonitorCheck = (await import('../models/MonitorCheck.js')).default;
+    const FixPullRequest = (await import('../models/FixPullRequest.js')).default;
+
+    await Promise.all([
+      Deployment.deleteMany({ projectId }),
+      Monitor.deleteMany({ projectId }),
+      MonitorCheck.deleteMany({ projectId }),
+      FixPullRequest.deleteMany({ projectId }),
+      Project.deleteOne({ _id: projectId })
+    ]);
+
+    // Cleanup postgres rules if they exist
+    try {
+      const { pool } = await import('../config/postgres.js');
+      await pool.query('DELETE FROM alert_rules WHERE project_id = $1', [projectId]);
+    } catch (err) {
+      console.warn("Postgres cleanup warning:", err.message);
+    }
+
+    res.json({ success: true, message: "Project deleted successfully" });
+  } catch (error) {
+    console.error("Delete Project Error:", error);
+    res.status(500).json({ error: "Failed to delete project" });
+  }
+};

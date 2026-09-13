@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, Activity, Server, Cpu, Database, Network } from "lucide-react";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { ArrowLeft, Loader2, Activity, Server, Cpu, Database, Network, Calendar, Filter } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-// Distinct colors for different series
-const COLORS = ['#6366f1', '#10b981', '#f43f5e', '#f59e0b', '#8b5cf6', '#0ea5e9'];
+// Highly contrasting colors WITHIN each chart so overlapping lines never blend
+const CPU_COLORS = ['#fc0000ff', '#055eecff', '#09ec5cff']; // Red, Blue, Green
+const MEM_COLORS = ['#16f9d3ff', '#f10538ff', '#70cc00ff']; // Orange, Purple, Cyan
+const NET_COLORS = ['#ec4899', '#eab308', '#0051baff']; // Pink, Yellow, Light Gray
 
 export default function InfrastructurePage() {
   const params = useParams();
@@ -17,6 +19,9 @@ export default function InfrastructurePage() {
   const [metricsData, setMetricsData] = useState<any[]>([]);
   const [timeRange, setTimeRange] = useState(24); // hours
   const [groupBy, setGroupBy] = useState('k8s_pod_name');
+  
+  const [isGroupDropdownOpen, setIsGroupDropdownOpen] = useState(false);
+  const [isTimeDropdownOpen, setIsTimeDropdownOpen] = useState(false);
 
   useEffect(() => {
     fetchMetrics();
@@ -80,106 +85,138 @@ export default function InfrastructurePage() {
   const memChart = useMemo(() => processChartData('system.memory.usage'), [metricsData]);
   const netChart = useMemo(() => processChartData('network.io'), [metricsData]);
 
-  const renderAreaChart = (chartInfo: { data: any[], groups: string[] }, yAxisLabel: string) => {
+  const renderLineChart = (chartInfo: { data: any[], groups: string[] }, yAxisLabel: string, colors: string[]) => {
     if (chartInfo.data.length === 0) {
       return (
-        <div className="flex h-64 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900/50 text-zinc-500">
+        <div className="flex h-[350px] items-center justify-center rounded-sm border-t border-zinc-800 bg-[#0a0a0a] text-zinc-500">
           No data available for this time range.
         </div>
       );
     }
 
     return (
-      <div className="h-72 w-full">
+      <div className="h-[380px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartInfo.data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-            <defs>
-              {chartInfo.groups.map((group, i) => (
-                <linearGradient key={`grad-${group}`} id={`color-${i}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0}/>
-                </linearGradient>
-              ))}
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+          <LineChart data={chartInfo.data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <CartesianGrid stroke="#27272a" vertical={false} />
             <XAxis 
               dataKey="formattedTime" 
               stroke="#52525b" 
-              fontSize={12} 
+              fontSize={11} 
               tickLine={false}
-              axisLine={false}
+              axisLine={{ stroke: '#27272a' }}
+              tickMargin={12}
+              minTickGap={80}
             />
             <YAxis 
+              orientation="right"
               stroke="#52525b" 
-              fontSize={12} 
+              fontSize={11} 
               tickLine={false}
               axisLine={false}
               tickFormatter={(val) => `${val}${yAxisLabel}`}
+              tickMargin={12}
             />
             <Tooltip 
-              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '0.5rem', color: '#fff' }}
-              itemStyle={{ color: '#e4e4e7' }}
-              labelStyle={{ color: '#a1a1aa', marginBottom: '0.25rem' }}
+              formatter={(value: any, name: any) => [`${Number(value || 0).toFixed(2)}${yAxisLabel}`, name]}
+              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '4px', color: '#fff' }}
+              itemStyle={{ color: '#e4e4e7', fontWeight: 500 }}
+              labelStyle={{ color: '#a1a1aa', marginBottom: '0.25rem', fontWeight: 600, fontSize: '12px' }}
             />
-            <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} iconType="circle" />
+            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '15px' }} iconType="plainline" iconSize={14} />
             {chartInfo.groups.map((group, i) => (
-              <Area 
+              <Line 
                 key={group}
                 type="monotone" 
                 dataKey={group} 
-                stroke={COLORS[i % COLORS.length]} 
-                fillOpacity={1} 
-                fill={`url(#color-${i})`}
-                strokeWidth={2}
+                stroke={colors[i % colors.length]} 
+                dot={false}
+                strokeWidth={1.2}
                 isAnimationActive={false}
               />
             ))}
-              </AreaChart>
-          </ResponsiveContainer>
+          </LineChart>
+        </ResponsiveContainer>
       </div>
     );
   };
 
   return (
-    <div className="min-h-screen bg-black p-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="flex items-center justify-between mb-8">
+    <div className="min-h-screen bg-black p-6">
+      <div className="mx-auto max-w-5xl space-y-6">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
           <div>
-            <button 
-              onClick={() => router.push(`/dashboard/projects/${projectId}/deploy`)}
-              className="mb-4 flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition-colors"
-            >
-              <ArrowLeft className="h-4 w-4" /> Back to Deployments
-            </button>
-            <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-              <Server className="h-6 w-6 text-indigo-400" />
+            <h1 className="mb-2 text-2xl font-bold text-white flex items-center gap-3">
+              <Server className="h-6 w-6 text-white" />
               Infrastructure Metrics
             </h1>
-            <p className="mt-1 text-zinc-400">High-resolution hardware and container telemetry.</p>
+            <p className="text-zinc-400 text-sm max-w-xl">High-resolution hardware and container telemetry.</p>
           </div>
 
-          <div className="flex items-center gap-4">
-            <select
-              value={groupBy}
-              onChange={(e) => setGroupBy(e.target.value)}
-              className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            >
-              <option value="k8s_pod_name">Group by Pod</option>
-              <option value="host_name">Group by Host</option>
-              <option value="container_name">Group by Container</option>
-              <option value="k8s_namespace_name">Group by Namespace</option>
-            </select>
-            
-            <select
-              value={timeRange}
-              onChange={(e) => setTimeRange(Number(e.target.value))}
-              className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            >
-              <option value={1}>Last 1 Hour</option>
-              <option value={6}>Last 6 Hours</option>
-              <option value={24}>Last 24 Hours</option>
-              <option value={168}>Last 7 Days</option>
-            </select>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <button 
+                onClick={() => { setIsGroupDropdownOpen(!isGroupDropdownOpen); setIsTimeDropdownOpen(false); }}
+                className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 shadow-xl text-sm text-zinc-300 font-medium hover:text-white hover:border-zinc-700 transition-colors"
+              >
+                <Filter className="h-4 w-4 text-zinc-500" />
+                {groupBy === 'k8s_pod_name' ? 'Group by Pod' : groupBy === 'host_name' ? 'Group by Host' : groupBy === 'container_name' ? 'Group by Container' : 'Group by Namespace'}
+              </button>
+              
+              {isGroupDropdownOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsGroupDropdownOpen(false)}></div>
+                  <div className="absolute right-0 mt-2 w-48 bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl overflow-hidden z-50 py-1">
+                    {[
+                      { value: 'k8s_pod_name', label: 'Group by Pod' },
+                      { value: 'host_name', label: 'Group by Host' },
+                      { value: 'container_name', label: 'Group by Container' },
+                      { value: 'k8s_namespace_name', label: 'Group by Namespace' },
+                    ].map(option => (
+                      <button
+                        key={option.value}
+                        onClick={() => { setGroupBy(option.value); setIsGroupDropdownOpen(false); }}
+                        className={`block w-full text-left px-4 py-2 text-sm transition-colors ${groupBy === option.value ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'}`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="relative">
+              <button 
+                onClick={() => { setIsTimeDropdownOpen(!isTimeDropdownOpen); setIsGroupDropdownOpen(false); }}
+                className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 shadow-xl text-sm text-zinc-300 font-medium hover:text-white hover:border-zinc-700 transition-colors"
+              >
+                <Calendar className="h-4 w-4 text-zinc-500" />
+                {timeRange === 1 ? 'Last 1 Hour' : timeRange === 6 ? 'Last 6 Hours' : timeRange === 24 ? 'Last 24 Hours' : 'Last 7 Days'}
+              </button>
+              
+              {isTimeDropdownOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsTimeDropdownOpen(false)}></div>
+                  <div className="absolute right-0 mt-2 w-40 bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl overflow-hidden z-50 py-1">
+                    {[
+                      { value: 1, label: 'Last 1 Hour' },
+                      { value: 6, label: 'Last 6 Hours' },
+                      { value: 24, label: 'Last 24 Hours' },
+                      { value: 168, label: 'Last 7 Days' },
+                    ].map(option => (
+                      <button
+                        key={option.value}
+                        onClick={() => { setTimeRange(Number(option.value)); setIsTimeDropdownOpen(false); }}
+                        className={`block w-full text-left px-4 py-2 text-sm transition-colors ${timeRange === option.value ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'}`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -188,32 +225,38 @@ export default function InfrastructurePage() {
             <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
           </div>
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-12">
             {/* CPU Chart */}
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
-              <div className="flex items-center gap-2 mb-6">
-                <Cpu className="h-5 w-5 text-indigo-400" />
-                <h2 className="text-lg font-semibold text-white">CPU Utilization</h2>
+            <div className="bg-transparent border-t border-zinc-800 pt-6">
+              <div className="mb-6">
+                <h2 className="text-lg font-semibold text-white">Average CPU Utilization</h2>
+                <p className="text-sm text-zinc-400 mt-1">Across all instances</p>
               </div>
-              {renderAreaChart(cpuChart, '%')}
+              <div>
+                {renderLineChart(cpuChart, '%', CPU_COLORS)}
+              </div>
             </div>
 
             {/* Memory Chart */}
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
-              <div className="flex items-center gap-2 mb-6">
-                <Database className="h-5 w-5 text-emerald-400" />
-                <h2 className="text-lg font-semibold text-white">Memory Usage</h2>
+            <div className="bg-transparent border-t border-zinc-800 pt-6">
+              <div className="mb-6">
+                <h2 className="text-lg font-semibold text-white">Average Memory Utilization</h2>
+                <p className="text-sm text-zinc-400 mt-1">Across all instances</p>
               </div>
-              {renderAreaChart(memChart, ' MB')}
+              <div>
+                {renderLineChart(memChart, ' MB', MEM_COLORS)}
+              </div>
             </div>
 
             {/* Network Chart */}
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
-              <div className="flex items-center gap-2 mb-6">
-                <Network className="h-5 w-5 text-sky-400" />
+            <div className="bg-transparent border-y border-zinc-800 pt-6 pb-6">
+              <div className="mb-6">
                 <h2 className="text-lg font-semibold text-white">Network I/O</h2>
+                <p className="text-sm text-zinc-400 mt-1">Across all instances</p>
               </div>
-              {renderAreaChart(netChart, ' KB/s')}
+              <div>
+                {renderLineChart(netChart, ' KB/s', NET_COLORS)}
+              </div>
             </div>
           </div>
         )}
