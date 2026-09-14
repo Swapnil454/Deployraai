@@ -7,7 +7,7 @@ const RETENTION_POLICIES = [
   { table: 'synthetic_checks', timeColumn: 'checked_at', daysToKeep: 14 },
   { table: 'metrics_minutely', timeColumn: 'bucket', daysToKeep: 30 },
   { table: 'custom_events', timeColumn: 'created_at', daysToKeep: 30 },
-  { table: 'rum_events', timeColumn: 'created_at', daysToKeep: 30 },
+  { table: 'rum_events', timeColumn: 'created_at', daysToKeep: 7 }, // Changed from 30 to 7 to prevent TOAST bloat
   { table: 'sourcemaps', timeColumn: 'created_at', daysToKeep: 90 },
   { table: 'alert_events', timeColumn: 'triggered_at', daysToKeep: 90 },
   { table: 'error_groups', timeColumn: 'last_seen', daysToKeep: 90 }
