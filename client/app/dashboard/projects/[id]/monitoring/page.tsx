@@ -237,7 +237,7 @@ export default function MonitoringPage() {
                             {analyzingCheckId === check._id ? (
                               <><Loader2 className="w-3 h-3 animate-spin" /> Analyzing...</>
                             ) : (
-                              <><Sparkles className="w-3 h-3" /> Analyze Issue</>
+                              <><img src="/ai-icon.svg" alt="AI" className="w-6 h-6 object-contain" /> Analyze Issue</>
                             )}
                           </button>
                         )}
@@ -248,7 +248,7 @@ export default function MonitoringPage() {
                         <td colSpan={6} className="px-6 py-6">
                           <div className="flex flex-col gap-4">
                             <h4 className="text-indigo-400 font-medium flex items-center gap-2">
-                              <Sparkles className="w-4 h-4" /> AI Root Cause Analysis
+                              <img src="/ai-icon.svg" alt="AI" className="w-6 h-6 object-contain" /> AI Root Cause Analysis
                             </h4>
                             {analyzingCheckId === check._id ? (
                               <div className="flex items-center gap-3 text-zinc-400 text-sm">

@@ -231,7 +231,7 @@ export function ObservabilitySetup({
                 </p>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between border-t border-zinc-800 pt-6 mt-auto gap-4">
                   <div className="flex items-center gap-2">
-                    <Wand2 className="h-4 w-4 text-purple-500" />
+                    <img src="/ai-icon.svg" alt="AI" className="w-6 h-6 object-contain" />
                     <span className="text-sm font-medium text-white">Generation Complete</span>
                     <span className="bg-purple-500/20 text-purple-400 text-[10px] px-1.5 py-0.5 rounded font-medium ml-1">Beta</span>
                   </div>
@@ -269,7 +269,7 @@ export function ObservabilitySetup({
                   disabled={injecting}
                   className="bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-white font-medium px-4 py-2 rounded-md transition-colors flex items-center gap-2"
                 >
-                  {injecting ? <Loader2 className="h-4 w-4 animate-spin text-zinc-400" /> : <Wand2 className="h-4 w-4 text-zinc-400" />}
+                  {injecting ? <Loader2 className="h-4 w-4 animate-spin text-zinc-400" /> : <img src="/ai-icon.svg" alt="AI" className="w-6 h-6 object-contain" />}
                   <span className="text-[13px]">{injecting ? 'Generating Pull Request...' : 'Implement with AI Agent'}</span>
                 </button>
                 <p className="text-[13px] text-zinc-400 mt-6 max-w-md text-center">
@@ -284,7 +284,7 @@ export function ObservabilitySetup({
             )}
             {!injectResult?.success && (
               <div className="bg-black border-t border-zinc-800 px-6 py-4 flex items-center gap-2">
-                <Wand2 className="h-4 w-4 text-zinc-400" />
+                <img src="/ai-icon.svg" alt="AI" className="w-6 h-6 object-contain" />
                 <span className="text-sm font-medium text-zinc-400">AI Agent</span>
                 <span className="bg-zinc-800 text-zinc-300 text-[10px] px-1.5 py-0.5 rounded font-medium ml-1">Beta</span>
               </div>

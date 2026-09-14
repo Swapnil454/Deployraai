@@ -83,14 +83,63 @@ export default function SessionsListPage() {
 
   if (loading) {
     return (
-      <div className="flex flex-col min-h-[calc(100vh-64px)] bg-[#050505] pb-20 font-sans">
-        <div className="p-8 max-w-[1440px] w-full mx-auto">
-          <div className="flex items-center justify-between border-b border-zinc-800/60 pb-8">
-            <div className="h-8 w-64 bg-zinc-800/50 rounded animate-pulse" />
-            <div className="h-12 w-24 bg-zinc-800/50 rounded-xl animate-pulse" />
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mt-8">
-            {[1,2,3].map(i => <div key={i} className="h-[140px] bg-zinc-800/30 rounded-2xl animate-pulse border border-white/5" />)}
+      <div className="relative w-full flex flex-col min-h-[calc(100vh-64px)] overflow-clip bg-[#050505] pb-24 shrink-0">
+        {/* Page Ambient Glows */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-900/10 via-transparent to-transparent pointer-events-none" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_var(--tw-gradient-stops))] from-indigo-900/10 via-transparent to-transparent pointer-events-none" />
+        
+        <div className="relative z-10 p-6 pt-6 w-full flex-1">
+          <div className="max-w-[1440px] w-full mx-auto">
+            {/* Toolbar Skeleton */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 border-b border-zinc-800/60 pb-4">
+              <div>
+                <div className="h-8 w-56 bg-zinc-800/50 rounded-lg animate-pulse mb-2.5" />
+                <div className="h-4 w-72 bg-zinc-800/30 rounded animate-pulse" />
+              </div>
+              <div className="h-12 w-[100px] bg-zinc-800/40 backdrop-blur-md border border-zinc-700/50 rounded-xl animate-pulse shrink-0" />
+            </div>
+
+            {/* Content Skeleton */}
+            <div className={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6" : "flex flex-col rounded-xl border border-zinc-700/50 bg-zinc-800/20 backdrop-blur-md overflow-hidden shadow-xl"}>
+              {[1, 2, 3, 4, 5, 6].map(i => 
+                viewMode === 'grid' ? (
+                  <div key={i} className="flex flex-col border border-zinc-700/50 bg-zinc-800/20 rounded-2xl h-[180px]">
+                    <div className="p-5 flex-1 flex flex-col animate-pulse">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-zinc-700/50 shrink-0" />
+                          <div className="h-5 w-48 bg-zinc-700/50 rounded" />
+                        </div>
+                      </div>
+                      <div className="mt-3 h-3.5 w-2/3 bg-zinc-700/30 rounded" />
+                      <div className="mt-auto pt-4 border-t border-zinc-700/50 flex justify-between items-center">
+                        <div className="h-4 w-24 bg-zinc-700/30 rounded" />
+                        <div className="h-4 w-32 bg-zinc-700/30 rounded" />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div key={i} className="flex items-center justify-between border-b border-zinc-700/50 bg-transparent px-6 py-5 last:border-b-0">
+                    <div className="flex items-center gap-4 w-[40%] animate-pulse">
+                      <div className="w-10 h-10 rounded-full bg-zinc-700/50 shrink-0" />
+                      <div className="flex-1">
+                        <div className="h-5 w-48 bg-zinc-700/50 rounded mb-1.5" />
+                        <div className="h-3.5 w-64 bg-zinc-700/30 rounded" />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 w-[40%] animate-pulse">
+                      <div className="h-4 w-24 bg-zinc-700/30 rounded" />
+                      <div className="w-1 h-1 rounded-full bg-zinc-600" />
+                      <div className="h-4 w-16 bg-zinc-700/30 rounded" />
+                      <div className="w-1 h-1 rounded-full bg-zinc-600" />
+                      <div className="h-4 w-20 bg-zinc-700/30 rounded" />
+                    </div>
+                    <div className="flex items-center justify-end gap-6 w-[20%] shrink-0">
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
           </div>
         </div>
       </div>

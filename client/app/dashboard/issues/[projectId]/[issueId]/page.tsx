@@ -2,12 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CustomSelect } from "@/components/ui/CustomSelect";
 import Link from "next/link";
-import { ArrowLeft, Clock, Activity, ShieldAlert, Sparkles, Loader2, GitPullRequest, MonitorPlay } from "lucide-react";
+import { ArrowLeft, Clock, Activity, ShieldAlert, Sparkles, Loader2, GitPullRequest, MonitorPlay, AlertTriangle, MessageSquare, Terminal } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import ReactMarkdown from 'react-markdown';
 
@@ -16,7 +14,7 @@ export default function IssueDetailPage() {
   const router = useRouter();
   const projectId = params?.projectId;
   const issueId = params?.issueId;
-    const [issue, setIssue] = useState<any>(null);
+  const [issue, setIssue] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [comments, setComments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,12 +104,15 @@ export default function IssueDetailPage() {
         method: 'POST',
         credentials: "include"
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: 'Unknown server error' }));
+        throw new Error(errData.error || `Server error ${res.status}`);
+      }
       const data = await res.json();
       setAiDiagnosis(data);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Failed to generate AI Diagnosis.");
+      alert(`AI Diagnosis failed: ${err.message}`);
     } finally {
       setIsDiagnosing(false);
     }
@@ -137,210 +138,289 @@ export default function IssueDetailPage() {
   }
 
   if (loading) {
-    return <div className="p-8 text-center text-muted-foreground">Loading issue details...</div>;
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-64px)] bg-[#050505]">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-500 mb-4" />
+        <div className="text-zinc-400 font-medium">Loading issue details...</div>
+      </div>
+    );
   }
 
   if (!issue) {
-    return <div className="p-8 text-center text-muted-foreground">Issue not found.</div>;
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-64px)] bg-[#050505]">
+        <AlertTriangle className="w-10 h-10 text-zinc-600 mb-4" />
+        <div className="text-zinc-400 font-medium text-lg">Issue not found</div>
+      </div>
+    );
   }
 
   const stacktrace = issue.latest_deobfuscated_stacktrace || issue.latest_stacktrace;
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => router.back()}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold tracking-tight">{issue.title}</h1>
-          <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-            <Badge variant="outline" className={issue.severity === 'critical' ? 'border-red-500 text-red-500' : ''}>
-              {issue.severity}
-            </Badge>
-            <span className="flex items-center gap-1"><Clock className="w-3 h-3"/> First seen: {new Date(issue.first_seen_at).toLocaleString()}</span>
-            <span className="flex items-center gap-1"><Activity className="w-3 h-3"/> Events: {issue.event_count}</span>
-            <span className="flex items-center gap-1"><ShieldAlert className="w-3 h-3"/> Fingerprint: <code className="text-xs bg-muted p-1 rounded">{issue.fingerprint.substring(0,8)}</code></span>
+    <div className="relative w-full flex flex-col min-h-[calc(100vh-64px)] overflow-clip bg-[#020202] pb-20 shrink-0 font-sans">
+      {/* Darker Ambient Glows */}
+      <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] bg-indigo-900/5 blur-[120px] rounded-full pointer-events-none" />
+      <div className="absolute bottom-[-20%] left-[-10%] w-[600px] h-[600px] bg-indigo-900/5 blur-[120px] rounded-full pointer-events-none" />
+      
+      <div className="relative z-10 p-5 pt-6 w-full flex-1">
+        <div className="max-w-[1152px] w-full mx-auto">
+          
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 mb-6 border-b border-white/15 pb-5 relative">
+            <div className="absolute bottom-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/5 to-transparent" />
+            <div className="flex-1 min-w-0">
+              <h1 className="text-2xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-white to-zinc-400 mb-3 break-words drop-shadow-sm">{issue.title}</h1>
+              
+              <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+                <Badge variant="outline" className={`capitalize text-[10px] font-semibold tracking-wider px-2.5 py-0.5 ${
+                  issue.severity === 'critical' ? 'border-red-500/40 text-red-300 bg-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.1)]' : 
+                  issue.severity === 'error' ? 'border-orange-500/40 text-orange-300 bg-orange-500/10 shadow-[0_0_15px_rgba(249,115,22,0.1)]' :
+                  issue.severity === 'warning' ? 'border-yellow-500/40 text-yellow-300 bg-yellow-500/10 shadow-[0_0_15px_rgba(234,179,8,0.1)]' :
+                  'border-zinc-500/40 text-zinc-300 bg-zinc-500/10 shadow-[0_0_15px_rgba(161,161,170,0.1)]'
+                }`}>
+                  {issue.severity}
+                </Badge>
+                
+                <div className="flex items-center gap-3 bg-white/[0.04] px-3 py-1 rounded-full border border-white/5 backdrop-blur-md shadow-inner">
+                  <span className="flex items-center gap-1.5"><Clock className="w-3 h-3 text-zinc-500"/> <span className="font-medium text-zinc-300">First seen:</span> {new Date(issue.first_seen_at).toLocaleString()}</span>
+                  <div className="w-[1px] h-3 bg-white/10" />
+                  <span className="flex items-center gap-1.5"><Activity className="w-3 h-3 text-zinc-500"/> <span className="font-medium text-zinc-300">Events:</span> {issue.event_count.toLocaleString()}</span>
+                  <div className="w-[1px] h-3 bg-white/10" />
+                  <span className="flex items-center gap-1.5"><ShieldAlert className="w-3 h-3 text-zinc-500"/> <span className="font-medium text-zinc-300">Fingerprint:</span> <code className="text-[10px] font-bold tracking-wider bg-white/10 text-white px-1.5 py-0.5 rounded shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]">{issue.fingerprint.substring(0,8)}</code></span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2 w-full lg:w-auto shrink-0">
+              <div className="w-[130px] shadow-[0_4px_10px_rgba(0,0,0,0.3)] rounded-lg">
+                <CustomSelect
+                  value={issue.status}
+                  onChange={updateStatus}
+                  disabled={isUpdatingStatus}
+                  options={[
+                    { value: "open", label: "Open" },
+                    { value: "resolved", label: "Resolved" },
+                    { value: "ignored", label: "Ignored" },
+                    { value: "regressed", label: "Regressed" }
+                  ]}
+                  placeholder="Status"
+                />
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Select value={issue.status} onValueChange={updateStatus} disabled={isUpdatingStatus}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="open">Open</SelectItem>
-              <SelectItem value="resolved">Resolved</SelectItem>
-              <SelectItem value="ignored">Ignored</SelectItem>
-              <SelectItem value="regressed">Regressed</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Error Details</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="bg-muted/50 p-4 rounded-md">
-                <div className="font-semibold text-red-500 mb-2">{issue.exception_type}</div>
-                <div className="text-sm font-mono whitespace-pre-wrap break-all">{issue.message}</div>
-              </div>
-
-              {stacktrace && (
-                <div>
-                  <h4 className="font-medium mb-2">Latest Stack Trace</h4>
-                  <pre className="bg-slate-950 text-slate-50 p-4 rounded-md overflow-x-auto text-xs font-mono leading-relaxed">
-                    {stacktrace}
-                  </pre>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            {/* LEFT COLUMN - MAIN CONTENT */}
+            <div className="lg:col-span-2 space-y-5">
+              
+              {/* ERROR DETAILS */}
+              <div className="w-full rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-3xl shadow-[0_12px_40px_rgba(0,0,0,0.6),_inset_0_1px_1px_rgba(255,255,255,0.05)] overflow-hidden">
+                <div className="px-5 py-4 border-b border-white/5 bg-transparent flex items-center gap-2 relative overflow-hidden">
+                  <div className="p-1.5 rounded-md bg-white/10 border border-white/10 shadow-sm">
+                    <Terminal className="w-3.5 h-3.5 text-zinc-200" />
+                  </div>
+                  <h2 className="text-xs font-bold text-zinc-200 uppercase tracking-widest drop-shadow-sm">Error Details</h2>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+                <div className="p-5 space-y-5 bg-gradient-to-b from-transparent to-black/40">
+                  <div className="bg-white/5 border border-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.4),_0_4px_12px_rgba(0,0,0,0.5)] p-4 rounded-xl backdrop-blur-md">
+                    {issue.exception_type && <div className="font-bold text-sm text-red-300 mb-2">{issue.exception_type}</div>}
+                    <div className="text-sm font-mono text-red-500 whitespace-pre-wrap break-all leading-relaxed drop-shadow-sm">{issue.message}</div>
+                  </div>
 
-          <Card className="border-indigo-200 overflow-hidden shadow-sm relative">
-            <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500" />
-            <CardHeader className="bg-indigo-50/50 flex flex-row items-center justify-between py-4">
-              <div>
-                <CardTitle className="text-indigo-900 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-indigo-500" />
-                  AI Root Cause Analysis
-                </CardTitle>
-              </div>
-              {!aiDiagnosis && (
-                <Button 
-                  onClick={handleDiagnose} 
-                  disabled={isDiagnosing}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                >
-                  {isDiagnosing ? (
-                     <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Analyzing...</>
-                  ) : (
-                     <><Sparkles className="w-4 h-4 mr-2" /> Diagnose Issue</>
+                  {stacktrace && (
+                    <div className="pt-1">
+                      <h4 className="text-xs font-semibold text-zinc-400 mb-2 flex items-center gap-2">
+                        Latest Stack Trace
+                      </h4>
+                      <pre className="bg-[#050505] border border-white/5 text-zinc-300 p-4 rounded-xl overflow-x-auto text-xs font-mono leading-loose shadow-[inset_0_2px_15px_rgba(0,0,0,1)] custom-scrollbar backdrop-blur-xl relative">
+                        {stacktrace}
+                      </pre>
+                    </div>
                   )}
-                </Button>
-              )}
-            </CardHeader>
-            {aiDiagnosis && (
-              <CardContent className="pt-6 space-y-6">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Root Cause</h3>
-                  <div className="text-slate-800 leading-relaxed text-sm">
-                    <ReactMarkdown>{aiDiagnosis.analysis_text}</ReactMarkdown>
-                  </div>
                 </div>
-                <div className="border-t pt-4">
-                  <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Suggested Fix</h3>
-                  <div className="prose prose-sm max-w-none text-slate-800">
-                    <ReactMarkdown>{aiDiagnosis.suggested_fix}</ReactMarkdown>
+              </div>
+
+              {/* AI ROOT CAUSE */}
+              <div className="w-full rounded-xl border border-white/10 bg-white/[0.04] backdrop-blur-xl shadow-[0_12px_40px_rgba(0,0,0,0.6),_inset_0_1px_1px_rgba(255,255,255,0.05)] overflow-hidden relative group">
+                <div className="absolute top-1/2 -translate-y-1/2 left-0 w-1 h-12 bg-white rounded-r-md shadow-[0_0_12px_rgba(255,255,255,0.8)]" />
+                
+                <div className="px-5 py-4  flex flex-col sm:flex-row sm:items-center justify-between gap-3  relative pl-5">
+                  <div className="flex items-center gap-2">
+                    <img src="/ai-icon.svg" alt="AI" className="w-10 h-10 object-contain" />
+                    <h2 className="text-xs font-bold text-white uppercase tracking-widest drop-shadow-sm">
+                      AI Root Cause Analysis
+                    </h2>
                   </div>
+                  
+                  {!aiDiagnosis && (
+                    <button 
+                      onClick={handleDiagnose} 
+                      disabled={isDiagnosing}
+                      className="flex items-center gap-2 h-8 px-4 rounded-lg bg-blue-500 hover:bg-blue-700  text-[11px] font-bold text-white transition-all disabled:opacity-50 disabled:pointer-events-none shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"
+                    >
+                      {isDiagnosing ? (
+                         <><Loader2 className="w-3 h-3 animate-spin" /> Analyzing...</>
+                      ) : (
+                         <><img src="/ai-icon.svg" alt="AI" className="w-6 h-6 object-contain" /> Diagnose Issue</>
+                      )}
+                    </button>
+                  )}
                 </div>
                 
-                <div className="border-t pt-4 flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">
-                    Automatically rewrite the affected file and open a GitHub Pull Request.
-                  </div>
-                  {aiDiagnosis.fix_pr_url ? (
-                    <a href={aiDiagnosis.fix_pr_url} target="_blank" rel="noopener noreferrer">
-                      <Button variant="outline" className="gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50">
-                        <GitPullRequest className="w-4 h-4" />
-                        View Pull Request
-                      </Button>
-                    </a>
-                  ) : (
-                    <Button 
-                      onClick={handleCreatePr} 
-                      disabled={isFixing}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
-                    >
-                      {isFixing ? (
-                         <><Loader2 className="w-4 h-4 animate-spin" /> Rewriting Code...</>
+                {aiDiagnosis && (
+                  <div className="p-5 space-y-6 bg-gradient-to-b from-transparent to-black/40">
+                    <div>
+                      <h3 className="text-[10px] font-black text-white/60 uppercase tracking-[0.2em] mb-3">Root Cause</h3>
+                      <div className="text-zinc-200 leading-relaxed text-sm prose prose-invert max-w-none">
+                        <ReactMarkdown>{aiDiagnosis.analysis_text}</ReactMarkdown>
+                      </div>
+                    </div>
+                    
+                    <div className="border-t border-white/5 pt-5">
+                      <h3 className="text-[10px] font-black text-white/60 uppercase tracking-[0.2em] mb-3">Suggested Fix</h3>
+                      <div className="text-zinc-200 leading-relaxed text-sm prose prose-invert max-w-none bg-white/[0.04] p-4 rounded-xl border border-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]">
+                        <ReactMarkdown>{aiDiagnosis.suggested_fix}</ReactMarkdown>
+                      </div>
+                    </div>
+                    
+                    <div className="border-t border-white/5 pt-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div className="text-xs text-zinc-400 font-medium">
+                        Automatically rewrite the affected file and open a Pull Request.
+                      </div>
+                      {aiDiagnosis.fix_pr_url ? (
+                        <a href={aiDiagnosis.fix_pr_url} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                          <button className="flex items-center gap-2 h-9 px-5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold text-white transition-all shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]">
+                            <GitPullRequest className="w-3.5 h-3.5" />
+                            View Pull Request
+                          </button>
+                        </a>
                       ) : (
-                         <><GitPullRequest className="w-4 h-4" /> Create Auto-Fix PR</>
-                      )}
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent Events</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {events.length === 0 ? (
-                <div className="text-sm text-muted-foreground">No detailed events stored.</div>
-              ) : (
-                <div className="space-y-4">
-                  {events.map((ev) => (
-                    <div key={ev.id} className="border-b last:border-0 pb-4 last:pb-0 flex flex-col gap-1">
-                      <div className="flex justify-between items-start">
-                        <span className="text-sm font-medium">{new Date(ev.occurred_at).toLocaleString()}</span>
-                        <div className="flex gap-2">
-                          {ev.session_id && (
-                            <Link href={`/dashboard/observability/sessions/${ev.session_id}?projectId=${projectId}`}>
-                              <Button variant="outline" size="sm" className="h-auto py-1 px-2 text-xs gap-1 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10">
-                                <MonitorPlay className="w-3 h-3" />
-                                Watch Session
-                              </Button>
-                            </Link>
+                        <button 
+                          onClick={handleCreatePr} 
+                          disabled={isFixing}
+                          className="shrink-0 flex items-center gap-2 h-9 px-5 rounded-lg bg-white hover:bg-zinc-200 text-xs font-bold text-black transition-all shadow-[0_4px_10px_rgba(255,255,255,0.2)] disabled:opacity-50 disabled:pointer-events-none"
+                        >
+                          {isFixing ? (
+                             <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Rewriting...</>
+                          ) : (
+                             <><GitPullRequest className="w-3.5 h-3.5" /> Create Auto-Fix PR</>
                           )}
-                          <Link href={`/dashboard/logs/${projectId}?traceId=${ev.trace_id}`}>
-                            <Button variant="link" size="sm" className="h-auto p-0 text-xs">View Trace</Button>
-                          </Link>
-                        </div>
-                      </div>
-                      <div className="text-xs text-muted-foreground flex gap-4">
-                        {ev.environment && <span>Env: {ev.environment}</span>}
-                        {ev.release && <span>Release: {ev.release}</span>}
-                        {ev.user_id && <span>User: {ev.user_id}</span>}
-                      </div>
+                        </button>
+                      )}
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Activity & Comments</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4 max-h-[400px] overflow-y-auto">
-                {comments.length === 0 ? (
-                  <div className="text-sm text-muted-foreground text-center italic">No comments yet.</div>
-                ) : (
-                  comments.map(c => (
-                    <div key={c.id} className="bg-muted p-3 rounded-lg text-sm">
-                      <div className="text-xs text-muted-foreground mb-1">{new Date(c.created_at).toLocaleString()}</div>
-                      <div>{c.body}</div>
-                    </div>
-                  ))
+                  </div>
                 )}
               </div>
-              
-              <div className="space-y-2">
-                <Textarea 
-                  placeholder="Leave a comment or note..." 
-                  value={newComment}
-                  onChange={(e) => setNewComment(e.target.value)}
-                />
-                <Button className="w-full" onClick={postComment} disabled={!newComment.trim()}>
-                  Post Comment
-                </Button>
+
+              {/* RECENT EVENTS */}
+              <div className="w-full rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-3xl shadow-[0_12px_40px_rgba(0,0,0,0.6),_inset_0_1px_1px_rgba(255,255,255,0.05)] overflow-hidden">
+                <div className="px-5 py-4 border-b border-white/5 bg-transparent flex items-center gap-2 relative">
+                  <div className="p-1.5 rounded-md bg-white/10 border border-white/10 shadow-sm">
+                    <Activity className="w-3.5 h-3.5 text-zinc-300" />
+                  </div>
+                  <h2 className="text-xs font-bold text-zinc-200 uppercase tracking-widest drop-shadow-sm">Recent Events</h2>
+                </div>
+                <div className="p-0 bg-gradient-to-b from-transparent to-black/40">
+                  {events.length === 0 ? (
+                    <div className="p-8 text-center text-xs font-medium text-zinc-500">No detailed events stored.</div>
+                  ) : (
+                    <div className="divide-y divide-white/5">
+                      {events.map((ev) => (
+                        <div key={ev.id} className="p-4 hover:bg-white/[0.03] transition-colors flex flex-col gap-2.5">
+                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                            <span className="text-xs font-bold text-zinc-300">{new Date(ev.occurred_at).toLocaleString()}</span>
+                            <div className="flex items-center gap-2">
+                              {ev.session_id && (
+                                <Link href={`/dashboard/observability/sessions/${ev.session_id}?projectId=${projectId}`}>
+                                  <button className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-indigo-500/30 bg-indigo-500/15 hover:bg-indigo-500/25 text-[11px] font-bold text-indigo-300 transition-all shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]">
+                                    <MonitorPlay className="w-3 h-3" />
+                                    Watch Session
+                                  </button>
+                                </Link>
+                              )}
+                              <Link href={`/dashboard/observability/logs/${projectId}?traceId=${ev.trace_id}`}>
+                                <button className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-white/10 bg-white/10 hover:bg-white/15 text-[11px] font-bold text-white transition-all shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]">
+                                  View Trace
+                                </button>
+                              </Link>
+                            </div>
+                          </div>
+                          <div className="text-[11px] text-zinc-400 flex flex-wrap items-center gap-x-4 gap-y-1 bg-[#050505]/80 p-2.5 rounded-lg border border-white/5 shadow-inner">
+                            {ev.environment && <span><span className="text-zinc-500 font-medium mr-1">Env:</span> <span className="text-zinc-300">{ev.environment}</span></span>}
+                            {ev.release && <span><span className="text-zinc-500 font-medium mr-1">Release:</span> <span className="text-zinc-300">{ev.release}</span></span>}
+                            {ev.user_id && <span><span className="text-zinc-500 font-medium mr-1">User:</span> <span className="text-zinc-300">{ev.user_id}</span></span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+
+            {/* RIGHT COLUMN - SIDEBAR */}
+            <div className="space-y-5">
+              
+              {/* ACTIVITY & COMMENTS */}
+              <div className="w-full rounded-2xl border border-white/5 bg-white/[0.04] backdrop-blur-3xl shadow-[0_12px_40px_rgba(0,0,0,0.6),_inset_0_1px_1px_rgba(255,255,255,0.05)] overflow-hidden flex flex-col h-[520px] sticky top-6">
+                <div className="px-5 py-4 border-b border-white/5 bg-transparent flex items-center gap-2 relative">
+                  <MessageSquare className="w-3.5 h-3.5 text-zinc-300" />
+                  <h2 className="text-xs font-bold text-zinc-200 uppercase tracking-widest drop-shadow-sm">Activity & Comments</h2>
+                </div>
+                
+                <div className="p-5 flex-1 flex flex-col justify-between bg-gradient-to-b from-transparent to-black/40 overflow-hidden">
+                  <div className="space-y-3 overflow-y-auto custom-scrollbar pr-2 mb-4 flex-1">
+                    {comments.length === 0 ? (
+                      <div className="text-xs text-zinc-500 font-medium text-center italic py-10 bg-black/60 rounded-xl border border-white/5 shadow-inner">No comments yet.</div>
+                    ) : (
+                      comments.map(c => (
+                        <div key={c.id} className="bg-white/[0.03] border border-white/10 p-4 rounded-xl text-xs group hover:bg-white/[0.05] transition-all shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]">
+                          <div className="text-[10px] text-zinc-500 mb-1.5 font-bold tracking-wide uppercase">{new Date(c.created_at).toLocaleString()}</div>
+                          <div className="text-zinc-200 leading-relaxed whitespace-pre-wrap">{c.body}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  
+                  <div className="space-y-3 pt-4 border-t border-white/5 relative">
+                    <Textarea 
+                      placeholder="Leave a comment or note..." 
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      className="bg-[#050505] border-white/10 shadow-[inset_0_2px_10px_rgba(0,0,0,0.8)] focus-visible:ring-1 focus-visible:ring-zinc-500 resize-none min-h-[90px] text-xs text-zinc-200 placeholder:text-zinc-600 rounded-xl p-3 custom-scrollbar"
+                    />
+                    <button 
+                      className="w-full h-9 rounded-lg bg-white/90 text-zinc-900 hover:bg-white border border-transparent text-xs font-bold transition-all disabled:opacity-50 disabled:pointer-events-none shadow-[0_2px_10px_rgba(255,255,255,0.2)]" 
+                      onClick={postComment} 
+                      disabled={!newComment.trim()}
+                    >
+                      Post Comment
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
         </div>
       </div>
+      
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+          height: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.2);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+      `}} />
     </div>
   );
 }
