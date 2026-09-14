@@ -1,5 +1,6 @@
 import { pool } from '../config/postgres.js';
 import { clickhouse } from '../config/clickhouse.js';
+import { invalidatePublicStatusCache } from './status.controller.js';
 
 export const getStatusPageConfig = async (req, res) => {
   try {
@@ -19,6 +20,7 @@ export const getStatusPageConfig = async (req, res) => {
         show_incidents: true
       });
     }
+    invalidatePublicStatusCache();
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch status page config' });
@@ -79,13 +81,21 @@ export const createSLO = async (req, res) => {
   try {
     const { projectId } = req.params;
     const { name, type, target_percentage, window_days, metric_source, latency_threshold_ms } = req.body;
+
+    const existing = await pool.query(
+      `SELECT id FROM service_level_objectives WHERE project_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
+      [projectId, name.trim()]
+    );
+    if (existing.rows.length) {
+      return res.status(409).json({ error: 'An SLO with this name already exists for this project.' });
+    }
     
     const result = await pool.query(`
       INSERT INTO service_level_objectives (
         project_id, name, type, target_percentage, window_days, metric_source, latency_threshold_ms
       ) VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *
-    `, [projectId, name, type, target_percentage, window_days, metric_source || 'synthetic_checks', latency_threshold_ms]);
+    `, [projectId, name.trim(), type, target_percentage, window_days, metric_source || 'synthetic_checks', latency_threshold_ms]);
     
     res.status(201).json(result.rows[0]);
   } catch (err) {

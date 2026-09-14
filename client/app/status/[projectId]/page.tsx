@@ -142,7 +142,7 @@ export default function PublicStatusPage() {
         <StatusBanner />
 
         {/* Active Incidents */}
-        {activeIncidents && activeIncidents.length > 0 && (
+        {config.show_incidents && activeIncidents && activeIncidents.length > 0 && (
           <div className="space-y-6">
             <h2 className="text-2xl font-bold text-slate-800">Active Incidents</h2>
             {activeIncidents.map((incident: any) => (
@@ -254,7 +254,7 @@ export default function PublicStatusPage() {
         )}
         
         {/* Past Incidents */}
-        {pastIncidents && pastIncidents.length > 0 && (
+        {config.show_incidents && pastIncidents && pastIncidents.length > 0 && (
           <div className="space-y-4 pt-4 border-t border-slate-200">
             <h2 className="text-xl font-bold text-slate-800">Past Incidents</h2>
             <div className="space-y-4">

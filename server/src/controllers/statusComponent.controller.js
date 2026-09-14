@@ -1,4 +1,5 @@
 import { pool } from '../config/postgres.js';
+import { invalidatePublicStatusCache } from './status.controller.js';
 
 export const getComponents = async (req, res) => {
   try {
@@ -24,6 +25,7 @@ export const createComponent = async (req, res) => {
       RETURNING *
     `, [projectId, name, description || null, position || 0]);
     
+    invalidatePublicStatusCache();
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -49,6 +51,7 @@ export const updateComponent = async (req, res) => {
     `, [name, description, position, current_status, projectId, componentId]);
     
     if (result.rows.length === 0) return res.status(404).json({ error: 'Component not found' });
+    invalidatePublicStatusCache();
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Failed to update component' });
@@ -62,6 +65,7 @@ export const deleteComponent = async (req, res) => {
       `DELETE FROM status_page_components WHERE project_id = $1 AND id = $2`,
       [projectId, componentId]
     );
+    invalidatePublicStatusCache();
     res.status(204).send();
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete component' });

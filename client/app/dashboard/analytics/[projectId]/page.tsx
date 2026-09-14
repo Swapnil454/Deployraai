@@ -1,10 +1,50 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Loader2, ArrowLeft, BarChart2, MousePointerClick, Globe, Monitor, Smartphone, Code, Wand2, GitBranch, ExternalLink, CheckCircle2, MoreHorizontal, Copy, Check, ChevronDown, Calendar } from "lucide-react";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ProjectAvatar } from "@/components/dashboard/ProjectAvatar";
 import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
+
+const chartConfig = {
+  visitors: { label: "Visitors", key: "visitors", suffix: "" },
+  pageViews: { label: "Page views", key: "pageViews", suffix: "" },
+  bounceRate: { label: "Bounce rate", key: "bounceRate", suffix: "%" },
+} as const;
+
+const rowAccents = [
+  { fill: "rgba(59, 130, 246, 0.14)", border: "#3b82f6" },
+  { fill: "rgba(139, 92, 246, 0.14)", border: "#8b5cf6" },
+  { fill: "rgba(20, 184, 166, 0.14)", border: "#14b8a6" },
+  { fill: "rgba(245, 158, 11, 0.14)", border: "#f59e0b" },
+  { fill: "rgba(244, 63, 94, 0.14)", border: "#f43f5e" },
+  { fill: "rgba(6, 182, 212, 0.14)", border: "#06b6d4" },
+  { fill: "rgba(132, 204, 22, 0.14)", border: "#84cc16" },
+] as const;
+
+function SegmentedBar({ x = 0, y = 0, width = 0, height = 0 }: { x?: number; y?: number; width?: number; height?: number }) {
+  const cellHeight = 11;
+  const gap = 1.5;
+  const rows = Math.max(1, Math.floor(height / cellHeight));
+  const cellWidth = Math.max(1, width - gap);
+  const renderedHeight = rows * cellHeight;
+
+  return (
+    <g>
+      {Array.from({ length: rows }, (_, index) => (
+        <rect
+          key={index}
+          x={x + gap / 2}
+          y={y + renderedHeight - (index + 1) * cellHeight + gap / 2}
+          width={cellWidth}
+          height={cellHeight - gap}
+          fill={index > rows * 0.74 ? "#b7d978" : "#91cfae"}
+        />
+      ))}
+    </g>
+  );
+}
 
 export default function ProjectAnalyticsPage() {
   const router = useRouter();
@@ -18,11 +58,10 @@ export default function ProjectAnalyticsPage() {
   const [summary, setSummary] = useState<any>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   
-  const [range, setRange] = useState("7d");
+  const [range, setRange] = useState("25d");
   const [environment, setEnvironment] = useState("all");
 
   const [showSetup, setShowSetup] = useState(false);
-  const [userDismissed, setUserDismissed] = useState(false);
 
   // New states for tabs
   const [chartTab, setChartTab] = useState("visitors"); // visitors, pageViews, bounceRate
@@ -32,6 +71,19 @@ export default function ProjectAnalyticsPage() {
   
   const [copied, setCopied] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const activeChart = chartConfig[chartTab as keyof typeof chartConfig];
+  const chartData = useMemo(() => (summary?.timeseries || []).map((point: { date: string; visitors: number; pageViews: number; bounceRate?: number }) => ({
+    ...point,
+    value: point[activeChart.key],
+    volume: Math.max(1, Math.round(Number(point.pageViews || 0) * 0.28)),
+  })), [summary?.timeseries, activeChart.key]);
+  const formatChartDate = (date: React.ReactNode) => {
+    if (typeof date !== "string") return "";
+    const value = new Date(date);
+    if (range === "24h") return new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit", hour12: false }).format(value);
+    if (range === "3d" || range === "7d") return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "2-digit", hour12: false }).format(value);
+    return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(value);
+  };
 
   useEffect(() => {
     if (!openDropdown) return;
@@ -44,8 +96,6 @@ export default function ProjectAnalyticsPage() {
       document.removeEventListener('click', handleGlobalClick);
     };
   }, [openDropdown]);
-
-  const hasData = summary?.visitors > 0 || summary?.pageViews > 0;
 
   const fetchProject = useCallback(async () => {
     try {
@@ -62,7 +112,7 @@ export default function ProjectAnalyticsPage() {
   }, [projectId]);
 
   const fetchSummary = useCallback(async () => {
-    if (!project?.analytics?.enabled) return;
+    if (!project) return;
     setLoadingSummary(true);
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${projectId}/analytics/summary?range=${range}&environment=${environment}`, { credentials: "include" });
@@ -75,7 +125,7 @@ export default function ProjectAnalyticsPage() {
     } finally {
       setLoadingSummary(false);
     }
-  }, [projectId, range, environment, project?.analytics?.enabled]);
+  }, [projectId, range, environment, project]);
 
   useEffect(() => {
     fetchProject();
@@ -133,7 +183,7 @@ export default function ProjectAnalyticsPage() {
     return <div className="p-8 text-white">Project not found</div>;
   }
 
-  const isVerified = project.analytics?.verified;
+  const isVerified = project.analytics?.verified === true;
 
   const getDomainStr = () => {
     return project.domains?.[0]?.domain 
@@ -156,11 +206,12 @@ export default function ProjectAnalyticsPage() {
     const maxCount = data[0].count;
     return data.map((item: any, idx: number) => {
       const percent = Math.max(2, (item.count / maxCount) * 100);
+      const colors = rowAccents[idx % rowAccents.length];
       return (
-        <div key={idx} className="relative flex items-center justify-between p-2.5 px-4 hover:bg-zinc-900/50 group border-b border-zinc-800/30 last:border-0">
-          <div className="absolute left-0 top-0 bottom-0 bg-blue-500/10 group-hover:bg-blue-500/20 transition-colors" style={{ width: `${percent}%` }} />
+        <div key={idx} className="relative flex items-center justify-between p-2.5 px-4 hover:bg-zinc-900/50 group border-b border-zinc-800/50 last:border-0">
+          <div className="absolute left-0 top-0 bottom-0 transition-[width] duration-300" style={{ width: `${percent}%`, backgroundColor: colors.fill, borderLeft: `2px solid ${colors.border}` }} />
           <span className="relative z-10 text-[13px] text-zinc-300 truncate max-w-[80%]">{item[titleField] || '/'}</span>
-          <span className="relative z-10 text-[13px] text-zinc-400">{item.count}</span>
+          <span className="relative z-10 text-[13px] tabular-nums text-white">{item.count}</span>
         </div>
       );
     });
@@ -226,7 +277,7 @@ export default function ProjectAnalyticsPage() {
                     className="flex items-center gap-2 bg-[#0a0a0a] border border-zinc-800 hover:border-zinc-700 text-[13px] font-medium text-white h-9 px-3 rounded-md transition-colors"
                   >
                     <Calendar className="h-3.5 w-3.5 text-zinc-400" />
-                    {range === '24h' ? 'Last 24 hours' : range === '3d' ? 'Last 3 days' : range === '7d' ? 'Last 7 days' : 'Last 30 days'}
+                    {range === '24h' ? 'Last 24 hours' : range === '3d' ? 'Last 3 days' : range === '7d' ? 'Last 7 days' : range === '25d' ? 'Last 25 days' : 'Last 30 days'}
                     <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
                   </button>
                   <div className={`absolute right-0 top-full mt-1 w-48 bg-[#0a0a0a] border border-zinc-800 rounded-md shadow-xl transition-all z-50 py-1 ${openDropdown === 'time' ? 'opacity-100 visible' : 'opacity-0 invisible'}`}>
@@ -238,6 +289,9 @@ export default function ProjectAnalyticsPage() {
                     </button>
                     <button onClick={(e) => { e.stopPropagation(); setRange('7d'); setOpenDropdown(null); }} className={`w-full text-left px-4 py-2 text-[13px] hover:bg-blue-600 transition-colors ${range === '7d' ? 'bg-blue-500 text-white' : 'text-zinc-300'}`}>
                       Last 7 days
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); setRange('25d'); setOpenDropdown(null); }} className={`w-full text-left px-4 py-2 text-[13px] hover:bg-blue-600 transition-colors ${range === '25d' ? 'bg-blue-500 text-white' : 'text-zinc-300'}`}>
+                      Last 25 days
                     </button>
                     <button onClick={(e) => { e.stopPropagation(); setRange('30d'); setOpenDropdown(null); }} className={`w-full text-left px-4 py-2 text-[13px] hover:bg-blue-600 transition-colors ${range === '30d' ? 'bg-blue-500 text-white' : 'text-zinc-300'}`}>
                       Last 30 days
@@ -261,18 +315,16 @@ export default function ProjectAnalyticsPage() {
                       onClick={(e) => {
                         e.stopPropagation();
                         setOpenDropdown(null);
-                        const isSetupVisible = (!hasData && !userDismissed) || showSetup;
+                        const isSetupVisible = showSetup;
                         if (isSetupVisible) {
-                          setUserDismissed(true);
                           setShowSetup(false);
                         } else {
                           setShowSetup(true);
-                          setUserDismissed(false);
                         }
                       }}
                       className="w-full text-left px-4 py-2 text-[13px] text-zinc-300 hover:bg-zinc-900 hover:text-white transition-colors"
                     >
-                      {((!hasData && !userDismissed) || showSetup) ? "Hide Setup Instructions" : "View Setup Instructions"}
+                      {showSetup ? "Hide Setup Instructions" : "View Setup Instructions"}
                     </button>
                     <button disabled className="w-full text-left px-4 py-2 text-[13px] text-zinc-600 cursor-not-allowed transition-colors">Add Drain</button>
                     <div className="my-1 border-t border-zinc-800/50"></div>
@@ -292,7 +344,7 @@ export default function ProjectAnalyticsPage() {
             </div>
 
             {/* Integration Section */}
-            {((!hasData && !userDismissed) || showSetup) && (
+            {showSetup && (
               <div className="mb-4">
                 <ObservabilitySetup 
                   project={project}
@@ -302,40 +354,55 @@ export default function ProjectAnalyticsPage() {
             )}
 
             {/* Main Chart Area */}
-            <div className="w-full border border-zinc-800 rounded-xl overflow-hidden relative mb-4">
-              <div className="grid grid-cols-3 divide-x divide-zinc-800 bg-[#0a0a0a] border-b border-zinc-800 relative z-20">
-                <button onClick={() => setChartTab('visitors')} className={`p-4 sm:p-6 text-left transition-colors hover:bg-zinc-900/30 ${chartTab === 'visitors' ? 'border-b-2 border-b-blue-500 bg-zinc-900/50 -mb-[1px]' : ''}`}>
-                  <div className="text-[13px] sm:text-sm text-zinc-400 mb-2">Visitors</div>
+            <div className="w-full overflow-hidden relative mb-4 rounded-xl border border-zinc-800 bg-[#0a0a0a]">
+              <div className="grid grid-cols-3 divide-x divide-zinc-800 border-b border-zinc-800">
+                <button onClick={() => setChartTab('visitors')} className={`group relative p-4 sm:p-6 text-left transition-colors hover:bg-zinc-900/40 ${chartTab === 'visitors' ? 'bg-zinc-900/50 shadow-[inset_0_-2px_0_#3b82f6]' : ''}`}>
+                  <div className={`text-[13px] sm:text-sm mb-2 transition-colors ${chartTab === 'visitors' ? 'text-zinc-200' : 'text-zinc-500 group-hover:text-zinc-300'}`}>Visitors</div>
                   <div className="text-xl sm:text-3xl font-semibold text-white">
                     {loadingSummary ? <Loader2 className="h-5 w-5 animate-spin text-zinc-600" /> : (summary?.visitors || 0)}
                   </div>
                 </button>
-                <button onClick={() => setChartTab('pageViews')} className={`p-4 sm:p-6 text-left transition-colors hover:bg-zinc-900/30 ${chartTab === 'pageViews' ? 'border-b-2 border-b-blue-500 bg-zinc-900/50 -mb-[1px]' : ''}`}>
-                  <div className="text-[13px] sm:text-sm text-zinc-400 mb-2">Page Views</div>
+                <button onClick={() => setChartTab('pageViews')} className={`group relative p-4 sm:p-6 text-left transition-colors hover:bg-zinc-900/40 ${chartTab === 'pageViews' ? 'bg-zinc-900/50 shadow-[inset_0_-2px_0_#8b5cf6]' : ''}`}>
+                  <div className={`text-[13px] sm:text-sm mb-2 transition-colors ${chartTab === 'pageViews' ? 'text-zinc-200' : 'text-zinc-500 group-hover:text-zinc-300'}`}>Page Views</div>
                   <div className="text-xl sm:text-3xl font-semibold text-white">
                     {loadingSummary ? <Loader2 className="h-5 w-5 animate-spin text-zinc-600" /> : (summary?.pageViews || 0)}
                   </div>
                 </button>
-                <button onClick={() => setChartTab('bounceRate')} className={`p-4 sm:p-6 text-left transition-colors hover:bg-zinc-900/30 ${chartTab === 'bounceRate' ? 'border-b-2 border-b-blue-500 bg-zinc-900/50 -mb-[1px]' : ''}`}>
-                  <div className="text-[13px] sm:text-sm text-zinc-400 mb-2">Bounce Rate</div>
+                <button onClick={() => setChartTab('bounceRate')} className={`group relative p-4 sm:p-6 text-left transition-colors hover:bg-zinc-900/40 ${chartTab === 'bounceRate' ? 'bg-zinc-900/50 shadow-[inset_0_-2px_0_#14b8a6]' : ''}`}>
+                  <div className={`text-[13px] sm:text-sm mb-2 transition-colors ${chartTab === 'bounceRate' ? 'text-zinc-200' : 'text-zinc-500 group-hover:text-zinc-300'}`}>Bounce Rate</div>
                   <div className="text-xl sm:text-3xl font-semibold text-white">
                     {loadingSummary ? <Loader2 className="h-5 w-5 animate-spin text-zinc-600" /> : `${summary?.bounceRate || 0}%`}
                   </div>
                 </button>
               </div>
-              <div className="h-[300px] bg-[#0a0a0a] p-0 flex flex-col justify-end relative">
-                 {summary?.timeseries?.length > 0 ? (
-                   <svg className="w-full h-full opacity-60" viewBox="0 0 100 100" preserveAspectRatio="none">
-                      <path d="M0,80 L10,75 L20,85 L30,60 L40,65 L50,40 L60,50 L70,30 L80,35 L90,10 L100,20 L100,100 L0,100 Z" fill="rgba(59,130,246,0.1)" />
-                      <path d="M0,80 L10,75 L20,85 L30,60 L40,65 L50,40 L60,50 L70,30 L80,35 L90,10 L100,20" fill="none" stroke="rgba(59,130,246,0.5)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-                   </svg>
+              <div className="h-[300px] px-3 pb-3 pt-5 relative">
+                 {chartData.length > 0 ? (
+                   <ResponsiveContainer width="100%" height="100%">
+                     {chartTab === "visitors" ? <AreaChart data={chartData} margin={{ top: 14, right: 46, left: 4, bottom: 0 }}>
+                       <defs>
+                         <linearGradient id="analytics-area-fill" x1="0" y1="0" x2="0" y2="1">
+                           <stop offset="0%" stopColor="#d14f50" stopOpacity={0.38} />
+                           <stop offset="72%" stopColor="#8c353b" stopOpacity={0.1} />
+                           <stop offset="100%" stopColor="#251f25" stopOpacity={0} />
+                         </linearGradient>
+                       </defs>
+                       <CartesianGrid vertical={false} stroke="#34313a" strokeOpacity={0.72} />
+                       <XAxis dataKey="date" tickFormatter={formatChartDate} axisLine={{ stroke: "#3b3740" }} tickLine={false} tickMargin={15} interval={0} tick={{ fill: "#9b98a2", fontSize: 11 }} />
+                       <YAxis orientation="right" axisLine={false} tickLine={false} tickMargin={12} width={34} domain={[0, "auto"]} tick={{ fill: "#9b98a2", fontSize: 12 }} />
+                       <Tooltip cursor={{ stroke: "#d14f50", strokeWidth: 2 }} contentStyle={{ background: "#25232a", border: "1px solid #4c4752", borderRadius: "4px" }} labelStyle={{ color: "#e8e6ea", marginBottom: 4 }} itemStyle={{ color: "#ef7770" }} labelFormatter={formatChartDate} formatter={(value) => [`${Number(value).toLocaleString()}`, activeChart.label]} />
+                       <Area type="linear" dataKey="value" stroke="#d14f50" strokeWidth={3} fill="url(#analytics-area-fill)" activeDot={{ r: 7, fill: "#f7f7f7", stroke: "#d14f50", strokeWidth: 4 }} />
+                     </AreaChart> : chartTab === "pageViews" ? <ComposedChart data={chartData} margin={{ top: 14, right: 16, left: 4, bottom: 0 }}>
+                       <defs><linearGradient id="pageview-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#83cd78" stopOpacity={0.2} /><stop offset="100%" stopColor="#83cd78" stopOpacity={0} /></linearGradient></defs>
+                       <CartesianGrid vertical={false} stroke="#2f3231" strokeOpacity={0.36} /><XAxis dataKey="date" tickFormatter={formatChartDate} axisLine={false} tickLine={false} tickMargin={14} interval={0} tick={{ fill: "#8f9892", fontSize: 11 }} /><YAxis hide domain={[0, "auto"]} />
+                       <Tooltip cursor={{ stroke: "#80c976", strokeOpacity: 0.45 }} contentStyle={{ background: "#1d211f", border: "1px solid #4c5a4e", borderRadius: "4px" }} labelStyle={{ color: "#e2e8df", marginBottom: 4 }} itemStyle={{ color: "#9ed68d" }} labelFormatter={formatChartDate} formatter={(value) => [`${Number(value).toLocaleString()}`, activeChart.label]} /><Bar dataKey="volume" fill="#526454" opacity={0.25} radius={[1, 1, 0, 0]} barSize={8} /><Area type="linear" dataKey="value" stroke="none" fill="url(#pageview-area)" /><Line type="linear" dataKey="value" stroke="#8bd17f" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: "#b5e69e", stroke: "#344d37", strokeWidth: 2 }} />
+                     </ComposedChart> : <BarChart data={chartData} margin={{ top: 12, right: 14, left: 4, bottom: 0 }} barCategoryGap="7%">
+                       <XAxis dataKey="date" tickFormatter={formatChartDate} axisLine={{ stroke: "#44484c" }} tickLine={false} tickMargin={14} interval={0} tick={{ fill: "#9ba4a2", fontSize: 11 }} /><YAxis hide domain={[0, 100]} />
+                       <Tooltip cursor={{ fill: "rgba(167,207,150,.07)" }} contentStyle={{ background: "#222832", border: "1px solid #4e5d57", borderRadius: "4px" }} labelStyle={{ color: "#eef5e9", marginBottom: 4 }} itemStyle={{ color: "#b7d978" }} labelFormatter={formatChartDate} formatter={(value) => [`${Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`, activeChart.label]} /><Bar dataKey="value" shape={<SegmentedBar />} />
+                     </BarChart>}
+                   </ResponsiveContainer>
                  ) : (
                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                     <svg className="w-full h-full opacity-10 absolute" viewBox="0 0 100 100" preserveAspectRatio="none">
-                        <path d="M0,80 L10,75 L20,85 L30,60 L40,65 L50,40 L60,50 L70,30 L80,35 L90,10 L100,20 L100,100 L0,100 Z" fill="rgba(255,255,255,0.1)" />
-                        <path d="M0,80 L10,75 L20,85 L30,60 L40,65 L50,40 L60,50 L70,30 L80,35 L90,10 L100,20" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
-                     </svg>
-                     <span className="text-sm text-zinc-500 relative z-10">No data found for selected period</span>
+                     <span className="text-sm text-zinc-500">No {activeChart.label.toLowerCase()} data for the selected period</span>
                    </div>
                  )}
               </div>
@@ -353,9 +420,9 @@ export default function ProjectAnalyticsPage() {
                   <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider px-2 pb-3">Visitors</span>
                 </div>
                 <div className="flex flex-col flex-1 pb-2">
-                  {pagesTab === 'pages' && renderList(summary?.topPages)}
-                  {pagesTab === 'routes' && renderList(summary?.topPages)}
-                  {pagesTab === 'hostnames' && renderList(summary?.topHostnames)}
+                  {pagesTab === 'pages' && renderList(summary?.topPages, "_id", "No page data found")}
+                  {pagesTab === 'routes' && renderList(summary?.topPages, "_id", "No route data found")}
+                  {pagesTab === 'hostnames' && renderList(summary?.topHostnames, "_id", "No hostname data found")}
                 </div>
               </div>
               
@@ -368,8 +435,8 @@ export default function ProjectAnalyticsPage() {
                   <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider px-2 pb-3">Visitors</span>
                 </div>
                 <div className="flex flex-col flex-1 pb-2">
-                  {sourcesTab === 'referrers' && renderList(summary?.topReferrers)}
-                  {sourcesTab === 'utm' && renderList(summary?.topReferrers)}
+                  {sourcesTab === 'referrers' && renderList(summary?.topReferrers, "_id", "No referrer data found")}
+                  {sourcesTab === 'utm' && renderList(summary?.topReferrers, "_id", "No UTM data found")}
                 </div>
               </div>
             </div>
@@ -384,7 +451,7 @@ export default function ProjectAnalyticsPage() {
                   <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider px-2 pb-3">Visitors</span>
                 </div>
                 <div className="flex flex-col flex-1 pb-2">
-                  {renderList(summary?.topCountries)}
+                  {renderList(summary?.topCountries, "_id", "No country data found")}
                 </div>
               </div>
 
@@ -397,8 +464,8 @@ export default function ProjectAnalyticsPage() {
                   <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider px-2 pb-3">Visitors</span>
                 </div>
                 <div className="flex flex-col flex-1 pb-2">
-                  {devicesTab === 'devices' && renderList(summary?.topDevices)}
-                  {devicesTab === 'browsers' && renderList(summary?.topBrowsers)}
+                  {devicesTab === 'devices' && renderList(summary?.topDevices, "_id", "No device data found")}
+                  {devicesTab === 'browsers' && renderList(summary?.topBrowsers, "_id", "No browser data found")}
                 </div>
               </div>
 
@@ -410,7 +477,7 @@ export default function ProjectAnalyticsPage() {
                   <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider px-2 pb-3">Visitors</span>
                 </div>
                 <div className="flex flex-col flex-1 pb-2">
-                  {renderList(summary?.topOS)}
+                  {renderList(summary?.topOS, "_id", "No operating system data found")}
                 </div>
               </div>
             </div>

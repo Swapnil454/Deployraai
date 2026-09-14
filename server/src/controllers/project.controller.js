@@ -1,8 +1,10 @@
 import axios from "axios";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 import User from "../models/User.js";
 import { decryptSecret } from "../utils/encryption.js";
+
 
 function generateProjectToken(projectId) {
   if (!process.env.INGESTOR_JWT_SECRET) {
@@ -573,16 +575,20 @@ export const disableStatusPage = async (req, res) => {
 
 import AnalyticsEvent from "../models/AnalyticsEvent.js";
 
+function getRangeConfig(range) {
+  const ranges = {
+    "24h": { hours: 24, bucketHours: 1 },
+    "3d": { hours: 72, bucketHours: 4 },
+    "7d": { hours: 168, bucketHours: 12 },
+    "25d": { hours: 600, bucketHours: 24 },
+    "30d": { hours: 720, bucketHours: 24 },
+  };
+  return ranges[range] || ranges["25d"];
+}
+
 function getFromDate(range) {
   const now = new Date();
-  const map = {
-    "24h": 1,
-    "3d": 3,
-    "7d": 7,
-    "30d": 30,
-  };
-  const days = map[range] || 7;
-  now.setDate(now.getDate() - days);
+  now.setHours(now.getHours() - getRangeConfig(range).hours);
   return now;
 }
 
@@ -604,6 +610,7 @@ export const getAnalyticsSummary = async (req, res) => {
     }
 
     const fromDate = getFromDate(range);
+    const rangeConfig = getRangeConfig(range);
 
     const match = {
       projectId: project._id,
@@ -632,14 +639,45 @@ export const getAnalyticsSummary = async (req, res) => {
 
       AnalyticsEvent.aggregate([
         { $match: baseMatch },
-        { 
-          $group: { 
-            _id: { $dateToString: { format: "%Y-%m-%d", date: "$timestamp" } },
-            visitors: { $addToSet: "$visitorHash" },
+        {
+          $group: {
+            _id: {
+              bucket: {
+                $dateTrunc: {
+                  date: "$timestamp",
+                  unit: "hour",
+                  binSize: rangeConfig.bucketHours,
+                  timezone: "UTC"
+                }
+              },
+              visitorHash: "$visitorHash"
+            },
             pageViews: { $sum: 1 }
-          } 
+          }
         },
-        { $project: { date: "$_id", visitors: { $size: "$visitors" }, pageViews: 1, _id: 0 } },
+        {
+          $group: {
+            _id: "$_id.bucket",
+            visitors: { $sum: 1 },
+            pageViews: { $sum: "$pageViews" },
+            bouncedVisitors: { $sum: { $cond: [{ $eq: ["$pageViews", 1] }, 1, 0] } }
+          }
+        },
+        {
+          $project: {
+            date: { $dateToString: { format: "%Y-%m-%dT%H:%M:%S.000Z", date: "$_id", timezone: "UTC" } },
+            visitors: 1,
+            pageViews: 1,
+            bounceRate: {
+              $cond: [
+                { $gt: ["$visitors", 0] },
+                { $multiply: [{ $divide: ["$bouncedVisitors", "$visitors"] }, 100] },
+                0
+              ]
+            },
+            _id: 0
+          }
+        },
         { $sort: { date: 1 } }
       ]),
 
@@ -700,6 +738,17 @@ export const getAnalyticsSummary = async (req, res) => {
     }
     
     const { topPages, topReferrers, topHostnames, topCountries, topDevices, topBrowsers, topOS } = topListsResult[0] || {};
+    const timeseriesByDate = new Map(timeseries.map((point) => [point.date, point]));
+    const bucketCount = rangeConfig.hours / rangeConfig.bucketHours;
+    const currentBucket = new Date();
+    currentBucket.setUTCMinutes(0, 0, 0);
+    currentBucket.setUTCHours(Math.floor(currentBucket.getUTCHours() / rangeConfig.bucketHours) * rangeConfig.bucketHours);
+    const completeTimeseries = Array.from({ length: bucketCount }, (_, index) => {
+      const date = new Date();
+      date.setTime(currentBucket.getTime() - (bucketCount - 1 - index) * rangeConfig.bucketHours * 60 * 60 * 1000);
+      const dateKey = date.toISOString().replace(/\.\d{3}Z$/, ".000Z");
+      return timeseriesByDate.get(dateKey) || { date: dateKey, visitors: 0, pageViews: 0, bounceRate: 0 };
+    });
 
     res.json({
       success: true,
@@ -707,7 +756,7 @@ export const getAnalyticsSummary = async (req, res) => {
         pageViews,
         visitors,
         bounceRate,
-        timeseries,
+        timeseries: completeTimeseries,
         topPages,
         topReferrers,
         topHostnames,
@@ -759,6 +808,34 @@ export const getProjectUsage = async (req, res) => {
     if (platform === 'render') {
       const { getRenderToken, getRenderUsage, getRenderCPU, getRenderRequests } = await import('../services/providers/render.service.js');
       const token = await getRenderToken(req.user.userId);
+
+      // Mock fallback for demo/seed projects without a real Render token
+      if (!token && project.configuration?.mockBackendUsage) {
+        const days = range === '7d' ? 7 : range === '30d' ? 30 : 30;
+        const buildTimeSeries = (baseVal, jitter) =>
+          Array.from({ length: days }, (_, i) => {
+            const d = new Date();
+            d.setDate(d.getDate() - (days - 1 - i));
+            return { date: d.toISOString().split('T')[0], value: Math.max(0, baseVal + Math.round((Math.random() - 0.4) * jitter)) };
+          });
+        const toRenderFormat = (series, unit) => ({
+          data: series.map(p => ({ date: p.date, values: [{ date: p.date, value: p.value }], unit }))
+        });
+        const bwSeries  = buildTimeSeries(180 * 1024 * 1024, 80 * 1024 * 1024); // ~180 MB/day
+        const cpuSeries = buildTimeSeries(0.012, 0.008);                         // ~0.012 Core-hrs/day
+        const reqSeries = buildTimeSeries(2400, 800);                             // ~2400 requests/day
+        return res.json({
+          success: true,
+          platform: 'render',
+          mock: true,
+          usage: {
+            bandwidth: toRenderFormat(bwSeries, 'bytes'),
+            cpu:       toRenderFormat(cpuSeries, 'core'),
+            requests:  toRenderFormat(reqSeries, 'count'),
+          },
+        });
+      }
+
       if (!token) return res.status(400).json({ success: false, message: "Render not connected" });
       
       const serviceId = project.configuration.renderServiceId;
@@ -808,10 +885,14 @@ export const getProjectUsage = async (req, res) => {
 export const getAiUsage = async (req, res) => {
   try {
     const { projectId, range = '14d', feature = 'total' } = req.query;
-    
-    let query = { userId: req.user.userId };
+
+    // IMPORTANT: aggregate() does NOT auto-cast strings to ObjectId (unlike find()).
+    // The JWT stores userId as a plain string, so we must cast it explicitly.
+    const userObjectId = new mongoose.Types.ObjectId(req.user.userId);
+
+    let query = { userId: userObjectId };
     if (projectId) {
-      query.projectId = projectId;
+      query.projectId = new mongoose.Types.ObjectId(projectId);
     }
     if (feature && feature !== 'total') {
       query.feature = feature;

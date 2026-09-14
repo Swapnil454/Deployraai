@@ -1,224 +1,225 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
-
-import { Copy, ExternalLink, Loader2 } from "lucide-react";
-
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
+import { useParams, useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  Activity,
+  ArrowUpRight,
+  Check,
+  CheckCircle2,
+  CircleDot,
+  Copy,
+  ExternalLink,
+  FileText,
+  Globe2,
+  Layers3,
+  Link2,
+  Loader2,
+  Radio,
+  Save,
+  Settings2,
+  ShieldCheck,
+} from "lucide-react";
+
+type StatusPageConfig = {
+  enabled: boolean;
+  title: string;
+  description: string;
+  slug: string;
+  show_uptime_history: boolean;
+  show_incidents: boolean;
+};
+
+type Project = { repoName?: string };
+
+const emptyConfig: StatusPageConfig = {
+  enabled: false,
+  title: "",
+  description: "",
+  slug: "",
+  show_uptime_history: true,
+  show_incidents: true,
+};
+
+const inputClass = "h-10 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none transition focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/10 placeholder:text-zinc-600";
+
+function normalizeConfig(value: Partial<StatusPageConfig>): StatusPageConfig {
+  return { ...emptyConfig, ...value, slug: value.slug || "" };
+}
+
+function Toggle({ checked, label, onChange }: { checked: boolean; label: string; onChange: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={onChange}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${checked ? "border-blue-400/40 bg-blue-500" : "border-zinc-700 bg-zinc-900"}`}
+    >
+      <span className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${checked ? "translate-x-5" : "translate-x-1"}`} />
+    </button>
+  );
+}
+
+function WorkflowStep({ active, complete, icon: Icon, title, detail, href }: { active?: boolean; complete?: boolean; icon: typeof Settings2; title: string; detail: string; href: string }) {
+  return (
+    <Link href={href} className={`group flex min-w-0 items-center gap-3 rounded-xl border p-3.5 transition ${active ? "border-blue-500/35 bg-blue-500/10" : "border-zinc-800/70 bg-zinc-900/20 hover:border-zinc-700 hover:bg-zinc-900/50"}`}>
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${active ? "border-blue-400/25 bg-blue-500/15 text-blue-300" : complete ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-400" : "border-zinc-800 bg-zinc-950 text-zinc-500"}`}>
+        {complete && !active ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+      </span>
+      <span className="min-w-0"><span className="block text-sm font-semibold text-zinc-100">{title}</span><span className="mt-0.5 block truncate text-xs text-zinc-500">{detail}</span></span>
+      <ArrowUpRight className="ml-auto h-4 w-4 shrink-0 text-zinc-600 transition group-hover:text-zinc-300" />
+    </Link>
+  );
+}
 
 export default function StatusPageSettings() {
   const params = useParams();
   const projectId = params?.projectId as string;
   const router = useRouter();
-  
-  useEffect(() => {
-    if (!projectId || projectId === 'undefined') {
-      router.push('/dashboard/status-pages');
-    }
-  }, [projectId, router]);
-
-  
-  const [config, setConfig] = useState<any>({
-    enabled: false,
-    title: "",
-    description: "",
-    slug: "",
-    show_uptime_history: true,
-    show_incidents: true
-  });
-  const [project, setProject] = useState<any>(null);
+  const [config, setConfig] = useState<StatusPageConfig>(emptyConfig);
+  const [savedSnapshot, setSavedSnapshot] = useState(JSON.stringify(emptyConfig));
+  const [project, setProject] = useState<Project | null>(null);
+  const [componentCount, setComponentCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
-  useEffect(() => {
-    if (!projectId) return;
-    fetchConfig();
-  }, [projectId]);
+  const publicUrl = `${typeof window === "undefined" ? "" : window.location.origin}/status/${config.slug || projectId}`;
+  const isDirty = JSON.stringify(config) !== savedSnapshot;
 
-  async function fetchConfig() {
+  const loadSetup = useCallback(async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const [configRes, projectRes] = await Promise.all([
+      const [configRes, projectRes, componentsRes] = await Promise.all([
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/status-page`, { credentials: "include" }),
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}`, { credentials: "include" })
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}`, { credentials: "include" }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/status-components`, { credentials: "include" }),
       ]);
-      
-      if (configRes.ok) {
-        setConfig(await configRes.json());
-      }
-      if (projectRes.ok) {
-        setProject(await projectRes.json());
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Failed to load status page settings.");
+      if (!configRes.ok) throw new Error("Unable to load status page settings.");
+
+      const loadedConfig = normalizeConfig(await configRes.json() as Partial<StatusPageConfig>);
+      setConfig(loadedConfig);
+      setSavedSnapshot(JSON.stringify(loadedConfig));
+      if (projectRes.ok) setProject(await projectRes.json() as Project);
+      if (componentsRes.ok) setComponentCount((await componentsRes.json() as unknown[]).length);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load status page settings.");
     } finally {
       setLoading(false);
     }
-  }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId || projectId === "undefined") router.replace("/dashboard/status-pages");
+  }, [projectId, router]);
+
+  useEffect(() => {
+    // This effect starts the asynchronous server synchronization for this route.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (projectId && projectId !== "undefined") void loadSetup();
+  }, [projectId, loadSetup]);
+
+  const updateConfig = (updates: Partial<StatusPageConfig>) => setConfig((current) => ({ ...current, ...updates }));
 
   async function saveConfig() {
+    if (!isDirty || saving) return;
     try {
       setSaving(true);
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/status-page`, {
-        method: 'PATCH',
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/status-page`, {
+        method: "PATCH",
         credentials: "include",
-        headers: { 
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(config)
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
       });
-      
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to save");
-      
-      setConfig(data);
-      alert("Status page settings saved.");
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || "Failed to save settings.");
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not save status page settings.");
+
+      const saved = normalizeConfig(data as Partial<StatusPageConfig>);
+      setConfig(saved);
+      setSavedSnapshot(JSON.stringify(saved));
+      setLastSavedAt(new Date());
+      toast.success("Status page saved and published configuration updated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save status page settings.");
     } finally {
       setSaving(false);
     }
   }
 
+  async function copyPublicUrl() {
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      toast.success("Public status URL copied.");
+    } catch {
+      toast.error("Could not copy the public URL.");
+    }
+  }
+
+  const readiness = useMemo(() => [Boolean(config.title.trim()), Boolean(config.slug.trim()), componentCount > 0, config.enabled].filter(Boolean).length, [config, componentCount]);
+
   if (loading) {
-    return <div className="p-8 text-center text-muted-foreground flex items-center justify-center"><Loader2 className="animate-spin mr-2" /> Loading settings...</div>;
+    return <div className="flex h-[calc(100vh-48px)] items-center justify-center bg-[#050505]"><div className="flex items-center gap-3 text-sm text-zinc-400"><Loader2 className="h-5 w-5 animate-spin text-blue-400" />Loading status page workspace...</div></div>;
   }
-
-  if (project && !project.analytics?.verified) {
-    return (
-      <div className="space-y-6 max-w-4xl mx-auto pt-8">
-        <ObservabilitySetup project={project} onVerified={fetchConfig} />
-      </div>
-    );
-  }
-
-  const publicUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/status/${config.slug || projectId}`;
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Status Page Settings</h1>
-        <p className="text-muted-foreground">Configure your public-facing status page.</p>
-      </div>
-
-      <div className="bg-[#0a0a0a] border border-zinc-800 rounded-xl overflow-hidden mb-6">
-        <div className="p-6 border-b border-zinc-800/60">
-          <h3 className="text-lg font-semibold text-white mb-1">Visibility</h3>
-          <p className="text-sm text-zinc-400">Control who can see your status page.</p>
-        </div>
-        <div className="p-6 space-y-6">
-          <div className="flex items-center justify-between border rounded-lg p-4 bg-muted/50">
-            <div>
-              <label className="text-base font-semibold text-zinc-200">Enable Public Status Page</label>
-              <p className="text-sm text-muted-foreground">When enabled, anyone with the link can view your system status.</p>
+    <main className="h-[calc(100vh-48px)] overflow-y-auto bg-[#050505] text-zinc-100">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-950/20 via-transparent to-transparent" />
+      <div className="relative mx-auto w-full max-w-6xl px-6 pb-12">
+        <header className="sticky top-0 z-20 -mx-6 border-b border-zinc-800/70 bg-[#050505]/95 px-6 py-5 backdrop-blur-xl">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-zinc-500"><Settings2 className="h-3.5 w-3.5" />Status page workspace{project?.repoName && <span className="truncate normal-case tracking-normal text-zinc-600">/ {project.repoName}</span>}</div>
+              <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-blue-400/20 bg-blue-500/10"><Globe2 className="h-5 w-5 text-blue-300" /></span><div><h1 className="text-2xl font-bold tracking-tight text-white">Status page setup</h1><p className="mt-0.5 text-sm text-zinc-400">Design the public reliability experience for your customers.</p></div></div>
             </div>
-            <button
-              type="button"
-              role="switch"
-              onClick={() => setConfig({...config, enabled: !config.enabled})}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-white ${config.enabled ? 'bg-white' : 'bg-zinc-800'}`}
-            >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-black transition-transform ${config.enabled ? 'translate-x-4' : 'translate-x-1'}`} />
-            </button>
+            <div className="flex items-center gap-3">
+              <span className={`hidden items-center gap-1.5 text-xs sm:flex ${isDirty ? "text-amber-300" : "text-emerald-400"}`}><span className={`h-1.5 w-1.5 rounded-full ${isDirty ? "bg-amber-400" : "bg-emerald-400"}`} />{isDirty ? "Unsaved changes" : lastSavedAt ? `Saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "All changes saved"}</span>
+              {config.enabled && <a href={publicUrl} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/70 px-3 text-sm font-medium text-zinc-300 transition hover:bg-zinc-800 hover:text-white">Preview <ExternalLink className="h-3.5 w-3.5" /></a>}
+              <button onClick={saveConfig} disabled={!isDirty || saving} className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-500 px-4 text-sm font-semibold text-white shadow-lg shadow-blue-950/40 transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500 disabled:shadow-none">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{saving ? "Saving..." : isDirty ? "Save changes" : "Saved"}</button>
+            </div>
           </div>
+        </header>
 
-          {config.enabled && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-zinc-200">Public URL</label>
-              <div className="flex gap-2">
-                <input className="w-full bg-[#0a0a0a] border border-zinc-800 rounded-md h-10 px-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 transition-colors bg-muted font-mono" readOnly value={publicUrl} />
-                <button className="h-10 w-10 flex items-center justify-center border border-zinc-800 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors" onClick={() => {
-                  navigator.clipboard.writeText(publicUrl);
-                  alert("Copied to clipboard");
-                }}>
-                  <Copy className="w-4 h-4" />
-                </button>
-                <Link href={publicUrl} target="_blank">
-                  <button className="h-10 w-10 flex items-center justify-center border border-zinc-800 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors">
-                    <ExternalLink className="w-4 h-4" />
-                  </button>
-                </Link>
+        <section className="py-6">
+          <div className="mb-3 flex items-center justify-between"><div><h2 className="text-sm font-semibold text-zinc-200">Configuration workflow</h2><p className="mt-1 text-sm text-zinc-500">Complete the stages below to create a customer-ready service-status experience.</p></div><span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2.5 py-1 text-xs font-medium text-zinc-400">{readiness}/4 complete</span></div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <WorkflowStep active icon={Settings2} title="Page details" detail="Brand, URL, visibility" href={`/dashboard/status-pages/${projectId}/settings`} />
+            <WorkflowStep complete={componentCount > 0} icon={Layers3} title="Components" detail={componentCount ? `${componentCount} monitored services` : "Define your services"} href={`/dashboard/status-pages/${projectId}/components`} />
+            <WorkflowStep complete={false} icon={Activity} title="Incidents" detail="Publish customer updates" href={`/dashboard/incidents/${projectId}`} />
+            <WorkflowStep complete={config.enabled} icon={Radio} title="Public page" detail={config.enabled ? "Live and shareable" : "Ready to publish"} href={config.enabled ? publicUrl : `/dashboard/status-pages/${projectId}/settings`} />
+          </div>
+        </section>
+
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="space-y-6">
+            <section className="overflow-hidden rounded-xl border border-zinc-800/70 bg-zinc-900/25 shadow-[0_10px_32px_rgb(0,0,0,0.16)]">
+              <div className="flex items-start gap-4 border-b border-zinc-800/70 p-5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-400/15 bg-emerald-500/10"><Globe2 className="h-4 w-4 text-emerald-400" /></span><div><h2 className="font-semibold text-white">Publishing controls</h2><p className="mt-1 text-sm text-zinc-400">Decide when customers can access this public source of truth.</p></div></div>
+              <div className="space-y-5 p-5">
+                <div className="flex items-center justify-between gap-6 rounded-xl border border-zinc-800 bg-zinc-950/40 p-4"><div><h3 className="text-sm font-medium text-zinc-100">Public status page</h3><p className="mt-1 max-w-xl text-sm leading-5 text-zinc-500">Publishing makes the page available to anyone with the URL. You can unpublish it at any time.</p></div><Toggle checked={config.enabled} label="Enable public status page" onChange={() => updateConfig({ enabled: !config.enabled })} /></div>
+                <div className={!config.enabled ? "opacity-50" : ""}><label className="mb-2 block text-sm font-medium text-zinc-300">Public URL</label><div className="flex gap-2"><div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3"><Link2 className="h-4 w-4 shrink-0 text-zinc-600" /><span className="truncate font-mono text-xs text-zinc-400">{publicUrl}</span></div><button type="button" onClick={copyPublicUrl} disabled={!config.enabled} aria-label="Copy public URL" className="grid h-10 w-10 place-items-center rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-400 transition hover:bg-zinc-800 hover:text-white disabled:cursor-not-allowed"><Copy className="h-4 w-4" /></button><a href={publicUrl} target="_blank" rel="noreferrer" aria-disabled={!config.enabled} className={`grid h-10 w-10 place-items-center rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-400 transition hover:bg-zinc-800 hover:text-white ${config.enabled ? "" : "pointer-events-none"}`}><ExternalLink className="h-4 w-4" /></a></div></div>
               </div>
-            </div>
-          )}
-        </div>
-      </div>
+            </section>
 
-      <div className="bg-[#0a0a0a] border border-zinc-800 rounded-xl overflow-hidden mb-6">
-        <div className="p-6 border-b border-zinc-800/60">
-          <h3 className="text-lg font-semibold text-white mb-1">Page Details</h3>
-          <p className="text-sm text-zinc-400">Customize the appearance and content.</p>
-        </div>
-        <div className="p-6 space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-200">Page Title</label>
-            <input className="w-full bg-[#0a0a0a] border border-zinc-800 rounded-md h-10 px-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 transition-colors" 
-              placeholder="e.g. Acme Corp Status"
-              value={config.title || ""}
-              onChange={(e) => setConfig({...config, title: e.target.value})}
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-200">Description</label>
-            <input className="w-full bg-[#0a0a0a] border border-zinc-800 rounded-md h-10 px-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 transition-colors" 
-              placeholder="Optional subtitle or contact info"
-              value={config.description || ""}
-              onChange={(e) => setConfig({...config, description: e.target.value})}
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-200">Custom Slug (Optional)</label>
-            <input className="w-full bg-[#0a0a0a] border border-zinc-800 rounded-md h-10 px-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 transition-colors" 
-              placeholder="e.g. acme-corp"
-              value={config.slug || ""}
-              onChange={(e) => setConfig({...config, slug: e.target.value})}
-            />
-            <p className="text-xs text-muted-foreground">If left blank, the Project ID will be used in the URL.</p>
-          </div>
-        </div>
-      </div>
+            <section className="overflow-hidden rounded-xl border border-zinc-800/70 bg-zinc-900/25 shadow-[0_10px_32px_rgb(0,0,0,0.16)]">
+              <div className="flex items-start gap-4 border-b border-zinc-800/70 p-5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-violet-400/15 bg-violet-500/10"><FileText className="h-4 w-4 text-violet-300" /></span><div><h2 className="font-semibold text-white">Page identity</h2><p className="mt-1 text-sm text-zinc-400">Give customers a recognizable name, helpful context, and memorable address.</p></div></div>
+              <div className="space-y-5 p-5"><div className="space-y-2"><label htmlFor="status-title" className="text-sm font-medium text-zinc-300">Page title</label><input id="status-title" className={inputClass} placeholder="e.g. Acme service status" value={config.title} onChange={(event) => updateConfig({ title: event.target.value })} /></div><div className="space-y-2"><label htmlFor="status-description" className="text-sm font-medium text-zinc-300">Customer message</label><input id="status-description" className={inputClass} placeholder="Optional service description or support contact" value={config.description} onChange={(event) => updateConfig({ description: event.target.value })} /></div><div className="space-y-2"><label htmlFor="status-slug" className="text-sm font-medium text-zinc-300">Public URL slug</label><div className="flex overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 focus-within:border-blue-500/60 focus-within:ring-2 focus-within:ring-blue-500/10"><span className="flex items-center border-r border-zinc-800 bg-zinc-900/60 px-3 font-mono text-xs text-zinc-500">/status/</span><input id="status-slug" className="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600" placeholder="acme" value={config.slug} onChange={(event) => updateConfig({ slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-") })} /></div><p className="text-xs text-zinc-600">Use lowercase letters, numbers, and hyphens. A slug makes the public URL shareable and stable.</p></div></div>
+            </section>
 
-      <div className="bg-[#0a0a0a] border border-zinc-800 rounded-xl overflow-hidden mb-6">
-        <div className="p-6 border-b border-zinc-800/60">
-          <h3 className="text-lg font-semibold text-white mb-1">Features</h3>
-          <p className="text-sm text-zinc-400">Toggle what information is displayed.</p>
-        </div>
-        <div className="p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-zinc-200">Show 90-Day Uptime History</label>
-            <button
-              type="button"
-              role="switch"
-              onClick={() => setConfig({...config, show_uptime_history: !config.show_uptime_history})}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-white ${config.show_uptime_history ? 'bg-white' : 'bg-zinc-800'}`}
-            >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-black transition-transform ${config.show_uptime_history ? 'translate-x-4' : 'translate-x-1'}`} />
-            </button>
+            <section className="overflow-hidden rounded-xl border border-zinc-800/70 bg-zinc-900/25 shadow-[0_10px_32px_rgb(0,0,0,0.16)]">
+              <div className="flex items-start gap-4 border-b border-zinc-800/70 p-5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-amber-400/15 bg-amber-500/10"><Activity className="h-4 w-4 text-amber-300" /></span><div><h2 className="font-semibold text-white">Public information</h2><p className="mt-1 text-sm text-zinc-400">Choose which reliability signals customers can see.</p></div></div>
+              <div className="divide-y divide-zinc-800/70"><div className="flex items-center justify-between gap-6 p-5"><div><h3 className="text-sm font-medium text-zinc-100">90-day uptime history</h3><p className="mt-1 text-sm text-zinc-500">Display historical availability from synthetic checks.</p></div><Toggle checked={config.show_uptime_history} label="Show 90-day uptime history" onChange={() => updateConfig({ show_uptime_history: !config.show_uptime_history })} /></div><div className="flex items-center justify-between gap-6 p-5"><div><h3 className="text-sm font-medium text-zinc-100">Incident timeline</h3><p className="mt-1 text-sm text-zinc-500">Display active incidents and the recent resolved-incident archive.</p></div><Toggle checked={config.show_incidents} label="Show incident timeline" onChange={() => updateConfig({ show_incidents: !config.show_incidents })} /></div></div>
+            </section>
           </div>
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-zinc-200">Show Recent Incidents (Future Feature)</label>
-            <button
-              type="button"
-              role="switch"
-              disabled
-              onClick={() => setConfig({...config, show_incidents: !config.show_incidents})}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-white disabled:opacity-50 disabled:cursor-not-allowed ${config.show_incidents ? 'bg-white' : 'bg-zinc-800'}`}
-            >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-black transition-transform ${config.show_incidents ? 'translate-x-4' : 'translate-x-1'}`} />
-            </button>
-          </div>
-        </div>
-        <div className="p-6 bg-zinc-900/20 justify-end border-t pt-6 mt-6">
-          <button className="h-10 px-4 flex items-center justify-center bg-white text-black hover:bg-zinc-200 rounded-md font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed" onClick={saveConfig} disabled={saving}>
-            {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            Save Changes
-          </button>
+
+          <aside className="space-y-5 lg:sticky lg:top-20 lg:self-start">
+            <section className="rounded-xl border border-zinc-800/70 bg-zinc-900/25 p-5"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-white"><ShieldCheck className="h-4 w-4 text-blue-300" />Release readiness</div><div className={`mb-4 flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium ${config.enabled ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 bg-zinc-950/60 text-zinc-400"}`}><CircleDot className="h-3.5 w-3.5" />{config.enabled ? "Public page is live" : "Draft — not public"}</div><div className="space-y-3 text-sm"><div className="flex items-center gap-2 text-zinc-400"><CheckCircle2 className={`h-4 w-4 ${config.title ? "text-emerald-400" : "text-zinc-700"}`} />Customer-facing title</div><div className="flex items-center gap-2 text-zinc-400"><CheckCircle2 className={`h-4 w-4 ${config.slug ? "text-emerald-400" : "text-zinc-700"}`} />Shareable URL</div><div className="flex items-center gap-2 text-zinc-400"><CheckCircle2 className={`h-4 w-4 ${componentCount ? "text-emerald-400" : "text-zinc-700"}`} />Service components</div><div className="flex items-center gap-2 text-zinc-400"><CheckCircle2 className={`h-4 w-4 ${config.enabled ? "text-emerald-400" : "text-zinc-700"}`} />Published</div></div></section>
+            <section className="rounded-xl border border-blue-500/15 bg-blue-500/[0.06] p-5"><div className="flex items-center gap-2 text-sm font-semibold text-blue-200"><Layers3 className="h-4 w-4" />Next: model your services</div><p className="mt-2 text-sm leading-6 text-zinc-400">Components let incidents identify exactly which customer-facing services are affected.</p><Link href={`/dashboard/status-pages/${projectId}/components`} className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-blue-400/20 bg-blue-500/10 text-sm font-medium text-blue-200 transition hover:bg-blue-500/20">Manage components <ArrowUpRight className="h-4 w-4" /></Link></section>
+          </aside>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

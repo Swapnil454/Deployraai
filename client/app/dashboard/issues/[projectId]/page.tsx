@@ -15,7 +15,7 @@ export default function IssueInboxPage() {
   const [issues, setIssues] = useState([]);
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  
+
   const [statusFilter, setStatusFilter] = useState("open");
   const [search, setSearch] = useState("");
 
@@ -35,7 +35,7 @@ export default function IssueInboxPage() {
         fetch(url.toString(), { credentials: "include" }),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}`, { credentials: "include" })
       ]);
-      
+
       if (issuesRes.ok) {
         const data = await issuesRes.json();
         setIssues(data);
@@ -57,7 +57,7 @@ export default function IssueInboxPage() {
     return <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">Open</Badge>;
   }
 
-  if (project && !project.analytics?.verified && false) {
+  if (project && !project.analytics?.verified) {
     return (
       <div className="flex flex-col min-h-[calc(100vh-64px)] bg-[#050505] text-zinc-200 pb-20 font-sans p-6 pt-12">
         <ObservabilitySetup project={project} onVerified={fetchIssues} />
@@ -70,10 +70,10 @@ export default function IssueInboxPage() {
       {/* Ambient Glows */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-orange-900/10 via-transparent to-transparent pointer-events-none" />
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_var(--tw-gradient-stops))] from-blue-900/10 via-transparent to-transparent pointer-events-none" />
-      
+
       <div className="relative z-10 p-6 pt-6 w-full flex-1">
         <div className="max-w-[1440px] w-full mx-auto">
-          
+
           {/* HEADER & CONTROLS */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8 border-b border-zinc-800/60 pb-5">
             <div>
@@ -83,13 +83,13 @@ export default function IssueInboxPage() {
               </h1>
               <p className="text-sm text-zinc-400 mt-1">Grouped errors waiting for resolution.</p>
             </div>
-            
+
             <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
               {/* Search Bar */}
               <div className="relative w-full sm:w-[320px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-                <Input 
-                  placeholder="Search by title or message..." 
+                <Input
+                  placeholder="Search by title or message..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && fetchIssues()}
@@ -144,12 +144,11 @@ export default function IssueInboxPage() {
                         <div className="flex items-center gap-3 mb-2">
                           <h3 className="font-semibold text-lg text-white truncate max-w-2xl">{issue.title}</h3>
                           {getStatusBadge(issue.status)}
-                          <Badge variant="outline" className={`capitalize text-xs font-medium ${
-                            issue.severity === 'critical' ? 'border-red-500/30 text-red-400 bg-red-500/10' : 
-                            issue.severity === 'error' ? 'border-orange-500/30 text-orange-400 bg-orange-500/10' :
-                            issue.severity === 'warning' ? 'border-yellow-500/30 text-yellow-400 bg-yellow-500/10' :
-                            'border-zinc-700 text-zinc-400'
-                          }`}>
+                          <Badge variant="outline" className={`capitalize text-xs font-medium ${issue.severity === 'critical' ? 'border-red-500/30 text-red-400 bg-red-500/10' :
+                              issue.severity === 'error' ? 'border-orange-500/30 text-orange-400 bg-orange-500/10' :
+                                issue.severity === 'warning' ? 'border-yellow-500/30 text-yellow-400 bg-yellow-500/10' :
+                                  'border-zinc-700 text-zinc-400'
+                            }`}>
                             {issue.severity}
                           </Badge>
                         </div>
@@ -160,7 +159,7 @@ export default function IssueInboxPage() {
                           <span>First seen {new Date(issue.first_seen_at).toLocaleDateString()}</span>
                         </div>
                       </div>
-                      
+
                       <div className="flex items-center gap-6 shrink-0">
                         <div className="flex flex-row md:flex-col gap-6 md:gap-4 text-right">
                           <div className="flex flex-col items-end">
