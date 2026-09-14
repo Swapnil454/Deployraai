@@ -29,7 +29,15 @@ async function validateMonitorUrl(targetUrl) {
     }
 
     // Resolve DNS and check actual IP to prevent DNS rebinding or obfuscated IPs
-    const ips = await resolve4(hostname);
+    let ips;
+    try {
+      ips = await resolve4(hostname);
+    } catch (e) {
+      const { promisify } = await import('util');
+      const lookup = promisify(dns.lookup);
+      const res = await lookup(hostname);
+      ips = res && res.address ? [res.address] : [];
+    }
     if (!ips || ips.length === 0) throw new Error('DNS resolution failed');
 
     for (const ip of ips) {
@@ -182,7 +190,7 @@ export const runMonitorCheck = async (monitorId) => {
     await validateMonitorUrl(targetUrl);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => { controller.abort(); }, 10000);
+    const timeout = setTimeout(() => { controller.abort(); }, 30000);
     
     // Add retry for /health -> /api/health then /
     let res = await fetch(targetUrl, { 

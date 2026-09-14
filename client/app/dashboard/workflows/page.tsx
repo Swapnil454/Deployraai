@@ -41,7 +41,7 @@ const getStepIcon = (name: string, status: string) => {
   return <Activity className="w-7 h-7 text-zinc-300 drop-shadow-md" />;
 };
 
-const InfographicTimelineNode = ({ event, index, isLast }: { event: any, index: number, isLast: boolean }) => {
+const InfographicTimelineNode = React.memo(({ event, index, isLast }: { event: any, index: number, isLast: boolean }) => {
   const isTop = index % 2 !== 0; // Odd index => Circle on Top
   const stepNumber = String(index + 1).padStart(2, '0');
   
@@ -144,21 +144,23 @@ const InfographicTimelineNode = ({ event, index, isLast }: { event: any, index: 
       {Info}
     </div>
   );
-};
+}, (prevProps, nextProps) => {
+  return prevProps.index === nextProps.index &&
+         prevProps.isLast === nextProps.isLast &&
+         prevProps.event.status === nextProps.event.status &&
+         prevProps.event.executedAt === nextProps.event.executedAt &&
+         prevProps.event.attempts === nextProps.event.attempts &&
+         prevProps.event.resumeAt === nextProps.event.resumeAt;
+});
 
-const InfographicTimeline = ({ events }: { events: any[] }) => {
+const InfographicTimeline = React.memo(({ events }: { events: any[] }) => {
   const stepWidth = 180;
   const containerWidth = Math.max(events.length * stepWidth, 200);
 
   return (
     <div className="relative h-[260px] overflow-visible mt-4 mb-2 shrink-0" style={{ width: containerWidth, minWidth: containerWidth }}>
       {/* Background SVG Snake */}
-      <svg className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none' }}>
-        <defs>
-          <filter id="pathShadow" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="8" stdDeviation="6" floodOpacity="0.3" floodColor="#000" />
-          </filter>
-        </defs>
+      <svg className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none', filter: 'drop-shadow(0px 8px 6px rgba(0,0,0,0.3))' }}>
         {events.map((event, i) => {
           if (i === events.length - 1) return null; // no path from last element
           const nextEvent = events[i + 1];
@@ -174,16 +176,6 @@ const InfographicTimeline = ({ events }: { events: any[] }) => {
 
           return (
             <g key={`path-group-${i}`}>
-              {/* Base shadow layer */}
-              <path
-                d={`M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`}
-                fill="none"
-                stroke={strokeColor}
-                strokeWidth="28"
-                strokeLinecap="round"
-                className="transition-colors duration-500"
-                filter="url(#pathShadow)"
-              />
               {/* Outer dark bevel edge */}
               <path
                 d={`M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`}
@@ -202,21 +194,12 @@ const InfographicTimeline = ({ events }: { events: any[] }) => {
                 strokeLinecap="round"
                 className="transition-colors duration-500"
               />
-              {/* Soft wide highlight */}
-              <path
-                d={`M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`}
-                fill="none"
-                stroke="#fff"
-                strokeOpacity="0.15"
-                strokeWidth="12"
-                strokeLinecap="round"
-              />
               {/* Sharp center specular reflection */}
               <path
                 d={`M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`}
                 fill="none"
                 stroke="#fff"
-                strokeOpacity="0.4"
+                strokeOpacity="0.3"
                 strokeWidth="4"
                 strokeLinecap="round"
               />
@@ -231,7 +214,17 @@ const InfographicTimeline = ({ events }: { events: any[] }) => {
       ))}
     </div>
   );
-};
+}, (prevProps, nextProps) => {
+  if (prevProps.events.length !== nextProps.events.length) return false;
+  for (let i = 0; i < prevProps.events.length; i++) {
+    const p = prevProps.events[i];
+    const n = nextProps.events[i];
+    if (p.status !== n.status || p.executedAt !== n.executedAt || p.resumeAt !== n.resumeAt || p.attempts !== n.attempts) {
+      return false;
+    }
+  }
+  return true;
+});
 
 const getWorkflowTitle = (run: any) => {
   if (run.workflowName === 'project-deployment-pipeline') {

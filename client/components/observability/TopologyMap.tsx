@@ -2,10 +2,13 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Edge,
   ReactFlow,
+  Node,
   useNodesState,
   useEdgesState,
   Background,
+  BackgroundVariant,
   MarkerType,
   Position,
 } from '@xyflow/react';
@@ -25,12 +28,27 @@ const edgeTypes = {
 const dagreGraph = new dagre.graphlib.Graph();
 dagreGraph.setDefaultEdgeLabel(() => ({}));
 
-const nodeWidth = 200;
-const nodeHeight = 120;
+const nodeWidth = 240;
+const nodeHeight = 200;
 
-const getLayoutedElements = (nodes: any[], edges: any[], direction = 'TB') => {
+interface ServiceNodeData extends Record<string, unknown> {
+  label: string;
+  serviceType: 'service' | 'database' | 'frontend';
+  errorRate: number;
+  avgLatency: number;
+  requestCount: number;
+}
+
+interface TopologyEdgeData extends Record<string, unknown> {
+  errorRate?: number;
+}
+
+type TopologyNode = Node<ServiceNodeData>;
+type TopologyEdge = Edge<TopologyEdgeData>;
+
+const getLayoutedElements = (nodes: TopologyNode[], edges: TopologyEdge[], direction = 'TB') => {
   const isHorizontal = direction === 'LR';
-  dagreGraph.setGraph({ rankdir: direction });
+  dagreGraph.setGraph({ rankdir: direction, ranksep: 160, nodesep: 80 });
 
   nodes.forEach((node) => {
     dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
@@ -42,16 +60,19 @@ const getLayoutedElements = (nodes: any[], edges: any[], direction = 'TB') => {
 
   dagre.layout(dagreGraph);
 
-  const newNodes = nodes.map((node) => {
+  const newNodes = nodes.map((node, index) => {
     const nodeWithPosition = dagreGraph.node(node.id);
+    
+    // Add a staggered vertical offset for alternating nodes to create that "stepped" visual by default
+    const staggeredYOffset = index % 2 === 1 ? 140 : 0;
+    
     return {
       ...node,
       targetPosition: isHorizontal ? Position.Left : Position.Top,
       sourcePosition: isHorizontal ? Position.Right : Position.Bottom,
-      // Shift to center the node based on its size
       position: {
         x: nodeWithPosition.x - nodeWidth / 2,
-        y: nodeWithPosition.y - nodeHeight / 2,
+        y: (nodeWithPosition.y - nodeHeight / 2) + staggeredYOffset,
       },
     };
   });
@@ -60,8 +81,8 @@ const getLayoutedElements = (nodes: any[], edges: any[], direction = 'TB') => {
 };
 
 export function TopologyMap({ projectId }: { projectId: string }) {
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<TopologyNode>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<TopologyEdge>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,21 +97,21 @@ export function TopologyMap({ projectId }: { projectId: string }) {
       .then(data => {
         if (data.nodes && data.edges) {
           // Add markerEnd to all edges
-          const mappedEdges = data.edges.map((e: any) => ({
+          const mappedEdges: TopologyEdge[] = data.edges.map((e: TopologyEdge) => ({
             ...e,
             type: 'animated',
             markerEnd: {
               type: MarkerType.ArrowClosed,
               width: 20,
               height: 20,
-              color: e.data?.errorRate > 0.05 ? '#ef4444' : '#6366f1',
+              color: (e.data?.errorRate ?? 0) > 0.05 ? '#ef4444' : '#6366f1',
             }
           }));
 
           const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-            data.nodes,
+            data.nodes as TopologyNode[],
             mappedEdges,
-            'TB'
+            'LR'
           );
 
           setNodes(layoutedNodes);
@@ -123,7 +144,7 @@ export function TopologyMap({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="w-full h-full min-h-[600px] border border-zinc-800 rounded-xl overflow-hidden bg-zinc-950">
+    <div className="w-full h-full min-h-[600px] bg-black">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -132,9 +153,9 @@ export function TopologyMap({ projectId }: { projectId: string }) {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
-        className="bg-zinc-950"
+        className="bg-black"
       >
-        <Background color="#27272a" gap={24} />
+        <Background color="#18181b" gap={40} size={1} variant={BackgroundVariant.Lines} />
       </ReactFlow>
     </div>
   );

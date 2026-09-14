@@ -1,8 +1,10 @@
 import axios from "axios";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 import User from "../models/User.js";
 import { decryptSecret } from "../utils/encryption.js";
+
 
 function generateProjectToken(projectId) {
   if (!process.env.INGESTOR_JWT_SECRET) {
@@ -573,16 +575,20 @@ export const disableStatusPage = async (req, res) => {
 
 import AnalyticsEvent from "../models/AnalyticsEvent.js";
 
+function getRangeConfig(range) {
+  const ranges = {
+    "24h": { hours: 24, bucketHours: 1 },
+    "3d": { hours: 72, bucketHours: 4 },
+    "7d": { hours: 168, bucketHours: 12 },
+    "25d": { hours: 600, bucketHours: 24 },
+    "30d": { hours: 720, bucketHours: 24 },
+  };
+  return ranges[range] || ranges["25d"];
+}
+
 function getFromDate(range) {
   const now = new Date();
-  const map = {
-    "24h": 1,
-    "3d": 3,
-    "7d": 7,
-    "30d": 30,
-  };
-  const days = map[range] || 7;
-  now.setDate(now.getDate() - days);
+  now.setHours(now.getHours() - getRangeConfig(range).hours);
   return now;
 }
 
@@ -604,6 +610,7 @@ export const getAnalyticsSummary = async (req, res) => {
     }
 
     const fromDate = getFromDate(range);
+    const rangeConfig = getRangeConfig(range);
 
     const match = {
       projectId: project._id,
@@ -632,14 +639,45 @@ export const getAnalyticsSummary = async (req, res) => {
 
       AnalyticsEvent.aggregate([
         { $match: baseMatch },
-        { 
-          $group: { 
-            _id: { $dateToString: { format: "%Y-%m-%d", date: "$timestamp" } },
-            visitors: { $addToSet: "$visitorHash" },
+        {
+          $group: {
+            _id: {
+              bucket: {
+                $dateTrunc: {
+                  date: "$timestamp",
+                  unit: "hour",
+                  binSize: rangeConfig.bucketHours,
+                  timezone: "UTC"
+                }
+              },
+              visitorHash: "$visitorHash"
+            },
             pageViews: { $sum: 1 }
-          } 
+          }
         },
-        { $project: { date: "$_id", visitors: { $size: "$visitors" }, pageViews: 1, _id: 0 } },
+        {
+          $group: {
+            _id: "$_id.bucket",
+            visitors: { $sum: 1 },
+            pageViews: { $sum: "$pageViews" },
+            bouncedVisitors: { $sum: { $cond: [{ $eq: ["$pageViews", 1] }, 1, 0] } }
+          }
+        },
+        {
+          $project: {
+            date: { $dateToString: { format: "%Y-%m-%dT%H:%M:%S.000Z", date: "$_id", timezone: "UTC" } },
+            visitors: 1,
+            pageViews: 1,
+            bounceRate: {
+              $cond: [
+                { $gt: ["$visitors", 0] },
+                { $multiply: [{ $divide: ["$bouncedVisitors", "$visitors"] }, 100] },
+                0
+              ]
+            },
+            _id: 0
+          }
+        },
         { $sort: { date: 1 } }
       ]),
 
@@ -700,6 +738,17 @@ export const getAnalyticsSummary = async (req, res) => {
     }
     
     const { topPages, topReferrers, topHostnames, topCountries, topDevices, topBrowsers, topOS } = topListsResult[0] || {};
+    const timeseriesByDate = new Map(timeseries.map((point) => [point.date, point]));
+    const bucketCount = rangeConfig.hours / rangeConfig.bucketHours;
+    const currentBucket = new Date();
+    currentBucket.setUTCMinutes(0, 0, 0);
+    currentBucket.setUTCHours(Math.floor(currentBucket.getUTCHours() / rangeConfig.bucketHours) * rangeConfig.bucketHours);
+    const completeTimeseries = Array.from({ length: bucketCount }, (_, index) => {
+      const date = new Date();
+      date.setTime(currentBucket.getTime() - (bucketCount - 1 - index) * rangeConfig.bucketHours * 60 * 60 * 1000);
+      const dateKey = date.toISOString().replace(/\.\d{3}Z$/, ".000Z");
+      return timeseriesByDate.get(dateKey) || { date: dateKey, visitors: 0, pageViews: 0, bounceRate: 0 };
+    });
 
     res.json({
       success: true,
@@ -707,7 +756,7 @@ export const getAnalyticsSummary = async (req, res) => {
         pageViews,
         visitors,
         bounceRate,
-        timeseries,
+        timeseries: completeTimeseries,
         topPages,
         topReferrers,
         topHostnames,
@@ -759,6 +808,34 @@ export const getProjectUsage = async (req, res) => {
     if (platform === 'render') {
       const { getRenderToken, getRenderUsage, getRenderCPU, getRenderRequests } = await import('../services/providers/render.service.js');
       const token = await getRenderToken(req.user.userId);
+
+      // Mock fallback for demo/seed projects without a real Render token
+      if (!token && project.configuration?.mockBackendUsage) {
+        const days = range === '7d' ? 7 : range === '30d' ? 30 : 30;
+        const buildTimeSeries = (baseVal, jitter) =>
+          Array.from({ length: days }, (_, i) => {
+            const d = new Date();
+            d.setDate(d.getDate() - (days - 1 - i));
+            return { date: d.toISOString().split('T')[0], value: Math.max(0, baseVal + Math.round((Math.random() - 0.4) * jitter)) };
+          });
+        const toRenderFormat = (series, unit) => ({
+          data: series.map(p => ({ date: p.date, values: [{ date: p.date, value: p.value }], unit }))
+        });
+        const bwSeries  = buildTimeSeries(180 * 1024 * 1024, 80 * 1024 * 1024); // ~180 MB/day
+        const cpuSeries = buildTimeSeries(0.012, 0.008);                         // ~0.012 Core-hrs/day
+        const reqSeries = buildTimeSeries(2400, 800);                             // ~2400 requests/day
+        return res.json({
+          success: true,
+          platform: 'render',
+          mock: true,
+          usage: {
+            bandwidth: toRenderFormat(bwSeries, 'bytes'),
+            cpu:       toRenderFormat(cpuSeries, 'core'),
+            requests:  toRenderFormat(reqSeries, 'count'),
+          },
+        });
+      }
+
       if (!token) return res.status(400).json({ success: false, message: "Render not connected" });
       
       const serviceId = project.configuration.renderServiceId;
@@ -808,10 +885,14 @@ export const getProjectUsage = async (req, res) => {
 export const getAiUsage = async (req, res) => {
   try {
     const { projectId, range = '14d', feature = 'total' } = req.query;
-    
-    let query = { userId: req.user.userId };
+
+    // IMPORTANT: aggregate() does NOT auto-cast strings to ObjectId (unlike find()).
+    // The JWT stores userId as a plain string, so we must cast it explicitly.
+    const userObjectId = new mongoose.Types.ObjectId(req.user.userId);
+
+    let query = { userId: userObjectId };
     if (projectId) {
-      query.projectId = projectId;
+      query.projectId = new mongoose.Types.ObjectId(projectId);
     }
     if (feature && feature !== 'total') {
       query.feature = feature;
@@ -900,5 +981,79 @@ export const getAiUsage = async (req, res) => {
   } catch (error) {
     console.error("Get AI Usage Error:", error);
     res.status(500).json({ success: false, message: "Failed to fetch AI usage metrics", error: error.message });
+  }
+};
+
+export const deleteProject = async (req, res) => {
+  try {
+    const projectId = req.params.projectId || req.params.id;
+    const userId = req.user.userId;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    // 1. Fetch Tokens for Cloud Providers
+    const [vercelToken, renderToken, railwayToken] = await Promise.all([
+      import('../services/providers/vercel.service.js').then(m => m.getVercelToken(userId)).catch(() => null),
+      import('../services/providers/render.service.js').then(m => m.getRenderToken(userId)).catch(() => null),
+      import('../services/providers/railway.service.js').then(m => m.getRailwayToken(userId)).catch(() => null)
+    ]);
+
+    // 2. Trigger Deletions from Cloud Providers if configuration exists
+    const config = project.configuration || {};
+
+    if (config.vercelProjectId && vercelToken) {
+      try {
+        const { deleteVercelProject } = await import('../services/providers/vercel.service.js');
+        await deleteVercelProject(vercelToken, config.vercelProjectId);
+      } catch (err) {
+        console.warn(`Failed to delete Vercel project ${config.vercelProjectId}:`, err.message);
+      }
+    }
+
+    if (config.renderServiceId && renderToken) {
+      try {
+        const { deleteRenderService } = await import('../services/providers/render.service.js');
+        await deleteRenderService(renderToken, config.renderServiceId);
+      } catch (err) {
+        console.warn(`Failed to delete Render service ${config.renderServiceId}:`, err.message);
+      }
+    }
+
+    if (config.railwayProjectId && railwayToken) {
+      try {
+        const { deleteRailwayProject } = await import('../services/providers/railway.service.js');
+        await deleteRailwayProject(railwayToken, config.railwayProjectId);
+      } catch (err) {
+        console.warn(`Failed to delete Railway project ${config.railwayProjectId}:`, err.message);
+      }
+    }
+
+    // 3. Delete from Local Database
+    const Deployment = (await import('../models/Deployment.js')).default;
+    const Monitor = (await import('../models/Monitor.js')).default;
+    const MonitorCheck = (await import('../models/MonitorCheck.js')).default;
+    const FixPullRequest = (await import('../models/FixPullRequest.js')).default;
+
+    await Promise.all([
+      Deployment.deleteMany({ projectId }),
+      Monitor.deleteMany({ projectId }),
+      MonitorCheck.deleteMany({ projectId }),
+      FixPullRequest.deleteMany({ projectId }),
+      Project.deleteOne({ _id: projectId })
+    ]);
+
+    // Cleanup postgres rules if they exist
+    try {
+      const { pool } = await import('../config/postgres.js');
+      await pool.query('DELETE FROM alert_rules WHERE project_id = $1', [projectId]);
+    } catch (err) {
+      console.warn("Postgres cleanup warning:", err.message);
+    }
+
+    res.json({ success: true, message: "Project deleted successfully" });
+  } catch (error) {
+    console.error("Delete Project Error:", error);
+    res.status(500).json({ error: "Failed to delete project" });
   }
 };

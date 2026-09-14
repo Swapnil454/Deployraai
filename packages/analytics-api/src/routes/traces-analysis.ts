@@ -112,7 +112,7 @@ export const tracesAnalysisRouter: FastifyPluginAsync = async (app) => {
           WHERE project_id = {projectId: String} 
             AND bucket >= now() - INTERVAL ${chInterval}
           GROUP BY endpoint, method
-          HAVING sum(error_count) > 0
+          HAVING error_count > 0
           ORDER BY error_count DESC
           LIMIT 10
         `,

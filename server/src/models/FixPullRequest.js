@@ -9,7 +9,7 @@ const LogSchema = new mongoose.Schema({
 const FixPullRequestSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project', required: true },
-  deploymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deployment', required: true },
+  deploymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deployment', required: false },
   
   provider: { type: String, default: 'github' },
   status: { 

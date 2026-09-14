@@ -21,10 +21,17 @@ const aiUsageSchema = new mongoose.Schema(
       type: Number,
       required: false,
     },
+    source: {
+      type: String,
+      enum: ["tracked", "seed"],
+      default: "tracked",
+    },
   },
   { timestamps: true }
 );
 
 aiUsageSchema.index({ projectId: 1, createdAt: -1 });
+aiUsageSchema.index({ userId: 1, createdAt: -1 });
+
 
 export default mongoose.models.AiUsage || mongoose.model("AiUsage", aiUsageSchema);

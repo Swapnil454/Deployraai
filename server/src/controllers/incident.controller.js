@@ -1,4 +1,5 @@
 import { pool } from '../config/postgres.js';
+import { invalidatePublicStatusCache } from './status.controller.js';
 
 function severityToComponentStatus(severity) {
   if (severity === "critical") return "major_outage";
@@ -113,6 +114,7 @@ export const createIncident = async (req, res) => {
     }
     
     await client.query('COMMIT');
+    invalidatePublicStatusCache();
     res.status(201).json(incident);
   } catch (err) {
     await client.query('ROLLBACK');
@@ -156,6 +158,7 @@ export const updateIncidentStatus = async (req, res) => {
     await recalculateComponentStatuses(client, compIds);
     
     await client.query('COMMIT');
+    invalidatePublicStatusCache();
     res.json(incRes.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');

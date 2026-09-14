@@ -177,7 +177,15 @@ export const tracesRumRouter: FastifyPluginAsync = async (app) => {
               MAX(created_at) as last_activity,
               SUM(event_count) as event_count
             FROM (
-              SELECT * FROM rum_events 
+              SELECT 
+                session_id, 
+                url, 
+                user_agent, 
+                duration_ms, 
+                error_count, 
+                created_at, 
+                event_count 
+              FROM rum_events 
               WHERE project_id = $1 AND ${timeFilter}
               ORDER BY created_at DESC
               LIMIT 10000
@@ -186,10 +194,10 @@ export const tracesRumRouter: FastifyPluginAsync = async (app) => {
           ) as grouped_sessions
           ${cursorFilter}
           ORDER BY last_activity DESC
-          LIMIT 50
+          LIMIT 12
         `, params);
 
-        const nextCursor = res.rows.length === 50 ? res.rows[49].last_activity : null;
+        const nextCursor = res.rows.length === 12 ? res.rows[11].last_activity : null;
         return { sessions: res.rows, nextCursor };
       } finally {
         client.release();

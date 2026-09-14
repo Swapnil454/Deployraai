@@ -1,18 +1,15 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import 'rrweb-player/dist/style.css';
 import Header from "./components/Header";
 import { Toaster } from 'sonner';
+import { DM_Sans } from "next/font/google";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const dmSans = DM_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '700'],
+  display: 'swap',
+  variable: '--font-dm-sans',
 });
 
 export const metadata: Metadata = {
@@ -28,12 +25,23 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
+      className={`h-full antialiased dark ${dmSans.variable} font-sans`}
+      suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col bg-black text-white selection:bg-indigo-500 selection:text-white">
         <Header />
         {children}
-        <Toaster theme="dark" position="bottom-right" />
+        <Toaster 
+          theme="dark" 
+          position="top-right" 
+          duration={3000} 
+          toastOptions={{
+            classNames: {
+              error: '!bg-red-500 !text-white !border-red-600',
+              success: '!bg-green-500 !text-white !border-green-600',
+            }
+          }}
+        />
       </body>
     </html>
   );

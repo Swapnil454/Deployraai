@@ -1654,8 +1654,8 @@ export const checkDomainHealth = async (req, res) => {
     }
 
     // 2. HTTP/HTTPS Check & SSL Validation
+    let responseTimeStart = Date.now();
     try {
-      const responseTimeStart = Date.now();
       let fetchOptions = {
         signal: AbortSignal.timeout(8000),
         headers: {}

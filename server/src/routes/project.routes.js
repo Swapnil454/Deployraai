@@ -1,5 +1,5 @@
 import express from "express";
-import { analyzeProject, createProject, getProjects, getProject, updateProjectConfig, enableAnalytics, disableAnalytics, getAnalyticsSummary, getProjectUsage, getAiUsage } from "../controllers/project.controller.js";
+import { analyzeProject, createProject, getProjects, getProject, updateProjectConfig, enableAnalytics, disableAnalytics, getAnalyticsSummary, getProjectUsage, getAiUsage, deleteProject } from "../controllers/project.controller.js";
 import { autoInjectAnalytics, verifyAnalytics } from "../controllers/analytics.controller.js";
 import { getProjectDeployments } from "../controllers/deployment.controller.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
@@ -17,6 +17,7 @@ router.post("/", createProject);
 router.get("/", getProjects);
 router.get("/usage/ai", getAiUsage);
 router.get("/:id", getProject);
+router.delete("/:id", deleteProject);
 router.put("/:id/config", updateProjectConfig);
 router.get("/:projectId/deployments", getProjectDeployments);
 router.get("/:projectId/fix-prs", listProjectFixPrs);

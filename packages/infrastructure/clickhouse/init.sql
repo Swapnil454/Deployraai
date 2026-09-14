@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS logs (
   raw String
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(timestamp)
-ORDER BY (project_id, timestamp);
+ORDER BY (project_id, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS spans (
   project_id String,
@@ -69,10 +70,12 @@ CREATE TABLE IF NOT EXISTS spans (
   status_code Int32,
   attributes Map(String, String),
   events String,
-  http_method String ALIAS coalesce(attributes['http.method'], attributes['http.request.method'])
+  http_method String ALIAS coalesce(attributes['http.method'], attributes['http.request.method']),
+  INDEX trace_id_idx trace_id TYPE bloom_filter GRANULARITY 4
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(start_time)
-ORDER BY (project_id, start_time, trace_id, span_id);
+ORDER BY (project_id, start_time, trace_id, span_id)
+TTL toDateTime(start_time) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS metrics_minutely_mv (
   project_id LowCardinality(String),

@@ -112,12 +112,13 @@ export function ProfilingTable({ data, profileType }: { data: FlamegraphNode, pr
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-black/50 border border-white/10 rounded-md overflow-hidden">
-      <div className="flex items-center gap-2 p-2 border-b border-white/10 bg-white/5">
+    <div className="w-full h-full flex flex-col">
+      <div className="flex items-center gap-2 p-3 border-b border-zinc-800/60 bg-zinc-900/30">
         <Button 
           variant={tableMode === 'tree' ? 'secondary' : 'ghost'} 
           size="sm" 
           onClick={() => setTableMode('tree')}
+          className={tableMode === 'tree' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}
         >
           Call Tree View
         </Button>
@@ -125,6 +126,7 @@ export function ProfilingTable({ data, profileType }: { data: FlamegraphNode, pr
           variant={tableMode === 'flat' ? 'secondary' : 'ghost'} 
           size="sm" 
           onClick={() => setTableMode('flat')}
+          className={tableMode === 'flat' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}
         >
           Top Bottlenecks (Flat)
         </Button>
@@ -132,23 +134,23 @@ export function ProfilingTable({ data, profileType }: { data: FlamegraphNode, pr
       
       <div className="flex-1 overflow-y-auto">
         <table className="w-full text-sm text-left">
-          <thead className="text-xs uppercase bg-white/5 border-b border-white/10 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
+          <thead className="text-xs uppercase bg-zinc-900/50 border-b border-zinc-800/60 text-zinc-400 sticky top-0 z-10 backdrop-blur-xl">
             <tr>
-              <th className="px-6 py-3 font-medium">Function Name</th>
+              <th className="px-6 py-4 font-semibold tracking-wider">Function Name</th>
               <th 
-                className={`px-6 py-3 font-medium w-[200px] ${tableMode === 'flat' ? 'cursor-pointer hover:bg-white/10 transition-colors' : ''}`}
+                className={`px-6 py-4 font-semibold tracking-wider w-[220px] ${tableMode === 'flat' ? 'cursor-pointer hover:bg-zinc-800/50 transition-colors' : ''}`}
                 onClick={() => toggleSort('selfValue')}
               >
                 <div className="flex items-center gap-2">
-                  Self Time {tableMode === 'flat' && <ArrowUpDown className="w-3 h-3 opacity-50" />}
+                  Self Time {tableMode === 'flat' && <ArrowUpDown className="w-3 h-3 text-zinc-500" />}
                 </div>
               </th>
               <th 
-                className={`px-6 py-3 font-medium w-[200px] ${tableMode === 'flat' ? 'cursor-pointer hover:bg-white/10 transition-colors' : ''}`}
+                className={`px-6 py-4 font-semibold tracking-wider w-[220px] ${tableMode === 'flat' ? 'cursor-pointer hover:bg-zinc-800/50 transition-colors' : ''}`}
                 onClick={() => toggleSort('totalValue')}
               >
                 <div className="flex items-center gap-2">
-                  Total Time {tableMode === 'flat' && <ArrowUpDown className="w-3 h-3 opacity-50" />}
+                  Total Time {tableMode === 'flat' && <ArrowUpDown className="w-3 h-3 text-zinc-500" />}
                 </div>
               </th>
             </tr>
@@ -160,35 +162,35 @@ export function ProfilingTable({ data, profileType }: { data: FlamegraphNode, pr
                 const totalPct = rows.totalSamples > 0 ? (row.totalValue / rows.totalSamples) * 100 : 0;
                 
                 return (
-                  <tr key={idx} className="border-b border-white/5 hover:bg-white/5 transition-colors font-mono">
-                    <td className="px-6 py-3 break-all text-gray-200">
+                  <tr key={idx} className="border-b border-zinc-800/40 hover:bg-zinc-800/30 transition-colors font-mono">
+                    <td className="px-6 py-4 break-all text-zinc-300">
                       {row.name}
                     </td>
-                <td className="px-6 py-3">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-gray-300 font-semibold">{formatValue(row.selfValue)}</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-24 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                <td className="px-6 py-4">
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-zinc-200 font-semibold">{formatValue(row.selfValue)}</span>
+                    <div className="flex items-center gap-3">
+                      <div className="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden shadow-inner">
                         <div 
-                          className="h-full bg-orange-500 rounded-full" 
+                          className="h-full bg-orange-500 rounded-full shadow-[0_0_8px_rgba(249,115,22,0.6)]" 
                           style={{ width: `${selfPct}%` }}
                         />
                       </div>
-                      <span className="text-xs text-gray-500 w-10">{selfPct.toFixed(1)}%</span>
+                      <span className="text-xs text-zinc-500 font-sans w-10">{selfPct.toFixed(1)}%</span>
                     </div>
                   </div>
                 </td>
-                <td className="px-6 py-3">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-gray-300">{formatValue(row.totalValue)}</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-24 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                <td className="px-6 py-4">
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-zinc-200">{formatValue(row.totalValue)}</span>
+                    <div className="flex items-center gap-3">
+                      <div className="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden shadow-inner">
                         <div 
-                          className="h-full bg-blue-500 rounded-full" 
+                          className="h-full bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.6)]" 
                           style={{ width: `${totalPct}%` }}
                         />
                       </div>
-                      <span className="text-xs text-gray-500 w-10">{totalPct.toFixed(1)}%</span>
+                      <span className="text-xs text-zinc-500 font-sans w-10">{totalPct.toFixed(1)}%</span>
                     </div>
                   </div>
                 </td>
@@ -203,38 +205,38 @@ export function ProfilingTable({ data, profileType }: { data: FlamegraphNode, pr
                 const totalPct = totalSamples > 0 ? (row.totalValue / totalSamples) * 100 : 0;
                 
                 return (
-                  <tr key={idx} className="border-b border-white/5 hover:bg-white/5 transition-colors font-mono">
-                    <td className="px-6 py-3 break-all text-gray-200" style={{ paddingLeft: `${row.depth * 2 + 1.5}rem` }}>
-                      <div className="flex items-center gap-2">
-                        {row.depth > 0 && <div className="w-2 h-px bg-white/20"></div>}
-                        {row.name}
+                  <tr key={idx} className="border-b border-zinc-800/40 hover:bg-zinc-800/30 transition-colors font-mono">
+                    <td className="px-6 py-4 break-all text-zinc-300" style={{ paddingLeft: `${row.depth * 1.5 + 1.5}rem` }}>
+                      <div className="flex items-center gap-3">
+                        {row.depth > 0 && <div className="w-3 h-px bg-zinc-700"></div>}
+                        <span className={row.depth === 0 ? "text-indigo-400 font-semibold" : ""}>{row.name}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-3">
-                      <div className="flex flex-col gap-1">
-                        <span className="text-gray-300 font-semibold">{formatValue(row.selfValue)}</span>
-                        <div className="flex items-center gap-2">
-                          <div className="w-24 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-zinc-200 font-semibold">{formatValue(row.selfValue)}</span>
+                        <div className="flex items-center gap-3">
+                          <div className="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden shadow-inner">
                             <div 
-                              className="h-full bg-orange-500 rounded-full" 
+                              className="h-full bg-orange-500 rounded-full shadow-[0_0_8px_rgba(249,115,22,0.6)]" 
                               style={{ width: `${selfPct}%` }}
                             />
                           </div>
-                          <span className="text-xs text-gray-500 w-10">{selfPct.toFixed(1)}%</span>
+                          <span className="text-xs text-zinc-500 font-sans w-10">{selfPct.toFixed(1)}%</span>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-3">
-                      <div className="flex flex-col gap-1">
-                        <span className="text-gray-300">{formatValue(row.totalValue)}</span>
-                        <div className="flex items-center gap-2">
-                          <div className="w-24 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-zinc-200">{formatValue(row.totalValue)}</span>
+                        <div className="flex items-center gap-3">
+                          <div className="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden shadow-inner">
                             <div 
-                              className="h-full bg-blue-500 rounded-full" 
+                              className="h-full bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.6)]" 
                               style={{ width: `${totalPct}%` }}
                             />
                           </div>
-                          <span className="text-xs text-gray-500 w-10">{totalPct.toFixed(1)}%</span>
+                          <span className="text-xs text-zinc-500 font-sans w-10">{totalPct.toFixed(1)}%</span>
                         </div>
                       </div>
                     </td>

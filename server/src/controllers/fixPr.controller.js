@@ -209,7 +209,7 @@ If the file is package.json and the error is a missing dependency, add the missi
 Return ONLY the raw new file content. Do NOT wrap it in markdown formatting blocks like \`\`\`javascript or \`\`\`json. Return the EXACT text to be saved to the file.`;
 
       const generateWithRetry = async (promptText) => {
-        const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"];
+        const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.6-flash"];
         for (const modelName of fallbackModels) {
           const currentModel = genAI.getGenerativeModel({ model: modelName });
           for (let i = 0; i < 3; i++) {

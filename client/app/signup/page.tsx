@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { auth } from '../lib/firebase';
+import { getFirebaseAuth } from '../lib/firebase';
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
@@ -58,6 +58,7 @@ export default function SignupPage() {
       setError('');
       setSuccessMsg('');
       const provider = new GoogleAuthProvider();
+      const auth = getFirebaseAuth();
       const result = await signInWithPopup(auth, provider);
       const idToken = await result.user.getIdToken();
       await handleFirebaseToken(idToken);
@@ -86,6 +87,7 @@ export default function SignupPage() {
       setLoading(true);
       setError('');
       setSuccessMsg('');
+      const auth = getFirebaseAuth();
       
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       

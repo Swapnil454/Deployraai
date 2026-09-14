@@ -16,32 +16,35 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
       // Look at spans in the last hour
       // Using ClickHouse syntax with CTEs
       // WARNING: ClickHouse materializes CTEs differently than Postgres. 
-      // If topology mapping performance degrades at high scale, this query should 
-      // be rewritten to avoid CTEs or utilize materialized views.
+      // At production scale (millions of spans/hour), this O(N^2) self-join will cause Memory Limit Exceeded (OOM).
+      // ARCHITECTURE RECOMMENDATION: The ingestor pipeline MUST be refactored to pre-calculate 
+      // edge relationships and write them directly into an AggregatingMergeTree (e.g. 'span_edges') 
+      // to avoid querying and joining raw spans for topology generation.
       const query = `
         WITH recent_spans AS (
           SELECT 
             span_id,
-            trace_id,
             parent_span_id,
             attributes['service.name'] as service_name,
             attributes['db.system'] as db_system,
             duration_ms,
             status_code
           FROM spans
-          WHERE project_id = {projectId: String} AND start_time > now() - INTERVAL 1 HOUR
+          WHERE project_id = {projectId: String} 
+            AND start_time > now() - INTERVAL 1 HOUR
+            AND attributes['service.name'] != '' -- Predicate pushdown to drastically reduce CTE footprint
         ),
         edges AS (
           -- Edge type 1: Service to Service (parent-child relationship)
           SELECT 
             parent.service_name as source,
             child.service_name as target,
+            'service' as target_type,
             child.duration_ms as duration_ms,
             child.status_code as status_code
           FROM recent_spans child
           JOIN recent_spans parent ON child.parent_span_id = parent.span_id
-          WHERE parent.service_name != '' 
-            AND child.service_name != '' 
+          WHERE child.service_name != '' 
             AND parent.service_name != child.service_name
             
           UNION ALL
@@ -50,14 +53,16 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
           SELECT 
             service_name as source,
             db_system as target,
+            'database' as target_type,
             duration_ms,
             status_code
           FROM recent_spans
-          WHERE db_system != '' AND service_name != ''
+          WHERE db_system != ''
         )
         SELECT 
           source, 
           target,
+          any(target_type) as target_type,
           COUNT(*) as request_count,
           avg(duration_ms) as avg_latency_ms,
           sum(if(status_code = 2, 1, 0)) / COUNT(*) as error_rate
@@ -91,12 +96,12 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
         const sourceId = row.source;
         const targetId = row.target;
         
-        // We assume target is a database if there are no edges where this target is a source
-        // A simpler heuristic: if it matches known db names like postgresql, redis, etc.
-        const isDb = ['postgresql', 'redis', 'mysql', 'mongodb', 'sqlite'].includes(targetId.toLowerCase());
+        // We now safely rely on OpenTelemetry's db.system attribute directly from the query
+        // instead of brittle javascript string-matching.
+        const targetType = row.target_type || 'service';
         
         addNodeStat(sourceId, 'service', Number(row.request_count), Number(row.error_rate), Number(row.avg_latency_ms));
-        addNodeStat(targetId, isDb ? 'database' : 'service', Number(row.request_count), Number(row.error_rate), Number(row.avg_latency_ms));
+        addNodeStat(targetId, targetType, Number(row.request_count), Number(row.error_rate), Number(row.avg_latency_ms));
         
         edges.push({
           id: `${sourceId}-${targetId}`,
@@ -123,20 +128,7 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
         }
       }));
 
-      // If no data, provide a dummy one to show how it looks
-      if (nodes.length === 0) {
-        return {
-          nodes: [
-            { id: 'frontend', type: 'serviceNode', data: { label: 'frontend', serviceType: 'service', errorRate: 0, avgLatency: 45, requestCount: 120 } },
-            { id: 'backend-api', type: 'serviceNode', data: { label: 'backend-api', serviceType: 'service', errorRate: 0.1, avgLatency: 120, requestCount: 120 } },
-            { id: 'postgresql', type: 'serviceNode', data: { label: 'postgresql', serviceType: 'database', errorRate: 0, avgLatency: 15, requestCount: 300 } }
-          ],
-          edges: [
-            { id: 'e1', source: 'frontend', target: 'backend-api', data: { errorRate: 0.1, avgLatency: 120 } },
-            { id: 'e2', source: 'backend-api', target: 'postgresql', data: { errorRate: 0, avgLatency: 15 } }
-          ]
-        };
-      }
+
 
       return { nodes, edges };
     } catch (err) {

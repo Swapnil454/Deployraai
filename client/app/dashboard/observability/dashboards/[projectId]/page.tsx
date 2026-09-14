@@ -87,15 +87,15 @@ export default function DashboardsListPage() {
 
   return (
     <div className="w-full max-w-5xl mx-auto py-10 px-8">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between border-b border-[#222] pb-8 mb-8">
         <div>
-          <h1 className="text-2xl font-semibold text-white">Custom Dashboards</h1>
-          <p className="text-sm text-zinc-400 mt-1">Build drag-and-drop dashboards for your custom business metrics</p>
+          <h1 className="text-3xl font-semibold text-white tracking-tight">Custom Dashboards</h1>
+          <p className="text-[15px] text-zinc-400 mt-2">Build drag-and-drop dashboards for your custom business metrics</p>
         </div>
         <button
           onClick={handleCreateDashboard}
           disabled={creating}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 text-sm font-medium rounded-md transition-colors"
+          className="flex items-center gap-2 bg-white hover:bg-zinc-200 text-black px-5 py-2.5 text-sm font-medium rounded-lg transition-all shadow-sm"
         >
           {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
           New Dashboard
@@ -103,44 +103,44 @@ export default function DashboardsListPage() {
       </div>
 
       {dashboards.length === 0 ? (
-        <div className="border border-dashed border-zinc-800 rounded-lg py-16 flex flex-col items-center justify-center text-center">
-          <div className="h-12 w-12 rounded-full bg-zinc-900 flex items-center justify-center mb-4">
-            <LayoutDashboard className="h-6 w-6 text-zinc-500" />
+        <div className="border border-dashed border-[#333] bg-[#0a0a0a]/50 rounded-2xl py-24 flex flex-col items-center justify-center text-center">
+          <div className="h-16 w-16 rounded-2xl bg-[#111] border border-[#222] flex items-center justify-center mb-6 shadow-xl">
+            <LayoutDashboard className="h-8 w-8 text-zinc-500" />
           </div>
-          <h3 className="text-lg font-medium text-white mb-2">No dashboards yet</h3>
-          <p className="text-sm text-zinc-400 max-w-sm mb-6">
-            Track user signups, revenue, or any custom business metric using tracepilot.track() and visualize it here.
+          <h3 className="text-xl font-semibold text-white mb-3 tracking-tight">No dashboards yet</h3>
+          <p className="text-[15px] text-zinc-400 max-w-md mb-8 leading-relaxed">
+            Track user signups, revenue, or any custom business metric using <code className="bg-[#111] text-zinc-300 px-1.5 py-0.5 rounded text-sm border border-[#222] font-mono">tracepilot.track()</code> and visualize it here.
           </p>
           <button
             onClick={handleCreateDashboard}
             disabled={creating}
-            className="flex items-center gap-2 bg-white text-black hover:bg-zinc-200 px-4 py-2 text-sm font-medium rounded-md transition-colors"
+            className="flex items-center gap-2 bg-white text-black hover:bg-zinc-200 px-5 py-2.5 text-sm font-medium rounded-lg transition-all shadow-sm"
           >
             {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             Create Dashboard
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {dashboards.map(dashboard => (
             <Link
               key={dashboard.id}
               href={`/dashboard/observability/dashboards/${projectId}/${dashboard.id}`}
-              className="bg-zinc-900/40 border border-zinc-800 hover:border-zinc-700 rounded-lg p-5 flex flex-col group transition-all"
+              className="bg-[#0a0a0a] border border-[#222] hover:border-zinc-600 rounded-2xl p-6 flex flex-col group transition-all hover:shadow-2xl hover:-translate-y-1"
             >
-              <div className="flex items-start justify-between mb-4">
-                <div className="h-10 w-10 rounded-md bg-zinc-800 flex items-center justify-center">
-                  <LayoutDashboard className="h-5 w-5 text-indigo-400" />
+              <div className="flex items-start justify-between mb-6">
+                <div className="h-12 w-12 rounded-xl bg-[#111] border border-[#333] flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <LayoutDashboard className="h-6 w-6 text-zinc-400 group-hover:text-white transition-colors" />
                 </div>
                 <button 
                   onClick={(e) => handleDelete(e, dashboard.id)}
-                  className="text-zinc-600 hover:text-red-400 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="text-zinc-600 hover:text-red-400 p-2 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg hover:bg-red-500/10"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
-              <h3 className="text-base font-medium text-white mb-1 truncate">{dashboard.name}</h3>
-              <p className="text-xs text-zinc-500 mt-auto">
+              <h3 className="text-lg font-semibold text-white mb-2 truncate group-hover:text-indigo-400 transition-colors tracking-tight">{dashboard.name}</h3>
+              <p className="text-[13px] text-zinc-500 mt-auto font-medium">
                 Updated {new Date(dashboard.updated_at).toLocaleDateString()}
               </p>
             </Link>

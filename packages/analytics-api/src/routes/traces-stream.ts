@@ -28,12 +28,18 @@ export const tracesStreamRouter: FastifyPluginAsync = async (app) => {
     sseEmitter.on(channel, listener);
     await subscribeToChannel(channel);
 
+    // Keep-alive heartbeat every 15 seconds to prevent Load Balancer (ALB/Nginx) from severing the connection (HTTP 504)
+    const keepAliveInterval = setInterval(() => {
+      reply.raw.write(':\n\n');
+    }, 15000);
+
     // Wait until the client disconnects. Wrapping in a Promise is CRITICAL — without it,
     // the async route handler never resolves, and Node.js permanently holds the request 
     // context (headers, closure, stack frame) in memory. Over thousands of SSE connections 
     // this causes a slow but guaranteed OOM crash.
     await new Promise<void>((resolve) => {
       req.raw.on('close', () => {
+        clearInterval(keepAliveInterval);
         sseEmitter.off(channel, listener);
         unsubscribeFromChannel(channel);
         resolve();

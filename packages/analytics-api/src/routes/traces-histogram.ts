@@ -31,7 +31,31 @@ export const tracesHistogramRouter: FastifyPluginAsync = async (app) => {
       
       const rows = await result.json<any>();
 
-      return { histogram: rows };
+      // Ensure exactly 60 minutes of data, filling gaps with 0
+      const now = new Date();
+      now.setSeconds(0, 0); // truncate to start of minute
+      
+      const filledHistogram = [];
+      const rowsMap = new Map(rows.map((r: any) => [new Date(r.bucket).getTime(), r]));
+      
+      for (let i = 59; i >= 0; i--) {
+        const bucketTime = now.getTime() - i * 60000;
+        if (rowsMap.has(bucketTime)) {
+          filledHistogram.push(rowsMap.get(bucketTime));
+        } else {
+          filledHistogram.push({
+            bucket: new Date(bucketTime).toISOString().replace('T', ' ').substring(0, 19),
+            volume: 0,
+            avg_latency: 0,
+            p50: 0,
+            p90: 0,
+            p99: 0,
+            errors: 0
+          });
+        }
+      }
+
+      return { histogram: filledHistogram };
     } catch (err) {
       req.log.error({ err }, 'Failed to fetch histogram');
       return reply.status(500).send({ error: 'Failed to fetch histogram' });

@@ -21,17 +21,40 @@ const getGithubToken = async (userId) => {
 
 export const getRepos = async (req, res) => {
   try {
+    const { page = 1, limit = 10, search = '' } = req.query;
     const token = await getGithubToken(req.user.userId);
     
-    // Fetch public repos for MVP. To get all, we could use user/repos with affiliation.
-    const response = await axios.get("https://api.github.com/user/repos?visibility=public&sort=updated&per_page=100", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github.v3+json"
+    let rawRepos = [];
+    let hasMore = false;
+    
+    if (search.trim()) {
+      // Search API requires the username to scope the query
+      const connectedAccount = await ConnectedAccount.findOne({ userId: req.user.userId, provider: 'github' });
+      let username = connectedAccount?.providerAccountName;
+      if (!username) {
+         const userRes = await axios.get("https://api.github.com/user", {
+           headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github.v3+json" }
+         });
+         username = userRes.data.login;
       }
-    });
+      
+      const q = encodeURIComponent(`${search.trim()} user:${username}`);
+      const response = await axios.get(`https://api.github.com/search/repositories?q=${q}&per_page=${limit}&page=${page}&sort=updated`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github.v3+json" }
+      });
+      
+      rawRepos = response.data.items || [];
+      hasMore = (response.data.total_count || 0) > page * limit;
+    } else {
+      const response = await axios.get(`https://api.github.com/user/repos?visibility=public&sort=updated&per_page=${limit}&page=${page}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github.v3+json" }
+      });
+      
+      rawRepos = response.data || [];
+      hasMore = rawRepos.length === parseInt(limit, 10);
+    }
 
-    const repos = response.data.map(repo => ({
+    const repos = rawRepos.map(repo => ({
       id: repo.id,
       name: repo.name,
       owner: repo.owner.login,
@@ -42,7 +65,7 @@ export const getRepos = async (req, res) => {
       updatedAt: repo.updated_at
     }));
 
-    res.json(repos);
+    res.json({ repos, hasMore });
   } catch (error) {
     if (error.response?.status === 401) {
       // Token is invalid/expired
@@ -53,7 +76,7 @@ export const getRepos = async (req, res) => {
     if (error.message === "GitHub not connected") {
       return res.status(401).json({ error: "GitHub not connected" });
     }
-    console.error("GitHub Fetch Repos Error:", error.message);
+    console.error("GitHub Fetch Repos Error:", error.response?.data || error.message);
     res.status(500).json({ error: "Failed to fetch repositories" });
   }
 };

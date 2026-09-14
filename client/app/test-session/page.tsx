@@ -15,7 +15,7 @@ export default function TestSessionPage() {
   const sessionId = useRef("sess_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36));
 
   useEffect(() => {
-    let stopRecording: (() => void) | null = null;
+    let stopRecording: (() => void) | undefined;
 
     // Dynamic import ensures rrweb only loads in browser (no SSR)
     import('rrweb').then(({ record }) => {

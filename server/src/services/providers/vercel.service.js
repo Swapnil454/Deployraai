@@ -150,6 +150,10 @@ export const getVercelProjects = async (token) => {
   return vercelAPI(token, 'GET', '/v9/projects');
 };
 
+export const deleteVercelProject = async (token, projectId) => {
+  return vercelAPI(token, 'DELETE', `/v9/projects/${projectId}`);
+};
+
 export const getVercelProject = async (token, projectId) => {
   return vercelAPI(token, 'GET', `/v9/projects/${projectId}`);
 };
@@ -215,6 +219,7 @@ export const validateVercelToken = async (token) => {
     await vercelAPI(token, 'GET', `/v2/user`);
     return true;
   } catch (error) {
+    console.error('Vercel validation error:', error.message || error);
     return false;
   }
 };

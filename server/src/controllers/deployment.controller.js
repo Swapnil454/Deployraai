@@ -898,7 +898,7 @@ Response MUST match this exact JSON schema:
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
     const generateWithRetry = async (promptText) => {
-      const fallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
+      const fallbackModels = ["gemini-2.5-flash", "gemini-3.6-flash", "gemini-flash-latest"];
       for (const modelName of fallbackModels) {
         const currentModel = genAI.getGenerativeModel({ model: modelName });
         for (let i = 0; i < 2; i++) {
@@ -1113,5 +1113,46 @@ export const rollbackDeployment = async (req, res) => {
   } catch (error) {
     console.error("Rollback deployment error:", error);
     res.status(500).json({ error: "Failed to rollback deployment" });
+  }
+};
+
+export const cancelDeployment = async (req, res) => {
+  try {
+    const { deploymentId } = req.params;
+    const Deployment = (await import('../models/Deployment.js')).default;
+    const deployment = await Deployment.findById(deploymentId);
+    if (!deployment) return res.status(404).json({ error: 'Deployment not found' });
+    if (deployment.userId.toString() !== req.user.userId.toString()) return res.status(403).json({ error: 'Access denied' });
+    
+    if (deployment.status !== 'running' && deployment.status !== 'queued') {
+      return res.status(400).json({ error: 'Deployment is not in a cancellable state' });
+    }
+    
+    deployment.status = 'failed';
+    if (!deployment.finalSummary) deployment.finalSummary = {};
+    deployment.finalSummary.failureReason = 'Cancelled by user';
+    deployment.logs.push({
+      level: 'error',
+      step: 'cancelled',
+      message: 'Deployment was cancelled by the user.',
+      timestamp: new Date()
+    });
+    
+    await deployment.save();
+    
+    if (deployment.type === 'full') {
+      await Deployment.updateMany(
+        { orchestrationGroupId: deployment._id, status: { $in: ['running', 'queued'] } },
+        { 
+          $set: { status: 'failed', 'finalSummary.failureReason': 'Cancelled by user' },
+          $push: { logs: { level: 'error', step: 'cancelled', message: 'Parent deployment cancelled', timestamp: new Date() } }
+        }
+      );
+    }
+    
+    res.json({ success: true, message: 'Deployment cancelled successfully' });
+  } catch (error) {
+    console.error('Cancel deployment error:', error);
+    res.status(500).json({ error: 'Failed to cancel deployment' });
   }
 };

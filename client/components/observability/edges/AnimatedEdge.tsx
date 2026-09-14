@@ -1,5 +1,11 @@
 import React from 'react';
-import { BaseEdge, EdgeProps, getBezierPath } from '@xyflow/react';
+import { BaseEdge, Edge, EdgeProps, getSmoothStepPath } from '@xyflow/react';
+
+interface AnimatedEdgeData extends Record<string, unknown> {
+  errorRate?: number;
+}
+
+type AnimatedEdgeType = Edge<AnimatedEdgeData>;
 
 export function AnimatedEdge({
   sourceX,
@@ -11,8 +17,8 @@ export function AnimatedEdge({
   style = {},
   markerEnd,
   data,
-}: EdgeProps) {
-  const [edgePath] = getBezierPath({
+}: EdgeProps<AnimatedEdgeType>) {
+  const [edgePath] = getSmoothStepPath({
     sourceX,
     sourceY,
     sourcePosition,
@@ -21,7 +27,7 @@ export function AnimatedEdge({
     targetPosition,
   });
 
-  const isHighError = data?.errorRate > 0.05;
+  const isHighError = (data?.errorRate ?? 0) > 0.05;
   const strokeColor = isHighError ? '#ef4444' : '#6366f1'; // red-500 or indigo-500
 
   return (

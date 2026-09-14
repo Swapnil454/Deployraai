@@ -103,6 +103,11 @@ export const getRenderService = async (token, serviceId) => {
   return data;
 };
 
+export const deleteRenderService = async (token, serviceId) => {
+  const data = await renderAPI(token, 'DELETE', `/services/${serviceId}`);
+  return data;
+};
+
 export const addRenderCustomDomain = async (token, serviceId, domain) => {
   const payload = { name: domain };
   const data = await renderAPI(token, 'POST', `/services/${serviceId}/custom-domains`, payload);

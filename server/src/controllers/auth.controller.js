@@ -29,6 +29,10 @@ export const firebaseLogin = async (req, res) => {
     if (signInProvider === 'google.com') providerName = 'firebase_google';
     if (signInProvider === 'github.com') providerName = 'github';
 
+    if (providerName === 'firebase_email' && !decodedToken.email_verified) {
+      return res.status(403).json({ error: "Email not verified. Please verify your email before logging in." });
+    }
+
     // 2. Email-first lookup
     let user = await User.findOne({ email });
 
@@ -255,10 +259,13 @@ export const me = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
     
-    // Check ConnectedAccount for GitHub status in addition to legacy field
+    // Check ConnectedAccount for all providers in addition to legacy fields
     const { default: ConnectedAccount } = await import("../models/ConnectedAccount.js");
-    const ghAccount = await ConnectedAccount.findOne({ userId: req.user.userId, provider: 'github', status: 'connected' });
-    const isGithubConnected = !!ghAccount || user.githubConnected;
+    const connectedAccounts = await ConnectedAccount.find({ userId: req.user.userId, status: 'connected' });
+    
+    const isConnected = (provider) => {
+      return connectedAccounts.some(acc => acc.provider === provider) || !!user[`${provider}Connected`];
+    };
 
     res.json({
       id: user._id,
@@ -267,10 +274,12 @@ export const me = async (req, res) => {
       avatar: user.avatar,
       githubUsername: user.githubUsername,
       role: user.role,
-      githubConnected: isGithubConnected,
-      vercelConnected: user.vercelConnected,
-      renderConnected: user.renderConnected,
-      cloudflareConnected: user.cloudflareConnected
+      githubConnected: isConnected('github'),
+      vercelConnected: isConnected('vercel'),
+      renderConnected: isConnected('render'),
+      railwayConnected: isConnected('railway'),
+      netlifyConnected: isConnected('netlify'),
+      cloudflareConnected: isConnected('cloudflare')
     });
   } catch (error) {
     res.status(500).json({ error: "Server error" });

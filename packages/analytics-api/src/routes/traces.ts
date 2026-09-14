@@ -13,7 +13,9 @@ export const tracesRouter: FastifyPluginAsync = async (app) => {
         start_time, duration_ms,
         status_code, attributes, events
       FROM spans
-      WHERE project_id = {projectId: String} AND parent_span_id = ''
+      WHERE project_id = {projectId: String} 
+        AND parent_span_id = '' 
+        AND start_time >= now() - INTERVAL 1 DAY
     `;
     const params: any = { projectId, limit: parseInt(limit), offset: parseInt(offset) };
 
