@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "nodemon src/server",
     "dev": "nodemon src/server"
   },
   "keywords": [],
@@ -14,7 +14,6 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "axios": "^1.17.0",
-    "bcrypt": "^6.0.0",
     "cloudinary": "^2.10.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -25,9 +24,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.7.0",
     "multer": "^2.2.0",
-    "nanoid": "^3.3.15",
     "node-cron": "^4.2.1",
-    "node-fetch": "^3.3.2",
     "nodemon": "^3.1.14",
     "pg": "^8.22.0",
     "puppeteer": "^25.1.0",
