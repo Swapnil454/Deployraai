@@ -106,7 +106,7 @@ export const autoInjectAnalytics = async (req, res) => {
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const generateWithRetry = async (promptText) => {
-      const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.6-flash"];
+      const fallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
       for (const modelName of fallbackModels) {
         const currentModel = genAI.getGenerativeModel({ model: modelName });
         for (let i = 0; i < 3; i++) {
@@ -160,10 +160,10 @@ CRITICAL: Return ONLY the raw new file content. Do NOT wrap it in markdown forma
 
       let newContent = result.response.text().trim();
       if (newContent.startsWith("\`\`\`")) {
-         const lines = newContent.split("\\n");
+         const lines = newContent.split("\n");
          lines.shift();
          if (lines.length > 0 && lines[lines.length - 1].startsWith("\`\`\`")) lines.pop();
-         newContent = lines.join("\\n");
+         newContent = lines.join("\n");
       }
 
       if (newContent !== entryFile.content) {
@@ -219,10 +219,10 @@ CRITICAL: Return ONLY the valid JSON array string. Do NOT wrap in \`\`\`json blo
       
       let newContent = result.response.text().trim();
       if (newContent.startsWith("\`\`\`")) {
-         const lines = newContent.split("\\n");
+         const lines = newContent.split("\n");
          lines.shift();
          if (lines.length > 0 && lines[lines.length - 1].startsWith("\`\`\`")) lines.pop();
-         newContent = lines.join("\\n").trim();
+         newContent = lines.join("\n").trim();
       }
 
       let parsedFiles = [];
