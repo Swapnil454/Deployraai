@@ -10,8 +10,10 @@
     "dev": "tsup src/index.ts --format cjs,esm --watch"
   },
   "devDependencies": {
+    "tsup": "^8.0.0"
+  },
+  "dependencies": {
     "@types/node": "^20.14.2",
-    "tsup": "^8.0.0",
     "typescript": "^5.4.0"
   }
 }
