@@ -60,7 +60,7 @@ export function track(
   } else {
     // Original behavior — attribute on active span
     const activeSpan = trace.getActiveSpan();
-    if (activeSpan) activeSpan.setAttribute(`app.${nameOrKey}`, valueOrPayload);
+    if (activeSpan) activeSpan.setAttribute(`app.${nameOrKey}`, valueOrPayload as string | number | boolean);
   }
 }
 
