@@ -186,7 +186,6 @@ export const resolveIssue = async (req, res) => {
 };
 
 import { generateIssueDiagnosis } from '../services/ai.service.js';
-import { trackAiUsage } from '../utils/aiTracker.js';
 
 export const diagnoseIssue = async (req, res) => {
   const client = await pool.connect();
@@ -224,10 +223,7 @@ export const diagnoseIssue = async (req, res) => {
     // 4. Call AI Service
     const aiResult = await generateIssueDiagnosis(issue, latestEvent);
 
-    // 5. Track AI usage (fire-and-forget — never block the response)
-    trackAiUsage(req.user?.userId, projectId, 'deployment_analysis').catch(() => {});
-
-    // 6. Save the analysis
+    // 5. Save the analysis
     const insertRes = await client.query(`
       INSERT INTO issue_analysis (issue_id, analysis_text, suggested_fix)
       VALUES ($1, $2, $3)

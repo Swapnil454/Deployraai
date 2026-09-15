@@ -58,7 +58,7 @@ ${issue.latest_deobfuscated_stacktrace || issue.latest_stacktrace}
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
     const generateWithRetry = async (promptText) => {
-      const fallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+      const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.6-flash"];
       for (const modelName of fallbackModels) {
         const currentModel = genAI.getGenerativeModel({ model: modelName });
         for (let i = 0; i < 3; i++) {
@@ -113,7 +113,7 @@ Return ONLY raw JSON, without markdown formatting blocks.`;
     check.aiAnalysis = analysis;
     await check.save();
     
-    await trackAiUsage(userId, projectId, 'deployment_analysis');
+    await trackAiUsage(userId, projectId, 'monitor_analysis');
 
     res.json({ success: true, aiAnalysis: analysis });
   } catch (error) {
@@ -158,7 +158,7 @@ export const createMonitorFixPr = async (req, res) => {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
     const generateWithRetry = async (promptText) => {
-      const fallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+      const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.6-flash"];
       for (const modelName of fallbackModels) {
         const currentModel = genAI.getGenerativeModel({ model: modelName });
         for (let i = 0; i < 3; i++) {
@@ -242,17 +242,17 @@ Return ONLY the raw new file content. Do NOT wrap it in markdown.`;
     const rewriteResult = await generateWithRetry(rewritePrompt);
     let newContent = rewriteResult.response.text().trim();
     if (newContent.startsWith("\`\`\`")) {
-       const lines = newContent.split("\n");
+       const lines = newContent.split("\\n");
        lines.shift();
        if (lines.length > 0 && lines[lines.length - 1].startsWith("\`\`\`")) lines.pop();
-       newContent = lines.join("\n");
+       newContent = lines.join("\\n");
     }
 
     if (!newContent || newContent === fileData.content) {
        return res.status(400).json({ error: "AI could not generate a meaningful change." });
     }
 
-    await trackAiUsage(userId, projectId, 'auto_pr_fix');
+    await trackAiUsage(userId, projectId, 'auto_pr_fix_monitor');
 
     // 3. Create PR
     const timestamp = Date.now();

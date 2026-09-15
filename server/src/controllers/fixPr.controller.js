@@ -171,7 +171,7 @@ export const createFixPr = async (req, res) => {
         return res.status(500).json({ error: "AI Provider not configured. Please add GEMINI_API_KEY." });
       }
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      // Note: model is selected via the generateWithRetry fallback below
+      const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
       const logString = deployment.logs ? deployment.logs.map(l => `[${l.level}] ${l.step}: ${l.message}`).join('\n').substring(0, 5000) : "No logs";
 
@@ -209,7 +209,7 @@ If the file is package.json and the error is a missing dependency, add the missi
 Return ONLY the raw new file content. Do NOT wrap it in markdown formatting blocks like \`\`\`javascript or \`\`\`json. Return the EXACT text to be saved to the file.`;
 
       const generateWithRetry = async (promptText) => {
-        const fallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+        const fallbackModels = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.6-flash"];
         for (const modelName of fallbackModels) {
           const currentModel = genAI.getGenerativeModel({ model: modelName });
           for (let i = 0; i < 3; i++) {

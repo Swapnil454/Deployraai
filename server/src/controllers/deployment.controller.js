@@ -898,7 +898,7 @@ Response MUST match this exact JSON schema:
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
     const generateWithRetry = async (promptText) => {
-      const fallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+      const fallbackModels = ["gemini-2.5-flash", "gemini-3.6-flash", "gemini-flash-latest"];
       for (const modelName of fallbackModels) {
         const currentModel = genAI.getGenerativeModel({ model: modelName });
         for (let i = 0; i < 2; i++) {
