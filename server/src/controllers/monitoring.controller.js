@@ -134,3 +134,61 @@ export const getProjectMonitorSummary = async (req, res) => {
     res.status(500).json({ error: "Failed to get monitor summary" });
   }
 };
+
+export const getMonitorHistory = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { timeRange = '1d' } = req.query;
+    
+    const project = await Project.findOne({ _id: projectId, userId: req.user.userId });
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const monitors = await Monitor.find({ projectId });
+    if (monitors.length === 0) return res.json({ success: true, history: { frontend: [], backend: [] } });
+
+    let days = 1;
+    if (timeRange === '7d') days = 7;
+    else if (timeRange === '15d') days = 15;
+    else if (timeRange === '1m') days = 30;
+    else if (timeRange === '1y') days = 365;
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const monitorIds = monitors.map(m => m._id);
+    
+    const checks = await MonitorCheck.find({
+      monitorId: { $in: monitorIds },
+      checkedAt: { $gte: startDate }
+    })
+    .sort({ checkedAt: 1 })
+    .populate('monitorId', 'name type')
+    .lean();
+
+    const history = {
+      frontend: [],
+      backend: []
+    };
+
+    checks.forEach(c => {
+      const type = c.monitorId?.type;
+      if (type === 'frontend') history.frontend.push(c);
+      else if (type === 'backend') history.backend.push(c);
+    });
+
+    // Sample data to prevent massive payloads for 1y
+    const downsample = (arr, maxItems = 100) => {
+      if (arr.length <= maxItems) return arr;
+      const step = Math.ceil(arr.length / maxItems);
+      return arr.filter((_, i) => i % step === 0);
+    };
+
+    history.frontend = downsample(history.frontend);
+    history.backend = downsample(history.backend);
+
+    res.json({ success: true, history });
+  } catch (error) {
+    console.error("Get monitor history error:", error);
+    res.status(500).json({ error: "Failed to get monitor history" });
+  }
+};

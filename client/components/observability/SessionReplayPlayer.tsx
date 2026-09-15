@@ -66,7 +66,13 @@ export function SessionReplayPlayer({ events }: SessionReplayPlayerProps) {
 
         const { width, height } = event;
         const containerW = outerRef.current.clientWidth;
-        const s = Math.min(containerW / width, 1); // never upscale
+        // Limit the maximum height so it stays in one view
+        const maxH = window.innerHeight ? window.innerHeight * 0.6 : 600;
+        
+        const scaleW = containerW / width;
+        const scaleH = maxH / height;
+        const s = Math.min(scaleW, scaleH, 1); // never upscale
+        
         const scaledW = Math.round(width * s);
         const scaledH = Math.round(height * s);
 
@@ -169,8 +175,8 @@ export function SessionReplayPlayer({ events }: SessionReplayPlayerProps) {
       {/* outerRef: clips to scaled size, hides overflow    */}
       <div
         ref={outerRef}
-        className="relative w-full overflow-hidden bg-zinc-900"
-        style={{ height: vpH > 0 ? vpH : 480 }}
+        className="relative w-full overflow-hidden bg-zinc-950 flex items-center justify-center border-b border-zinc-800/50"
+        style={{ height: vpH > 0 ? vpH : (window.innerHeight ? window.innerHeight * 0.6 : 600) }}
       >
         {/* Loading state */}
         {status === 'loading' && (

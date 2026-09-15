@@ -12,28 +12,39 @@ export const logsRouter: FastifyPluginAsync = async (app) => {
     const { projectId } = req.params as { projectId: string };
     const lines = req.body as any[];
 
-    const logs = lines.map(line => ({
-      projectId,
-      source: 'vercel',
-      timestamp: new Date(line.timestamp),
-      message: line.message,
-      level: detectLogLevel(line.message),
-      requestId: line.requestId,
-      region: line.proxy?.region ?? 'unknown',
-      deployId: line.deploymentId,
-      raw: line,
-    }));
+    // Respond immediately to prevent Vercel webhook timeout
+    reply.status(202).send({ status: 'accepted' });
 
-    // Apply custom log parsing pipelines concurrently
-    await Promise.all(logs.map(async (log) => {
-      const attributes = await parseMessage(log.projectId, log.message);
-      if (attributes) {
-        (log as any).attributes = attributes;
+    // Process asynchronously in the background
+    const processLogsAsync = async () => {
+      try {
+        const logs = lines.map(line => ({
+          projectId,
+          source: 'vercel',
+          timestamp: new Date(line.timestamp),
+          message: line.message,
+          level: detectLogLevel(line.message),
+          requestId: line.requestId,
+          region: line.proxy?.region ?? 'unknown',
+          deployId: line.deploymentId,
+          raw: line,
+        }));
+
+        // Apply custom log parsing pipelines concurrently
+        await Promise.all(logs.map(async (log) => {
+          const attributes = await parseMessage(log.projectId, log.message);
+          if (attributes) {
+            (log as any).attributes = attributes;
+          }
+        }));
+
+        await logWriter.write(logs);
+      } catch (err: any) {
+        req.log.error({ err, projectId }, '[Logs] Vercel log processing failed in background');
       }
-    }));
+    };
 
-    logWriter.write(logs).catch(() => {});
-    reply.status(202).send();
+    processLogsAsync();
   });
 
   // Netlify log drain
@@ -42,10 +53,20 @@ export const logsRouter: FastifyPluginAsync = async (app) => {
   }, async (req, reply) => {
     const { projectId } = req.params as { projectId: string };
     const payload = req.body as any;
-    // Netlify sends different shape — normalize to same internal format
-    const logs = normalizeNetlifyLogs(payload, projectId);
-    logWriter.write(logs).catch(() => {});
-    reply.status(202).send();
+    
+    reply.status(202).send({ status: 'accepted' });
+
+    const processLogsAsync = async () => {
+      try {
+        // Netlify sends different shape — normalize to same internal format
+        const logs = normalizeNetlifyLogs(payload, projectId);
+        await logWriter.write(logs);
+      } catch (err: any) {
+        req.log.error({ err, projectId }, '[Logs] Netlify log processing failed in background');
+      }
+    };
+
+    processLogsAsync();
   });
 
   // Railway log drain
@@ -55,28 +76,39 @@ export const logsRouter: FastifyPluginAsync = async (app) => {
     const { projectId } = req.params as { projectId: string };
     const payload = req.body as any[];
 
-    const logs = payload.map(line => ({
-      projectId,
-      source: 'railway',
-      timestamp: new Date(line.timestamp),
-      message: line.message,
-      level: detectLogLevel(line.message),
-      requestId: null,
-      region: line.attributes?.region ?? 'unknown',
-      deployId: line.attributes?.deploymentId ?? 'unknown',
-      raw: line,
-    }));
+    // Respond immediately to prevent Railway webhook timeout
+    reply.status(202).send({ status: 'accepted' });
 
-    // Apply custom log parsing pipelines concurrently
-    await Promise.all(logs.map(async (log) => {
-      const attributes = await parseMessage(log.projectId, log.message);
-      if (attributes) {
-        (log as any).attributes = attributes;
+    // Process asynchronously
+    const processLogsAsync = async () => {
+      try {
+        const logs = payload.map(line => ({
+          projectId,
+          source: 'railway',
+          timestamp: new Date(line.timestamp),
+          message: line.message,
+          level: detectLogLevel(line.message),
+          requestId: null,
+          region: line.attributes?.region ?? 'unknown',
+          deployId: line.attributes?.deploymentId ?? 'unknown',
+          raw: line,
+        }));
+
+        // Apply custom log parsing pipelines concurrently
+        await Promise.all(logs.map(async (log) => {
+          const attributes = await parseMessage(log.projectId, log.message);
+          if (attributes) {
+            (log as any).attributes = attributes;
+          }
+        }));
+
+        await logWriter.write(logs);
+      } catch (err: any) {
+        req.log.error({ err, projectId }, '[Logs] Railway log processing failed in background');
       }
-    }));
+    };
 
-    logWriter.write(logs).catch(() => {});
-    reply.status(202).send();
+    processLogsAsync();
   });
 };
 

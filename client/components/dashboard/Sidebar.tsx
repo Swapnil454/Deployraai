@@ -59,6 +59,7 @@ export const Sidebar = ({ user }: { user: any }) => {
     pathname.startsWith("/dashboard/observability/analysis") ||
     pathname.startsWith("/dashboard/observability/profiling") ||
     pathname.startsWith("/dashboard/observability/rum") ||
+    pathname.startsWith("/dashboard/observability/sessions") ||
     pathname.startsWith("/dashboard/observability/logs") ||
     pathname.startsWith("/dashboard/issues") ||
     pathname.startsWith("/dashboard/alerts") ||
@@ -94,7 +95,7 @@ export const Sidebar = ({ user }: { user: any }) => {
         </div>
       </div>
 
-      <nav className="flex-1 px-4 space-y-0.5">
+      <nav className="flex-1 px-4 space-y-0.5 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {SIDEBAR_ITEMS.map((item) => {
           if (item.name === "Deployments") {
             return (

@@ -64,22 +64,39 @@ export default function SessionReplayPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 space-y-4">
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => router.back()}
-          className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-white">Session Replay</h1>
-          <p className="text-zinc-500 mt-0.5 font-mono text-xs">{sessionId}</p>
-        </div>
-        <span className="ml-auto text-xs text-zinc-500">{events.length.toLocaleString()} events</span>
-      </div>
+    <div className="relative w-full flex flex-col min-h-full overflow-clip bg-[#050505] pb-24">
+      {/* Page Ambient Glows */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-900/10 via-transparent to-transparent pointer-events-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_var(--tw-gradient-stops))] from-indigo-900/10 via-transparent to-transparent pointer-events-none" />
+      
+      <div className="relative z-10 p-6 pt-6 w-full flex-1">
+        <div className="max-w-[1440px] w-full mx-auto">
+          {/* Header */}
+          <div className="flex items-center gap-4 mb-8 border-b border-zinc-800/60 pb-6">
+            <button
+              onClick={() => router.back()}
+              className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors border border-zinc-800/50 hover:border-zinc-700/50 shadow-sm"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <h1 className="text-2xl font-extrabold tracking-tight text-white">Session Replay</h1>
+              <p className="text-zinc-500 mt-1 font-mono text-xs">{sessionId}</p>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-zinc-800/50 text-zinc-300 border border-zinc-700/50 shadow-sm">
+                <MonitorPlay className="w-4 h-4 text-indigo-400" />
+                {events.length.toLocaleString()} events
+              </span>
+            </div>
+          </div>
 
-      <SessionReplayPlayer events={events} />
+          {/* Player Container */}
+          <div className="w-full max-w-5xl mx-auto shadow-2xl shadow-indigo-900/10 rounded-xl overflow-hidden ring-1 ring-zinc-700/50 bg-zinc-950/50 backdrop-blur-sm">
+            <SessionReplayPlayer events={events} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -9,7 +9,15 @@ const monitorCheckSchema = new mongoose.Schema({
   statusCode: { type: Number },
   responseTimeMs: { type: Number },
   errorMessage: { type: String },
-  checkedAt: { type: Date, default: Date.now }
+  checkedAt: { type: Date, default: Date.now },
+  aiAnalysis: {
+    summary: { type: String },
+    likelyCause: { type: String },
+    suggestedFix: { type: String },
+    canAutoFix: { type: Boolean, default: false },
+    fix_pr_url: { type: String },
+    generatedAt: { type: Date }
+  }
 });
 
 // Index for querying checks by monitor over time

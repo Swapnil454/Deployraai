@@ -70,8 +70,15 @@ export function WebVitalsDashboard({
   const getGradeColor = (grade: string) => {
     if (grade === 'good') return 'text-emerald-400';
     if (grade === 'needs-improvement') return 'text-amber-400';
-    if (grade === 'poor') return 'text-rose-400';
+    if (grade === 'poor') return 'text-rose-500';
     return 'text-zinc-500';
+  };
+
+  const getGradeLabel = (grade: string) => {
+    if (grade === 'good') return 'Good';
+    if (grade === 'needs-improvement') return 'Needs Work';
+    if (grade === 'poor') return 'Poor';
+    return 'N/A';
   };
 
   const getGradeBg = (grade: string) => {
@@ -90,24 +97,21 @@ export function WebVitalsDashboard({
     name: string, 
     label: string, 
     icon: React.ReactNode, 
-    iconColorClass: string,
     isTimeBased: boolean = true
   ) => {
     const data = getVitalScore(name);
     
-    if (!data || data.sample_count < 100) {
+    if (!data || data.sample_count < 1) {
       return (
-        <div className="bg-[#0a0a0a] border border-zinc-800/60 rounded-xl p-5 flex flex-col justify-between">
-          <div className="flex items-center gap-3 mb-4">
-            <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${iconColorClass}`}>
+        <div className="bg-[#0a0a0a] border border-zinc-800/60 rounded-xl p-4 flex flex-col justify-between hover:border-zinc-700/80 transition-colors min-h-[130px]">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="shrink-0 flex items-center justify-center text-zinc-400">
               {icon}
             </div>
-            <h3 className="font-medium text-zinc-300">{label}</h3>
+            <h3 className="text-sm font-medium text-zinc-400 tracking-tight truncate">{name}</h3>
           </div>
-          <div className="flex items-center">
-            <span className="px-2 py-1 bg-zinc-800/50 text-zinc-400 text-xs rounded-md border border-zinc-800">
-              Insufficient data ({data ? data.sample_count : 0} samples)
-            </span>
+          <div className="flex items-center mt-auto">
+            <span className="text-[11px] font-medium text-zinc-600">No Data</span>
           </div>
         </div>
       );
@@ -115,58 +119,58 @@ export function WebVitalsDashboard({
 
     const grade = getGrade(name, data.p75_value);
     const gradeColor = getGradeColor(grade);
-    const gradeBg = getGradeBg(grade);
     
     const formatted = isTimeBased ? Math.round(data.p75_value) : data.p75_value.toFixed(3);
     const unit = isTimeBased ? 'ms' : '';
 
     return (
-      <div className="bg-[#0a0a0a] border border-zinc-800/60 rounded-xl p-5 flex flex-col justify-between">
-        <div className="flex items-center gap-3 mb-2">
-          <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${iconColorClass}`}>
+      <div className="bg-[#0a0a0a] border border-zinc-800/60 rounded-xl p-4 flex flex-col justify-between hover:border-zinc-700/80 transition-colors min-h-[130px]">
+        
+        <div className="flex items-center gap-2 mb-3">
+          <div className="shrink-0 flex items-center justify-center text-zinc-400">
             {icon}
           </div>
-          <h3 className="font-medium text-zinc-300">{label}</h3>
+          <h3 className="text-sm font-medium text-zinc-300 tracking-tight truncate" title={label}>{name}</h3>
         </div>
         
-        <div className="mt-2 flex items-end justify-between">
-          <div className="flex items-baseline gap-1">
-            <span className={`text-3xl font-semibold ${gradeColor}`}>{formatted}</span>
-            <span className="text-sm text-zinc-500">{unit}</span>
+        <div className="mt-auto flex flex-col">
+          <div className="flex items-baseline gap-1 mb-3">
+            <span className={`text-3xl font-semibold tracking-tight ${gradeColor}`}>
+              {formatted}
+            </span>
+            <span className="text-xs font-medium text-zinc-500">{unit}</span>
+            <span className={`ml-2 text-[10px] font-medium ${gradeColor} opacity-70`}>
+              · {getGradeLabel(grade)}
+            </span>
           </div>
-          <div className={`px-2.5 py-1 text-xs font-medium rounded-md border capitalize ${gradeBg} ${gradeColor}`}>
-            {grade.replace('-', ' ')}
-          </div>
-        </div>
 
-        {/* Visual Bar Indicator */}
-        <div className="mt-4 w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden flex relative">
-          {name === 'CLS' ? (
-             // Horizontal Threshold Bar for CLS
-             <>
-               <div className="h-full bg-emerald-500" style={{ width: '33.33%' }}></div>
-               <div className="h-full bg-amber-500" style={{ width: '50%' }}></div>
-               <div className="h-full bg-rose-500" style={{ width: '16.67%' }}></div>
-               {/* Marker */}
-               <div className="absolute top-0 bottom-0 w-1 bg-white border-x border-black z-10" 
-                    style={{ left: `${Math.min((data.p75_value / 0.3) * 100, 100)}%` }}></div>
-             </>
-          ) : (
-            // Gauge bar for time-based metrics
-            <>
-               <div className="h-full bg-emerald-500" style={{ width: '33.33%' }}></div>
-               <div className="h-full bg-amber-500" style={{ width: '33.33%' }}></div>
-               <div className="h-full bg-rose-500" style={{ width: '33.33%' }}></div>
-               {/* Marker (normalized against upper boundary of poor roughly) */}
-               <div className="absolute top-0 bottom-0 w-1 bg-white border-x border-black z-10" 
-                    style={{ 
-                      left: `${Math.min(
-                        (data.p75_value / (name === 'INP' ? 750 : name === 'TTFB' ? 2500 : 6000)) * 100, 
-                        98
-                      )}%` 
-                    }}></div>
-            </>
-          )}
+          {/* Minimal Visual Bar Indicator */}
+          <div className="w-full bg-zinc-900 rounded-full h-1 overflow-hidden flex relative border border-zinc-800/50">
+            {name === 'CLS' ? (
+               // Horizontal Threshold Bar for CLS
+               <>
+                 <div className="h-full bg-emerald-500/50" style={{ width: '33.33%' }}></div>
+                 <div className="h-full bg-amber-500/50" style={{ width: '50%' }}></div>
+                 <div className="h-full bg-rose-500/50" style={{ width: '16.67%' }}></div>
+                 <div className="absolute top-0 bottom-0 w-1 bg-white rounded-full z-10" 
+                      style={{ left: `${Math.min((data.p75_value / 0.3) * 100, 98)}%` }}></div>
+               </>
+            ) : (
+              // Gauge bar for time-based metrics
+              <>
+                 <div className="h-full bg-emerald-500/50" style={{ width: '33.33%' }}></div>
+                 <div className="h-full bg-amber-500/50" style={{ width: '33.33%' }}></div>
+                 <div className="h-full bg-rose-500/50" style={{ width: '33.33%' }}></div>
+                 <div className="absolute top-0 bottom-0 w-1 bg-white rounded-full z-10" 
+                      style={{ 
+                        left: `${Math.min(
+                          (data.p75_value / (name === 'INP' ? 750 : name === 'TTFB' ? 2500 : 6000)) * 100, 
+                          98
+                        )}%` 
+                      }}></div>
+              </>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -202,12 +206,12 @@ export function WebVitalsDashboard({
 
   return (
     <div className="mb-8">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        {renderSummaryCard('LCP', 'Largest Contentful Paint', <Layout className="h-4 w-4 text-emerald-400" />, 'bg-emerald-500/10')}
-        {renderSummaryCard('INP', 'Interaction to Next Paint', <MousePointer2 className="h-4 w-4 text-blue-400" />, 'bg-blue-500/10')}
-        {renderSummaryCard('CLS', 'Cumulative Layout Shift', <Activity className="h-4 w-4 text-amber-400" />, 'bg-amber-500/10', false)}
-        {renderSummaryCard('FCP', 'First Contentful Paint', <Timer className="h-4 w-4 text-purple-400" />, 'bg-purple-500/10')}
-        {renderSummaryCard('TTFB', 'Time to First Byte', <Zap className="h-4 w-4 text-pink-400" />, 'bg-pink-500/10')}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+        {renderSummaryCard('LCP', 'Largest Contentful Paint', <Layout className="h-4 w-4" />)}
+        {renderSummaryCard('INP', 'Interaction to Next Paint', <MousePointer2 className="h-4 w-4" />)}
+        {renderSummaryCard('CLS', 'Cumulative Layout Shift', <Activity className="h-4 w-4" />, false)}
+        {renderSummaryCard('FCP', 'First Contentful Paint', <Timer className="h-4 w-4" />)}
+        {renderSummaryCard('TTFB', 'Time to First Byte', <Zap className="h-4 w-4" />)}
       </div>
 
       <div className="bg-[#0a0a0a] border border-zinc-800/60 rounded-xl overflow-hidden mb-8">

@@ -72,25 +72,33 @@ export function TracePilotProvider({
     setProvider(webProvider);
 
     // --- 2. WEB VITALS ---
-    const capturedRoute = typeof window !== 'undefined' ? window.location.pathname : '';
-    
+    // IMPORTANT: Capture route INSIDE the callback, not outside.
+    // The SDK mounts once but the user navigates to many routes (SPA).
+    // Capturing outside means every metric gets tagged with the first page's route.
     const reportVitals = (metric: any) => {
+      // Capture the route at the exact moment the metric fires, not at SDK mount time.
+      const currentRoute = typeof window !== 'undefined' ? window.location.pathname : '';
       const globalTracer = trace.getTracer('tracepilot-web-vitals');
       globalTracer.startActiveSpan('web-vitals', span => {
         span.setAttribute('web.vital.name', metric.name);
-        span.setAttribute('web.vital.value', metric.value);
+        // Ensure value is sent as a float64, not a string. Some OTEL encoding paths
+        // may coerce numbers; using parseFloat ensures it's always numeric.
+        span.setAttribute('web.vital.value', parseFloat(String(metric.value)));
         span.setAttribute('web.vital.rating', metric.rating);
-        span.setAttribute('http.route', capturedRoute);
+        // Use the live pathname at measurement time for correct route breakdown.
+        span.setAttribute('http.route', currentRoute);
         span.setAttribute('session_id', currentSessionId);
         span.end();
       });
     };
     if (canRegisterWebVitals()) {
-      onLCP(reportVitals);
-      onINP(reportVitals);
-      onCLS(reportVitals);
-      onFCP(reportVitals);
-      onTTFB(reportVitals);
+      // reportAllChanges: true enables metrics to fire on soft navigations (Next.js SPA page changes)
+      // Without this, LCP/CLS/INP only fire once on initial page load and never again.
+      onLCP(reportVitals, { reportAllChanges: true });
+      onINP(reportVitals, { reportAllChanges: true });
+      onCLS(reportVitals, { reportAllChanges: true });
+      onFCP(reportVitals, { reportAllChanges: true });
+      onTTFB(reportVitals, { reportAllChanges: true });
     }
 
     // --- 3. SESSION REPLAY (rrweb) ---

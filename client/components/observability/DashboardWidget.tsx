@@ -55,7 +55,7 @@ export function DashboardWidget({ projectId, widget }: { projectId: string; widg
 
   if (loading) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-zinc-900/50 rounded-lg border border-zinc-800">
+      <div className="w-full h-full flex items-center justify-center bg-[#0a0a0a] rounded-xl border border-[#222]">
         <Loader2 className="h-5 w-5 animate-spin text-zinc-500" />
       </div>
     );
@@ -63,8 +63,12 @@ export function DashboardWidget({ projectId, widget }: { projectId: string; widg
 
   if (error) {
     return (
-      <div className="w-full h-full p-4 flex items-center justify-center bg-zinc-900/50 rounded-lg border border-zinc-800">
-        <p className="text-red-400 text-sm text-center">{error}</p>
+      <div className="w-full h-full p-6 flex flex-col items-center justify-center bg-[#0a0a0a] rounded-xl border border-red-900/30">
+        <div className="h-10 w-10 rounded-full bg-red-500/10 flex items-center justify-center mb-3">
+          <span className="text-red-400 font-bold text-lg">!</span>
+        </div>
+        <h3 className="text-[14px] font-semibold text-white mb-1">Widget Error</h3>
+        <p className="text-xs text-zinc-400 text-center max-w-[200px] break-words">{error}</p>
       </div>
     );
   }
@@ -72,17 +76,19 @@ export function DashboardWidget({ projectId, widget }: { projectId: string; widg
   // Handle Empty State
   if (data.length === 0) {
     return (
-      <div className="w-full h-full p-6 flex flex-col items-center justify-center bg-zinc-900/50 rounded-lg border border-zinc-800 overflow-y-auto custom-scrollbar">
-        <h3 className="text-[13px] font-semibold text-white mb-2 text-center">No data for {widget.eventName}</h3>
-        <p className="text-xs text-zinc-400 mb-4 text-center max-w-[250px]">
+      <div className="w-full h-full p-6 flex flex-col items-center justify-center bg-[#0a0a0a] rounded-xl border border-[#222] overflow-y-auto custom-scrollbar">
+        <h3 className="text-[15px] font-semibold text-white mb-2 text-center tracking-tight">No data for "{widget.eventName}"</h3>
+        <p className="text-[13px] text-zinc-400 mb-2 text-center max-w-[280px]">
           Make sure you're calling the tracking code in your application:
         </p>
-        <pre className="bg-black border border-zinc-800 rounded p-2 text-[11px] text-zinc-300 overflow-x-auto max-w-full">
-          <code>
+        <div className="w-full px-4">
+          <pre className="bg-[#111] border border-[#333] rounded-lg p-3.5 text-[12px] text-zinc-300 overflow-x-auto w-full font-mono shadow-inner mt-2">
+            <code>
 tracepilot.track('{widget.eventName}'{widget.property ? `, {\n  ${widget.property}: 123\n}` : `, {}`})
-          </code>
-        </pre>
-        <p className="text-[10px] text-zinc-500 mt-4 text-center">Events appear within 30 seconds</p>
+            </code>
+          </pre>
+        </div>
+        <p className="text-[11px] font-medium text-zinc-500 mt-5 text-center tracking-wide uppercase">Events appear within 30 seconds</p>
       </div>
     );
   }
@@ -96,8 +102,8 @@ tracepilot.track('{widget.eventName}'{widget.property ? `, {\n  ${widget.propert
   };
 
   const ChartContainer = ({ children }: { children: React.ReactNode }) => (
-    <div className="w-full h-full bg-zinc-900/50 border border-zinc-800 rounded-lg p-4 flex flex-col">
-      <h3 className="text-sm font-medium text-white mb-4">{widget.title}</h3>
+    <div className="w-full h-full bg-[#0a0a0a] border border-[#222] hover:border-[#333] transition-colors rounded-xl p-5 flex flex-col shadow-sm">
+      <h3 className="text-[15px] font-semibold text-white mb-4 tracking-tight">{widget.title}</h3>
       <div className="flex-1 min-h-0 w-full">
         {children}
       </div>

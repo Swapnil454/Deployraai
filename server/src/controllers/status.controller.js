@@ -5,6 +5,10 @@ import { BoundedCache } from '../utils/BoundedCache.js';
 const cache = new BoundedCache(1000);
 const CACHE_TTL = 60 * 1000;
 
+export function invalidatePublicStatusCache() {
+  cache.clear();
+}
+
 function getCached(key) {
   return cache.get(key);
 }
@@ -14,8 +18,10 @@ function setCache(key, data) {
 }
 
 async function getStatusConfig(identifier) {
-  // identifier could be a project_id (UUID) or a slug
-  const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(identifier);
+  // Projects are stored in MongoDB, so the identifier can be either a UUID
+  // from legacy data or a 24-character Mongo ObjectId from current projects.
+  const isProjectId = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(identifier)
+    || /^[0-9a-fA-F]{24}$/.test(identifier);
   
   let query = `
     SELECT sp.*, p.name as project_name 
@@ -25,8 +31,8 @@ async function getStatusConfig(identifier) {
   `;
   
   const params = [identifier];
-  if (isUUID) {
-    query += ` AND sp.project_id = $1`;
+  if (isProjectId) {
+    query += ` AND sp.project_id::text = $1`;
   } else {
     query += ` AND sp.slug = $1`;
   }
@@ -128,13 +134,18 @@ export const getPublicStatus = async (req, res) => {
       status = 'down';
     } else if (activeIncidents.some(i => i.severity === 'major' || i.severity === 'minor')) {
       status = 'degraded';
+    } else if (components.some(component => component.current_status === 'major_outage')) {
+      status = 'down';
+    } else if (components.some(component => ['degraded', 'partial_outage', 'maintenance'].includes(component.current_status))) {
+      status = 'degraded';
     }
 
     const responseData = {
       config: {
         title: config.title || config.project_name,
         description: config.description,
-        show_uptime_history: config.show_uptime_history
+        show_uptime_history: config.show_uptime_history,
+        show_incidents: config.show_incidents
       },
       status,
       components,

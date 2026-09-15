@@ -5,43 +5,101 @@ import dynamic from 'next/dynamic';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Layers, HardDrive } from 'lucide-react';
+import { Layers, HardDrive, RefreshCw, Activity, Cpu, ChevronDown } from 'lucide-react';
 import * as d3 from 'd3';
 import flamegraph from 'd3-flame-graph';
 import './d3-flamegraph.css';
 import { ProfilingTable } from '@/components/observability/ProfilingTable';
 import { Table, Flame } from 'lucide-react';
 
-function D3Flamegraph({ data }: { data: any }) {
+function D3Flamegraph({ data, profileType }: { data: any, profileType: string }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (ref.current && data) {
       ref.current.innerHTML = ''; // clear previous
       
+      // dynamically get width of container to make it responsive
+      const containerWidth = ref.current.clientWidth || 1200;
+      
       const chart = flamegraph()
-        .width(1200)
-        .cellHeight(24)
+        .width(containerWidth)
+        .cellHeight(26)
         .transitionDuration(750)
-        .minFrameSize(5)
+        .minFrameSize(1)
         .transitionEase(d3.easeCubic)
         .sort(true)
-        .getName((d: any) => {
-          const name = d.data.n || d.data.name;
-          const val = d.value || d.v || d.data.value || 0;
-          const rootVal = data.value || val;
-          const pct = rootVal > 0 ? (val / rootVal) * 100 : 0;
-          return `${name} (${val.toLocaleString()} samples, ${pct.toFixed(1)}%)`;
+        .setColorMapper((d: any, originalColor: string) => {
+          const name = d.data.n || d.data.name || '';
+          let hash = 0;
+          for (let i = 0; i < name.length; i++) {
+            hash = name.charCodeAt(i) + ((hash << 5) - hash);
+          }
+          
+          if (profileType === 'memory') {
+            // Enterprise Cool colors (Blues/Teals/Indigos) for Memory
+            const h = Math.abs(hash % 60) + 200; // 200-260 range
+            const s = 65 + Math.abs(hash % 25);
+            const l = 45 + Math.abs(hash % 15);
+            return `hsl(${h}, ${s}%, ${l}%)`;
+          } else {
+            // Enterprise Warm colors (Reds/Oranges/Yellows) for CPU (like reference)
+            const h = Math.abs(hash % 45); // 0-45 range
+            const s = 75 + Math.abs(hash % 25);
+            const l = 45 + Math.abs(hash % 15);
+            return `hsl(${h}, ${s}%, ${l}%)`;
+          }
         })
-        .title("")
-        .selfValue(false);
+        .title("");
 
       d3.select(ref.current).datum(data).call(chart);
     }
-  }, [data]);
+  }, [data, profileType]);
 
-  return <div ref={ref} className="w-full h-full overflow-y-auto" />;
+  return (
+    <div className="w-full h-full relative group">
+      <style>{`
+        .d3-flame-graph rect {
+          stroke: #09090b !important;
+          stroke-width: 1.5px !important;
+          rx: 3px;
+          ry: 3px;
+          transition: all 0.2s ease-in-out;
+          cursor: pointer;
+        }
+        .d3-flame-graph rect:hover {
+          opacity: 0.85;
+          stroke: #ffffff !important;
+          stroke-width: 1.5px !important;
+          filter: brightness(1.2);
+        }
+        .d3-flame-graph text {
+          fill: #ffffff !important;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+          font-size: 11.5px !important;
+          font-weight: 500;
+          pointer-events: none;
+          text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+        }
+        .d3-flame-graph-tip {
+          background: rgba(9, 9, 11, 0.95) !important;
+          border: 1px solid rgba(255, 255, 255, 0.1) !important;
+          border-radius: 8px !important;
+          color: #fff !important;
+          padding: 8px 12px !important;
+          font-family: inherit !important;
+          font-size: 12px !important;
+          backdrop-filter: blur(12px) !important;
+          z-index: 100 !important;
+          box-shadow: 0 10px 40px -10px rgba(0,0,0,0.5) !important;
+        }
+      `}</style>
+      <div ref={ref} className="w-full h-full overflow-y-auto px-2 py-4" />
+    </div>
+  );
 }
+
+import { AlertCircle, Database, Ghost } from 'lucide-react';
 
 export default function ProfilingPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = use(params);
@@ -52,6 +110,21 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
   const [serviceName, setServiceName] = useState('go-profiler-test');
   const [profileType, setProfileType] = useState('cpu');
   const [viewMode, setViewMode] = useState<'table' | 'flamegraph'>('table');
+  
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [dropdownRef]);
   
   const fetchProfile = async () => {
     if (!projectId) {
@@ -98,32 +171,39 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
   }, [projectId, serviceName, profileType]);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Continuous Profiling</h1>
-          <p className="text-muted-foreground mt-2">
+          <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-3">
+            <Activity className="w-8 h-8 text-white" />
+            Continuous Profiling
+          </h1>
+          <p className="text-zinc-400 mt-2 max-w-xl text-sm leading-relaxed">
             Analyze {profileType === 'cpu' ? 'CPU' : 'Memory'} flamegraphs to find performance bottlenecks in your code.
           </p>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3 bg-zinc-900/40 p-1.5 rounded-xl border border-zinc-800/60 backdrop-blur-xl shadow-lg relative z-50">
           
           {/* Custom Toggle for Profile Type */}
-          <div className="flex items-center p-1 bg-[#0a0a0a] border border-zinc-800 rounded-lg">
+          <div className="flex items-center bg-zinc-950/80 rounded-lg p-0.5 border border-zinc-800/50 shadow-inner">
             <button
               onClick={() => setProfileType('cpu')}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                profileType === 'cpu' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-white'
+              className={`flex items-center gap-2 px-3.5 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
+                profileType === 'cpu' 
+                  ? 'bg-indigo-500/10 text-indigo-400 shadow-sm' 
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
-              <Layers className="w-4 h-4" />
+              <Cpu className="w-4 h-4" />
               CPU
             </button>
             <button
               onClick={() => setProfileType('memory')}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                profileType === 'memory' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-white'
+              className={`flex items-center gap-2 px-3.5 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
+                profileType === 'memory' 
+                  ? 'bg-indigo-500/10 text-indigo-400 shadow-sm' 
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
               <HardDrive className="w-4 h-4" />
@@ -131,64 +211,128 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
             </button>
           </div>
 
-          <div className="relative">
-            <select
-              value={serviceName}
-              onChange={(e) => setServiceName(e.target.value)}
-              className="flex h-10 w-[220px] appearance-none items-center justify-between rounded-md border border-zinc-800 bg-[#0a0a0a] px-3 py-2 pr-8 text-sm text-white focus:outline-none"
+          <div className="h-6 w-px bg-zinc-800/60 mx-0.5"></div>
+
+          {/* Custom Built Service Selector */}
+          <div className="relative w-[220px]" ref={dropdownRef}>
+            <button 
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="flex items-center justify-between w-full h-9 px-3 bg-zinc-950/80 border border-zinc-800/50 rounded-md text-sm text-zinc-100 hover:bg-zinc-900 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 shadow-inner transition-colors"
             >
-              <option value="go-profiler-test">go-profiler-test (Demo)</option>
-              <option value="frontend">frontend</option>
-              <option value="backend">backend</option>
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-white">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-            </div>
+              <span className="truncate">
+                {serviceName === 'go-profiler-test' ? 'go-profiler-test (Demo)' : serviceName}
+              </span>
+              <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {isDropdownOpen && (
+              <div className="absolute top-full left-0 mt-1 w-full bg-zinc-900 border border-zinc-700/80 rounded-md shadow-xl overflow-hidden z-50 backdrop-blur-2xl">
+                {['go-profiler-test', 'frontend', 'backend'].map((svc) => (
+                  <button
+                    key={svc}
+                    onClick={() => {
+                      setServiceName(svc);
+                      setIsDropdownOpen(false);
+                    }}
+                    className={`flex items-center w-full px-3 py-2 text-sm transition-colors ${
+                      serviceName === svc 
+                        ? 'bg-indigo-500/10 text-indigo-400 font-medium' 
+                        : 'text-zinc-300 hover:bg-zinc-800/80 hover:text-white'
+                    }`}
+                  >
+                    {svc === 'go-profiler-test' ? 'go-profiler-test (Demo)' : svc}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           
-          <Button onClick={fetchProfile} variant="outline" disabled={loading}>
-            {loading ? 'Loading...' : 'Refresh'}
+          <Button 
+            onClick={fetchProfile} 
+            variant="outline" 
+            size="sm"
+            disabled={loading}
+            className="h-9 bg-zinc-950/80 border-zinc-800/50 hover:bg-zinc-900 hover:text-white transition-all shadow-inner text-zinc-300"
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin text-indigo-400' : 'text-zinc-400'}`} />
+            {loading ? 'Refreshing...' : 'Refresh'}
           </Button>
 
-          <div className="flex items-center space-x-2 border-l border-white/10 pl-4 ml-2">
-            <Button 
-              variant={viewMode === 'table' ? 'secondary' : 'ghost'} 
-              size="sm" 
+          <div className="h-6 w-px bg-zinc-800/60 mx-0.5"></div>
+
+          <div className="flex items-center bg-zinc-950/80 rounded-lg p-0.5 border border-zinc-800/50 shadow-inner">
+            <button
               onClick={() => setViewMode('table')}
-              className="gap-2"
+              className={`flex items-center justify-center p-1.5 rounded-md transition-all duration-200 ${
+                viewMode === 'table' 
+                  ? 'bg-zinc-800 text-white shadow-sm' 
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+              }`}
+              title="Table View"
             >
-              <Table className="w-4 h-4" /> Table
-            </Button>
-            <Button 
-              variant={viewMode === 'flamegraph' ? 'secondary' : 'ghost'} 
-              size="sm" 
+              <Table className="w-4 h-4" />
+            </button>
+            <button
               onClick={() => setViewMode('flamegraph')}
-              className="gap-2"
+              className={`flex items-center justify-center p-1.5 rounded-md transition-all duration-200 ${
+                viewMode === 'flamegraph' 
+                  ? 'bg-zinc-800 text-white shadow-sm' 
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+              }`}
+              title="Flamegraph View"
             >
-              <Flame className="w-4 h-4" /> Flamegraph
-            </Button>
+              <Flame className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>
 
-      <Card className="p-6 min-h-[600px] flex flex-col">
-        {loading && <div className="text-center py-10">Loading profile data...</div>}
-        
-        {error && !loading && (
-          <div className="text-center text-red-500 py-10">{error}</div>
+      <div className="min-h-[600px] flex flex-col bg-zinc-950/40 border border-zinc-800/40 rounded-xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.12)] backdrop-blur-xl">
+        {loading && (
+          <div className="flex-1 w-full p-6 animate-pulse">
+            <div className="flex items-center gap-2 mb-6">
+              <div className="h-8 w-32 bg-zinc-800/50 rounded-md"></div>
+              <div className="h-8 w-40 bg-zinc-800/50 rounded-md"></div>
+            </div>
+            <div className="h-10 w-full bg-zinc-800/50 rounded-md mb-4"></div>
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="flex justify-between items-center py-4 border-b border-zinc-800/40">
+                <div className="h-5 bg-zinc-800/50 rounded w-1/3"></div>
+                <div className="h-5 bg-zinc-800/50 rounded w-1/4"></div>
+                <div className="h-5 bg-zinc-800/50 rounded w-1/4"></div>
+              </div>
+            ))}
+          </div>
         )}
         
+        {error && !loading && (
+          <div className="flex-1 flex flex-col items-center justify-center py-20 px-4 text-center">
+            <div className="w-16 h-16 bg-red-500/10 text-red-400 rounded-2xl flex items-center justify-center mb-4">
+              <AlertCircle className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-medium text-white mb-2">No Profiling Data</h3>
+            <p className="text-zinc-400 max-w-md mx-auto">{error}</p>
+            <Button 
+              onClick={fetchProfile} 
+              variant="outline"
+              className="mt-6 bg-zinc-900 border-zinc-700 hover:bg-zinc-800"
+            >
+              <RefreshCw className="w-4 h-4 mr-2 text-zinc-400" />
+              Try Again
+            </Button>
+          </div>
+        )}
         
         {!loading && !error && profile && (
           <div className="flex-1 w-full relative">
             {viewMode === 'table' ? (
               <ProfilingTable data={profile} profileType={profileType} />
             ) : (
-              <D3Flamegraph data={profile} />
+              <D3Flamegraph data={profile} profileType={profileType} />
             )}
           </div>
         )}
-      </Card>
+      </div>
     </div>
   );
 }

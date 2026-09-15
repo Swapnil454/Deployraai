@@ -2,15 +2,34 @@
 
 import { useState } from 'react';
 import { getFirebaseAuth } from '../lib/firebase';
+import { Pacifico } from 'next/font/google';
+import { toast } from 'sonner';
+
+const pacifico = Pacifico({ weight: '400', subsets: ['latin'] });
+
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
   GithubAuthProvider,
   signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword,
   sendEmailVerification
 } from 'firebase/auth';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+
+const EyeIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+    <circle cx="12" cy="12" r="3"></circle>
+  </svg>
+);
+
+const EyeOffIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+    <line x1="1" y1="1" x2="23" y2="23"></line>
+  </svg>
+);
 
 const GithubIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg {...props} viewBox="0 0 24 24" fill="currentColor" stroke="none">
@@ -29,11 +48,13 @@ const GoogleIcon = (props: React.SVGProps<SVGSVGElement>) => (
 
 export default function LoginPage() {
   const router = useRouter();
+  const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [verificationSent, setVerificationSent] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const handleFirebaseToken = async (idToken: string) => {
     try {
@@ -53,7 +74,7 @@ export default function LoginPage() {
         router.push('/dashboard');
       }
     } catch (err: any) {
-      setError(err.message);
+      toast.error(err.message);
       setLoading(false);
     }
   };
@@ -61,14 +82,17 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
-      setError('');
       const provider = new GoogleAuthProvider();
       const auth = getFirebaseAuth();
       const result = await signInWithPopup(auth, provider);
       const idToken = await result.user.getIdToken();
       await handleFirebaseToken(idToken);
     } catch (err: any) {
-      setError(err.message);
+      if (err.code === 'auth/popup-closed-by-user') {
+        toast.error('Sign-in was cancelled. Please try again.');
+      } else {
+        toast.error('Google sign-in failed. Please try again later.');
+      }
       setLoading(false);
     }
   };
@@ -76,7 +100,6 @@ export default function LoginPage() {
   const handleGithubLogin = async () => {
     try {
       setLoading(true);
-      setError('');
       const provider = new GithubAuthProvider();
       provider.addScope('read:user');
       provider.addScope('user:email');
@@ -85,177 +108,226 @@ export default function LoginPage() {
       const idToken = await result.user.getIdToken();
       await handleFirebaseToken(idToken);
     } catch (err: any) {
-      setError(err.message);
+      if (err.code === 'auth/popup-closed-by-user') {
+        toast.error('Sign-in was cancelled. Please try again.');
+      } else {
+        toast.error('GitHub sign-in failed. Please try again later.');
+      }
       setLoading(false);
     }
   };
 
-  const handleEmailPasswordLogin = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      setError('Please enter email and password');
+      toast.error('Please fill in all required fields');
       return;
+    }
+    
+    if (!isLogin) {
+      if (password !== confirmPassword) {
+        toast.error('Passwords do not match');
+        return;
+      }
+      if (password.length < 6) {
+        toast.error('Password should be at least 6 characters');
+        return;
+      }
     }
     
     try {
       setLoading(true);
-      setError('');
       const auth = getFirebaseAuth();
       
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      
-      if (!userCredential.user.emailVerified) {
+      if (isLogin) {
+        // Login Flow
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        
+        if (!userCredential.user.emailVerified) {
+          await sendEmailVerification(userCredential.user);
+          await auth.signOut();
+          toast.error('Please verify your email address before logging in. A new verification email has been sent to your inbox.');
+          setLoading(false);
+          return;
+        }
+
+        const idToken = await userCredential.user.getIdToken();
+        await handleFirebaseToken(idToken);
+      } else {
+        // Signup Flow
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         await sendEmailVerification(userCredential.user);
         await auth.signOut();
-        setError('Please verify your email address before logging in. A new verification email has been sent to your inbox.');
+        
+        toast.success('Account created successfully! Please check your email to verify your account before logging in.');
+        setIsLogin(true); // switch to login mode after successful signup
+        setPassword('');
+        setConfirmPassword('');
         setLoading(false);
-        return;
       }
-
-      const idToken = await userCredential.user.getIdToken();
-      await handleFirebaseToken(idToken);
     } catch (err: any) {
       if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-        setError('Invalid email or password.');
+        toast.error('Invalid email or password.');
+      } else if (err.code === 'auth/email-already-in-use') {
+        toast.error('An account with this email already exists.');
+      } else if (err.code === 'auth/too-many-requests') {
+        toast.error('Too many attempts. If you just created an account, please check your spam folder for the verification email or try again later.');
       } else {
-        setError(err.message);
-      }
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyEmail = async () => {
-    if (!email || !password) {
-      setError('Please enter your email and password to verify');
-      return;
-    }
-    try {
-      setLoading(true);
-      setError('');
-      const auth = getFirebaseAuth();
-      
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      
-      if (userCredential.user.emailVerified) {
-        setError('Your email is already verified. You can log in directly.');
-        await auth.signOut();
-      } else {
-        await sendEmailVerification(userCredential.user);
-        await auth.signOut();
-        setVerificationSent(true);
-      }
-      setLoading(false);
-    } catch (err: any) {
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-        setError('Invalid email or password, or account does not exist.');
-      } else {
-        setError(err.message);
+        toast.error(err.message);
       }
       setLoading(false);
     }
   };
 
   return (
-    <div suppressHydrationWarning className="flex min-h-[calc(100vh-64px)] flex-col items-center justify-center bg-black px-4">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/50 p-8 shadow-xl backdrop-blur-md">
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-white mb-2">Welcome back</h1>
-          <p className="text-sm text-zinc-400">
-            Sign in to your DeployAI account to continue
+    <div suppressHydrationWarning className="flex min-h-screen w-full bg-black relative overflow-hidden z-0">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-zinc-400/10 via-black/0 to-black/0 -z-10"></div>
+      
+      {/* Left Column */}
+      <div className="flex w-full flex-col justify-center px-8 py-12 lg:w-1/2 lg:px-24 xl:px-32 relative">
+        <div className="mx-auto w-full max-w-md mt-2 lg:mt-0">
+          <div className="-mt-8 lg:-mt-10 mb-4 flex items-center gap-3">
+            <img 
+              src="https://res.cloudinary.com/djhuduvrr/image/upload/v1787775599/deployraai_logo_lgkg7l.png" 
+              alt="Logo" 
+              className="h-14 w-auto"
+            />
+          </div>
+
+          <h1 className="mb-2 text-3xl font-bold tracking-tight text-white flex items-baseline gap-2">
+            Welcome to <span className={`${pacifico.className} font-normal tracking-normal text-4xl`}>Deployra AI</span>
+          </h1>
+          <p className="mb-6 text-sm text-zinc-400 leading-relaxed">
+            Get started - it's free.
           </p>
-        </div>
 
-        {error && (
-          <div className="mb-4 rounded bg-red-500/10 p-3 text-sm text-red-500 border border-red-500/20">
-            {error}
-          </div>
-        )}
+          <div className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Email Address</label>
+                <input
+                  type="email"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-md border border-zinc-800 bg-[#1c2128] px-4 py-3.5 text-sm text-white placeholder-zinc-500 outline-none focus:border-white transition-colors"
+                />
+              </div>
+              
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Password</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full rounded-md border border-zinc-800 bg-[#1c2128] px-4 py-3.5 pr-10 text-sm text-white placeholder-zinc-500 outline-none focus:border-white transition-colors"
+                  />
+                  <button 
+                    type="button" 
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white"
+                  >
+                    {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
 
-        <button
-          onClick={handleGoogleLogin}
-          disabled={loading}
-          className="mb-4 flex w-full items-center justify-center gap-3 rounded-lg bg-white px-4 py-3 text-sm font-semibold text-black transition-all hover:bg-zinc-200 active:scale-[0.98] disabled:opacity-50"
-        >
-          <GoogleIcon className="h-5 w-5" />
-          Continue with Google
-        </button>
+              {!isLogin && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Confirm Password</label>
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? "text" : "password"}
+                      placeholder="••••••••"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full rounded-md border border-zinc-800 bg-[#1c2128] px-4 py-3.5 pr-10 text-sm text-white placeholder-zinc-500 outline-none focus:border-white transition-colors"
+                    />
+                    <button 
+                      type="button" 
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white"
+                    >
+                      {showConfirmPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+              
+              <div className="flex gap-4 pt-4">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 rounded-md bg-blue-600 px-4 py-3.5 text-sm font-bold text-white transition-all hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50"
+                >
+                  {loading ? 'Processing...' : (isLogin ? 'Sign In Securely' : 'Create Account')}
+                </button>
+              </div>
+            </form>
 
-        <div className="relative mb-6 flex items-center py-2">
-          <div className="flex-grow border-t border-zinc-800"></div>
-          <span className="flex-shrink-0 px-4 text-xs text-zinc-600">Or use email</span>
-          <div className="flex-grow border-t border-zinc-800"></div>
-        </div>
+            <div className="relative flex items-center py-4 mt-2">
+              <div className="flex-grow border-t border-zinc-800"></div>
+              <span className="flex-shrink-0 px-4 text-xs text-zinc-600 uppercase tracking-wider">Alternative Logins</span>
+              <div className="flex-grow border-t border-zinc-800"></div>
+            </div>
 
-        <form onSubmit={handleEmailPasswordLogin} className="space-y-4">
-          <div>
-            <input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-800/50 px-4 py-3 text-sm text-white placeholder-zinc-400 outline-none focus:border-zinc-500 focus:bg-zinc-800 transition-colors"
-            />
-          </div>
-          <div>
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-800/50 px-4 py-3 text-sm text-white placeholder-zinc-400 outline-none focus:border-zinc-500 focus:bg-zinc-800 transition-colors"
-            />
-          </div>
-          
-          <div className="pt-2">
-            {verificationSent ? (
-              <p className="text-sm text-green-400 text-center py-2 mb-2 bg-green-500/10 rounded-lg border border-green-500/20">Verification link sent! Check your email.</p>
-            ) : (
+            <div className="flex gap-4">
+              <button
+                onClick={handleGoogleLogin}
+                disabled={loading}
+                type="button"
+                className="flex flex-1 items-center justify-center gap-3 rounded-md bg-white px-4 py-3.5 text-sm font-semibold text-black transition-all hover:bg-zinc-200 active:scale-[0.98] disabled:opacity-50"
+              >
+                <GoogleIcon className="h-5 w-5" />
+                Google
+              </button>
+
               <button
                 type="button"
-                onClick={handleVerifyEmail}
+                onClick={handleGithubLogin}
                 disabled={loading}
-                className="mb-2 w-full rounded-lg border border-zinc-700 bg-transparent px-4 py-3 text-sm font-semibold text-zinc-300 transition-all hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-50"
+                className="flex flex-1 items-center justify-center gap-3 rounded-md bg-[#24292e] px-4 py-3.5 text-sm font-semibold text-white transition-all hover:bg-[#2f363d] active:scale-[0.98] disabled:opacity-50"
               >
-                Verify Email
+                <GithubIcon className="h-5 w-5" />
+                GitHub
               </button>
-            )}
-            
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-lg bg-zinc-100 px-4 py-3 text-sm font-semibold text-black transition-all hover:bg-zinc-300 active:scale-[0.98] disabled:opacity-50"
+            </div>
+          </div>
+
+          <div className="mt-8 text-center text-sm text-zinc-400">
+            {isLogin ? "Don't have an account? " : "Already have an account? "}
+            <button 
+              type="button"
+              onClick={() => setIsLogin(!isLogin)} 
+              className="font-semibold text-blue-500 hover:text-blue-400 hover:underline transition-colors"
             >
-              {loading ? 'Processing...' : 'Login'}
+              {isLogin ? 'Sign up' : 'Log in'}
             </button>
           </div>
-        </form>
 
-        <div className="relative mb-4 mt-6 flex items-center py-2">
-          <div className="flex-grow border-t border-zinc-800"></div>
-          <span className="flex-shrink-0 px-4 text-xs text-zinc-600">Legacy / Alternative login</span>
-          <div className="flex-grow border-t border-zinc-800"></div>
+          <div className="mt-6 text-center text-xs text-zinc-600">
+            By {isLogin ? 'signing in' : 'signing up'}, you agree to our{' '}
+            <span className="font-semibold text-zinc-400 cursor-pointer hover:text-zinc-300">Privacy Policy</span> and{' '}
+            <span className="font-semibold text-zinc-400 cursor-pointer hover:text-zinc-300">Terms of Service</span>
+          </div>
         </div>
+      </div>
 
-        <button
-          type="button"
-          onClick={handleGithubLogin}
-          disabled={loading}
-          className="flex w-full items-center justify-center gap-3 rounded-lg bg-[#24292e] px-4 py-3 text-sm font-semibold text-white transition-all hover:bg-[#2f363d] active:scale-[0.98] disabled:opacity-50"
-        >
-          <GithubIcon className="h-5 w-5" />
-          Continue with GitHub
-        </button>
-        
-        <p className="mt-8 text-center text-sm text-zinc-400">
-          Don't have an account?{' '}
-          <Link href="/signup" className="text-white hover:underline font-medium">
-            Sign up
-          </Link>
-        </p>
-
-        <p className="mt-6 text-center text-xs text-zinc-500">
-          By clicking continue, you agree to our Terms of Service and Privacy Policy.
-        </p>
+      {/* Right Column */}
+      <div className="hidden lg:flex lg:w-1/2 relative items-center justify-center p-8 lg:p-12">
+        <div className="duration-300 transition-[filter] will-change-filter relative aspect-square w-[600px] xl:w-[700px] max-w-full overflow-hidden">
+          <video 
+            autoPlay 
+            loop 
+            muted 
+            playsInline 
+            className="absolute left-0 top-0 h-full w-full object-cover" 
+            poster="/static/cube-fallback.jpg" 
+            src="https://res.cloudinary.com/q2bmwbvf/video/upload/v1789193379/cube.mp4" 
+          ></video>
+        </div>
       </div>
     </div>
   );

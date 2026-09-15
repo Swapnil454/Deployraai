@@ -83,7 +83,7 @@ export const startFrontendProviderDeployment = async (deployment, project, injec
       });
       providerServiceId = vercelProj.id;
       project.configuration.vercelProjectId = providerServiceId;
-      await project.save();
+      await Project.updateOne({ _id: project._id }, { $set: { 'configuration.vercelProjectId': providerServiceId } });
     } catch (createErr) {
       if (createErr.message.includes('already in use') || createErr.message.includes('exists')) {
         const projectsRes = await getVercelProjects(token);
@@ -91,7 +91,7 @@ export const startFrontendProviderDeployment = async (deployment, project, injec
         if (existingProj) {
           providerServiceId = existingProj.id;
           project.configuration.vercelProjectId = providerServiceId;
-          await project.save();
+          await Project.updateOne({ _id: project._id }, { $set: { 'configuration.vercelProjectId': providerServiceId } });
           await updateVercelEnvVars(token, providerServiceId, envVars);
         } else throw createErr;
       } else throw createErr;
@@ -179,7 +179,7 @@ export const startBackendProviderDeployment = async (deployment, project, inject
       const railProj = await createRailwayProject(token, `deploy-ai-${projectId.toString().slice(-6)}`, teamId);
       providerProjectId = railProj.projectCreate.id;
       project.configuration.railwayProjectId = providerProjectId;
-      await project.save();
+      await Project.updateOne({ _id: project._id }, { $set: { 'configuration.railwayProjectId': providerProjectId } });
     }
 
     const envs = await getProjectEnvironments(token, providerProjectId);
@@ -248,7 +248,7 @@ export const startBackendProviderDeployment = async (deployment, project, inject
        });
        providerServiceId = renderSvc.id || renderSvc.service?.id;
        project.configuration.renderServiceId = providerServiceId;
-       await project.save();
+       await Project.updateOne({ _id: project._id }, { $set: { 'configuration.renderServiceId': providerServiceId } });
     } else {
        await updateRenderEnvVars(token, providerServiceId, envVarsArray);
     }

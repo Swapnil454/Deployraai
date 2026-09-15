@@ -30,4 +30,8 @@ export class BoundedCache {
   delete(key) {
     this.cache.delete(key);
   }
+
+  clear() {
+    this.cache.clear();
+  }
 }

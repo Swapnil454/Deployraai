@@ -1,5 +1,6 @@
 import express from 'express';
 import { requireAuth } from '../middleware/auth.middleware.js';
+import { analyzeMonitorCheck, createMonitorFixPr } from '../controllers/monitoringFix.controller.js';
 import {
   createMonitors,
   getProjectMonitors,
@@ -7,7 +8,8 @@ import {
   checkMonitorNow,
   pauseMonitor,
   resumeMonitor,
-  getProjectMonitorSummary
+  getProjectMonitorSummary,
+  getMonitorHistory
 } from '../controllers/monitoring.controller.js';
 
 const router = express.Router();
@@ -17,10 +19,15 @@ router.use(requireAuth);
 router.post('/projects/:projectId/monitors/create-default', createMonitors);
 router.get('/projects/:projectId/monitors', getProjectMonitors);
 router.get('/projects/:projectId/monitor-summary', getProjectMonitorSummary);
+router.get('/projects/:projectId/monitor-checks/history', getMonitorHistory);
 
 router.get('/monitors/:monitorId', getMonitor);
 router.post('/monitors/:monitorId/check-now', checkMonitorNow);
 router.patch('/monitors/:monitorId/pause', pauseMonitor);
 router.patch('/monitors/:monitorId/resume', resumeMonitor);
+
+// AI Auto-Fix routes for runtime errors
+router.post('/projects/:projectId/monitor-checks/:checkId/analyze', analyzeMonitorCheck);
+router.post('/projects/:projectId/monitor-checks/:checkId/create-pr', createMonitorFixPr);
 
 export default router;

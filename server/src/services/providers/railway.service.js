@@ -106,6 +106,15 @@ export const createRailwayProject = async (token, name, teamId) => {
   return railwayGraphQL(token, query, variables);
 };
 
+export const deleteRailwayProject = async (token, projectId) => {
+  const query = `
+    mutation projectDelete($id: String!) {
+      projectDelete(id: $id)
+    }
+  `;
+  return railwayGraphQL(token, query, { id: projectId });
+};
+
 export const getProjectEnvironments = async (token, projectId) => {
   const query = `
     query getEnvironments($projectId: String!) {
