@@ -594,7 +594,7 @@ When the user sends an image:
 
     // 6c. Initialize Gemini and build capped message history
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const fallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+    const fallbackModels = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-flash-latest"];
     
     let result;
     let success = false;
