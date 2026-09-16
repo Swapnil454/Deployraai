@@ -63,8 +63,9 @@ app.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
 const start = async () => {
   try {
     // Port 4318 for analytics API, separate from 4317 ingestor
-    await app.listen({ port: 4318, host: '0.0.0.0' });
-    console.log('Analytics Query API running on port 4318');
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 4318;
+    await app.listen({ port, host: '0.0.0.0' });
+    console.log(`Analytics Query API running on port ${port}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);
