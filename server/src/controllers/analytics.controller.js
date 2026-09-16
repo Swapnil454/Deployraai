@@ -81,7 +81,9 @@ export const autoInjectAnalytics = async (req, res) => {
     if (!project.analytics?.enabled || !project.analytics?.trackingId) {
       if (!project.analytics) project.analytics = {};
       project.analytics.enabled = true;
-      project.analytics.trackingId = generateProjectToken(project._id.toString());
+      if (!project.analytics.trackingId) {
+        project.analytics.trackingId = generateProjectToken(project._id.toString());
+      }
       project.analytics.enabledAt = new Date();
       await project.save();
     }
