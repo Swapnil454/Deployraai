@@ -29,30 +29,17 @@ import "./workflows/index.js"; // Register workflows
 const app = express();
 app.set('trust proxy', 1);
 
-app.use(cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    credentials: true
-}));
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 
-const apiLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 500, // Limit each IP to 500 requests per window (5 minutes)
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests from this IP, please try again after 5 minutes' }
-});
-
-import { requireOrigin } from "./middleware/csrf.middleware.js";
-
 // Analytics routes need open CORS since they're called from arbitrary user websites
-// We mount this BEFORE the CSRF middleware so that tracking events don't get rejected for having a foreign Origin.
+// We mount this BEFORE the global CORS and CSRF middleware so that tracking events 
+// don't get rejected for having a foreign Origin.
 app.use("/api/analytics", (req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
     if (req.method === "OPTIONS") return res.sendStatus(204);
     next();
 });
@@ -65,6 +52,22 @@ app.use("/api/analytics", async (req, res, next) => {
         next(err);
     }
 });
+
+// Global CORS for the dashboard
+app.use(cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    credentials: true
+}));
+
+const apiLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 500, // Limit each IP to 500 requests per window (5 minutes)
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests from this IP, please try again after 5 minutes' }
+});
+
+import { requireOrigin } from "./middleware/csrf.middleware.js";
 
 // Apply rate limiting and CSRF middleware
 app.use('/api/', apiLimiter, requireOrigin);

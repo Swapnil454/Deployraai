@@ -193,6 +193,18 @@ export const callbackProvider = async (req, res) => {
       { upsert: true, returnDocument: 'after' }
     );
 
+    // Update legacy flags on the User model for backward compatibility
+    const update = {};
+    update[`${provider}Connected`] = true;
+    if (provider === 'github') {
+      update.githubAccessTokenEncrypted = encryptSecret(accessToken);
+    } else if (provider === 'vercel') {
+      update.vercelAccessTokenEncrypted = encryptSecret(accessToken);
+    }
+    if (Object.keys(update).length > 0) {
+      await User.findByIdAndUpdate(req.user.userId, update);
+    }
+
     res.redirect(`${returnTo}?connected=${provider}`);
     } catch (error) {
       console.error("Callback error:", error);
