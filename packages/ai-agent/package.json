@@ -12,15 +12,16 @@
   },
   "dependencies": {
     "@ai-agents/shared": "*",
+    "@anthropic-ai/sdk": "^0.126.0",
     "@clickhouse/client": "^1.22.0",
     "@fastify/rate-limit": "^9.0.1",
     "@google/generative-ai": "^0.24.1",
     "@octokit/rest": "^22.0.1",
+    "@types/node": "^20.11.24",
+    "@types/pg": "^8.11.2",
     "fastify": "^4.29.1",
     "ioredis": "^5.11.1",
     "pg": "^8.11.3",
-    "@types/node": "^20.11.24",
-    "@types/pg": "^8.11.2",
     "typescript": "^5.4.0"
   },
   "devDependencies": {
