@@ -292,6 +292,9 @@ CRITICAL: Return ONLY the valid JSON array string. Do NOT wrap in \`\`\`json blo
     if (error.response && error.response.status === 401) {
       return res.status(401).json({ error: "GitHub integration expired or invalid. Please reconnect GitHub." });
     }
+    if (error.response && error.response.status === 404) {
+      return res.status(404).json({ error: "Repository not found. Please ensure DeployAI has access to this repository in your GitHub settings." });
+    }
     return res.status(500).json({ error: error.message || "Failed to auto-inject analytics" });
   }
 };

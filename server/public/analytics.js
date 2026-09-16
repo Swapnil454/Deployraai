@@ -21,19 +21,12 @@
 
   function sendEvent(payload) {
     try {
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon(
-          API_URL,
-          new Blob([JSON.stringify(payload)], { type: "application/json" })
-        );
-      } else {
-        fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-          keepalive: true,
-        });
-      }
+      fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      });
     } catch (error) {
       console.warn("[DeployAI Analytics] Failed to send event", error);
     }
