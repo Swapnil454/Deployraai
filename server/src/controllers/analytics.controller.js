@@ -289,6 +289,9 @@ CRITICAL: Return ONLY the valid JSON array string. Do NOT wrap in \`\`\`json blo
     return res.json({ prUrl: pr.html_url, prNumber: pr.number, branch: newBranchName, file: modifiedFiles.join(", ") });
   } catch (error) {
     console.error("Auto Inject Analytics Error:", error);
+    if (error.response && error.response.status === 401) {
+      return res.status(401).json({ error: "GitHub integration expired or invalid. Please reconnect GitHub." });
+    }
     return res.status(500).json({ error: error.message || "Failed to auto-inject analytics" });
   }
 };
@@ -319,3 +322,49 @@ export const verifyAnalytics = async (req, res) => {
     return res.status(500).json({ error: "Failed to verify analytics" });
   }
 };
+
+export const trackAnalytics = async (req, res) => {
+  try {
+    const { trackingId, eventType, eventName, path, fullUrl, hostname, referrer, environment, metadata } = req.body;
+    
+    if (!trackingId) return res.status(400).json({ error: "Missing trackingId" });
+    if (!eventType) return res.status(400).json({ error: "Missing eventType" });
+    
+    const project = await Project.findOne({ "analytics.trackingId": trackingId });
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    
+    const userAgentStr = req.headers["user-agent"] || "";
+    const ipAddress = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+    
+    const parser = new UAParser(userAgentStr);
+    const browser = parser.getBrowser().name || "unknown";
+    const os = parser.getOS().name || "unknown";
+    const device = parser.getDevice().type || "desktop";
+    
+    const visitorHash = crypto.createHash("sha256").update((ipAddress || "") + userAgentStr).digest("hex");
+    
+    const event = new AnalyticsEvent({
+      projectId: project._id,
+      trackingId,
+      eventType,
+      eventName,
+      visitorHash,
+      path: path || "/",
+      fullUrl,
+      hostname,
+      referrer,
+      environment: environment || "production",
+      browser,
+      os,
+      device,
+      metadata: metadata || {}
+    });
+    
+    await event.save();
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("Analytics Track Error:", error);
+    return res.status(500).json({ error: "Failed to track event" });
+  }
+};
+
