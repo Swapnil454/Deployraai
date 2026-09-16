@@ -18,9 +18,18 @@ function generateProjectToken(projectId) {
   );
 }
 
+import ConnectedAccount from "../models/ConnectedAccount.js";
+
 const getGithubToken = async (userId) => {
+  // 1. Try to get token from ConnectedAccount
+  const connectedAccount = await ConnectedAccount.findOne({ userId, provider: 'github', status: 'connected' });
+  if (connectedAccount && connectedAccount.accessTokenEncrypted) {
+    return decryptSecret(connectedAccount.accessTokenEncrypted);
+  }
+
+  // 2. Fallback to legacy User model
   const user = await User.findById(userId);
-  if (!user || !user.githubConnected || !user.githubAccessTokenEncrypted) {
+  if (!user || (!user.githubConnected && !user.githubAccessTokenEncrypted)) {
     throw new Error("GitHub account not connected or token missing");
   }
   return decryptSecret(user.githubAccessTokenEncrypted);
