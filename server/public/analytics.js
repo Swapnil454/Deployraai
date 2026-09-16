@@ -21,14 +21,21 @@
 
   function sendEvent(payload) {
     try {
+      console.log("[DeployAI Analytics] Sending event payload:", payload);
       fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         keepalive: true,
+      })
+      .then(res => {
+        console.log(`[DeployAI Analytics] Received status ${res.status} from tracking endpoint`);
+      })
+      .catch(err => {
+        console.error("[DeployAI Analytics] Fetch error:", err);
       });
     } catch (error) {
-      console.warn("[DeployAI Analytics] Failed to send event", error);
+      console.error("[DeployAI Analytics] Failed to send event block:", error);
     }
   }
 

@@ -66,12 +66,17 @@ async function findFrontendEntryFile(github, owner, repo, branch) {
 
 export const autoInjectAnalytics = async (req, res) => {
   try {
+    console.log(`[AutoInject] Starting auto-inject for project ${req.params.projectId}`);
     const { projectId } = req.params;
     const userId = req.user.userId;
 
     const project = await Project.findOne({ _id: projectId, userId });
-    if (!project) return res.status(404).json({ error: "Project not found" });
+    if (!project) {
+      console.log(`[AutoInject] Project not found`);
+      return res.status(404).json({ error: "Project not found" });
+    }
     
+    console.log(`[AutoInject] Validating Analytics config for project`);
     // Automatically enable analytics if it's not enabled yet
     if (!project.analytics?.enabled || !project.analytics?.trackingId) {
       if (!project.analytics) project.analytics = {};
@@ -81,11 +86,14 @@ export const autoInjectAnalytics = async (req, res) => {
       await project.save();
     }
 
+    console.log(`[AutoInject] Fetching user to check GitHub connection`);
     const user = await User.findById(userId);
     if (!user || !user.githubAccessTokenEncrypted) {
+      console.log(`[AutoInject] GitHub not connected for user ${userId}`);
       return res.status(400).json({ error: "GitHub not connected" });
     }
 
+    console.log(`[AutoInject] Decrypting GitHub token`);
     const githubToken = decryptSecret(user.githubAccessTokenEncrypted);
     const github = new GitHubService(githubToken);
 
@@ -94,18 +102,29 @@ export const autoInjectAnalytics = async (req, res) => {
        if (repoFullName) {
          [repoOwner, repoName] = repoFullName.split('/');
        } else {
+         console.log(`[AutoInject] Repository information missing`);
          return res.status(400).json({ error: "Repository information missing in project source." });
        }
     }
+    console.log(`[AutoInject] Target repository: ${repoOwner}/${repoName}`);
 
+    console.log(`[AutoInject] Fetching default branch from GitHub API`);
     const defaultBranch = await github.getDefaultBranch(repoOwner, repoName);
+    console.log(`[AutoInject] Default branch is ${defaultBranch}. Fetching SHA.`);
     const defaultSha = await github.getBranchSha(repoOwner, repoName, defaultBranch);
 
     const timestamp = Date.now();
     const newBranchName = `deployai/analytics-inject-${timestamp}`;
+    console.log(`[AutoInject] Creating branch: ${newBranchName}`);
     await github.createBranch(repoOwner, repoName, newBranchName, defaultSha);
 
+    console.log(`[AutoInject] Finding frontend entry file`);
     const entryFile = await findFrontendEntryFile(github, repoOwner, repoName, newBranchName);
+    if (entryFile) {
+      console.log(`[AutoInject] Found frontend entry file: ${entryFile.path}`);
+    } else {
+      console.log(`[AutoInject] No frontend entry file found`);
+    }
 
     if (!process.env.GEMINI_API_KEY) {
       return res.status(500).json({ error: "AI Provider not configured. Please add GEMINI_API_KEY." });
@@ -301,14 +320,19 @@ CRITICAL: Return ONLY the valid JSON array string. Do NOT wrap in \`\`\`json blo
 
 export const verifyAnalytics = async (req, res) => {
   try {
+    console.log(`[Verify] Starting analytics verification for project ${req.params.projectId}`);
     const { projectId } = req.params;
     const userId = req.user.userId;
 
     const project = await Project.findOne({ _id: projectId, userId });
-    if (!project) return res.status(404).json({ error: "Project not found" });
+    if (!project) {
+      console.log(`[Verify] Project not found or unauthorized for user ${userId}`);
+      return res.status(404).json({ error: "Project not found" });
+    }
 
     // Check if any events have been received for this project
     const eventCount = await AnalyticsEvent.countDocuments({ projectId: project._id });
+    console.log(`[Verify] Found ${eventCount} events for project ${project._id}`);
 
     if (eventCount > 0) {
       if (!project.analytics) project.analytics = {};
@@ -316,25 +340,39 @@ export const verifyAnalytics = async (req, res) => {
       project.analytics.verified = true;
       await project.save();
 
+      console.log(`[Verify] Successfully verified project ${project._id}`);
       return res.json({ verified: true, success: true });
     } else {
+      console.log(`[Verify] Verification failed. No events found in DB.`);
       return res.json({ verified: false, success: true, message: "No data detected yet. Please ensure you have deployed the changes and visited the site." });
     }
   } catch (error) {
-    console.error("Verify Analytics Error:", error);
+    console.error("[Verify] Verify Analytics Error:", error);
     return res.status(500).json({ error: "Failed to verify analytics" });
   }
 };
 
 export const trackAnalytics = async (req, res) => {
   try {
+    console.log(`[Track] Received incoming tracking request`);
     const { trackingId, eventType, eventName, path, fullUrl, hostname, referrer, environment, metadata } = req.body;
+    console.log(`[Track] Payload:`, { trackingId, eventType, path, fullUrl });
     
-    if (!trackingId) return res.status(400).json({ error: "Missing trackingId" });
-    if (!eventType) return res.status(400).json({ error: "Missing eventType" });
+    if (!trackingId) {
+      console.log(`[Track] Rejected: Missing trackingId`);
+      return res.status(400).json({ error: "Missing trackingId" });
+    }
+    if (!eventType) {
+      console.log(`[Track] Rejected: Missing eventType`);
+      return res.status(400).json({ error: "Missing eventType" });
+    }
     
     const project = await Project.findOne({ "analytics.trackingId": trackingId });
-    if (!project) return res.status(404).json({ error: "Project not found" });
+    if (!project) {
+      console.log(`[Track] Rejected: Project not found for trackingId ${trackingId}`);
+      return res.status(404).json({ error: "Project not found" });
+    }
+    console.log(`[Track] Matched to project: ${project._id}`);
     
     const userAgentStr = req.headers["user-agent"] || "";
     const ipAddress = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
@@ -364,10 +402,10 @@ export const trackAnalytics = async (req, res) => {
     });
     
     await event.save();
+    console.log(`[Track] Successfully saved event to DB`);
     return res.status(200).json({ success: true });
   } catch (error) {
-    console.error("Analytics Track Error:", error);
-    return res.status(500).json({ error: "Failed to track event" });
+    console.error("[Track] Analytics Track Error:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
-
