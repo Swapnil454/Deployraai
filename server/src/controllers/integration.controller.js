@@ -207,11 +207,11 @@ export const disconnectProvider = async (req, res) => {
     
     // Also clear legacy flags on the User model
     const update = {};
+    update[`${provider}Connected`] = false;
+    
     if (provider === 'github') {
-      update.githubConnected = false;
       update.githubAccessTokenEncrypted = "";
     } else if (provider === 'vercel') {
-      update.vercelConnected = false;
       update.vercelAccessTokenEncrypted = "";
     }
     

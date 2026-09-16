@@ -19,7 +19,6 @@ router.get('/cloudflare/zones', getCloudflareZones);
 
 // API Key specific (Render, Railway)
 router.post('/:provider/connect-api-key', connectApiKey);
-router.post('/render/disconnect', disconnectProvider);
 
 // Generic OAuth routes for vercel, netlify, railway
 router.get('/:provider/connect', connectProvider);

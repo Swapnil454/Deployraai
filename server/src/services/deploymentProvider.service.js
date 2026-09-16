@@ -6,7 +6,7 @@ import { decryptSecret, encryptSecret } from '../utils/encryption.js';
 import { captureDeploymentScreenshot } from '../services/screenshot.service.js';
 import { getVercelToken, getVercelUser, createVercelProject, updateVercelEnvVars, triggerVercelDeploy, getVercelDeployments, getVercelProjects, getVercelProject, getVercelDeploymentEvents, updateVercelProject } from './providers/vercel.service.js';
 import { getRailwayToken, getRailwayMe, getRailwayWorkspaces, createRailwayProject, getProjectEnvironments, createRailwayService, setRailwayVariables, triggerRailwayDeployment } from './providers/railway.service.js';
-import { getRenderToken, getRenderOwner, createRenderWebService, getRenderDeployStatus, updateRenderEnvVars, triggerRenderDeploy, getRenderService } from './providers/render.service.js';
+import { getRenderToken, getRenderOwner, createRenderWebService, getRenderDeployStatus, updateRenderEnvVars, triggerRenderDeploy, getRenderService, getRenderDeploys } from './providers/render.service.js';
 
 export const createLog = (level, step, message, metadata = {}) => ({ level, step, message, metadata, timestamp: new Date() });
 
@@ -221,7 +221,7 @@ export const startBackendProviderDeployment = async (deployment, project, inject
       railwayUrl = `https://${deployment.domainSnapshot.backendPrimaryDomain}`;
     }
 
-    return { platform: 'railway', token, providerServiceId, newDeployId: null, url: railwayUrl, dashboardUrl };
+    return { platform: 'railway', token, providerServiceId, providerEnvironmentId, newDeployId: null, url: railwayUrl, dashboardUrl };
   } else if (platform === 'render') {
     const token = await getRenderToken(userId);
     if (!token) throw new Error('Render is not connected.');
@@ -272,7 +272,16 @@ export const checkBackendProviderStatus = async (deploymentId, token, platform, 
     let railwayUrl = domainSnapshot?.backendPrimaryDomain ? `https://${domainSnapshot.backendPrimaryDomain}` : null;
     return { done: true, status: 'completed', url: railwayUrl };
   } else if (platform === 'render') {
-    if (!providerDeploymentId) return { done: true, status: 'completed' }; // Assume started if no ID
+    if (!providerDeploymentId) {
+      try {
+        const deploys = await getRenderDeploys(token, providerServiceId);
+        if (deploys && deploys.length > 0) {
+          providerDeploymentId = deploys[0].deploy?.id || deploys[0].id;
+        }
+      } catch (e) {}
+    }
+    
+    if (!providerDeploymentId) return { done: false, status: 'initializing' };
     
     const deployStatus = await getRenderDeployStatus(token, providerServiceId, providerDeploymentId);
     const st = deployStatus?.deploy?.status || deployStatus?.status;
@@ -293,5 +302,56 @@ export const checkBackendProviderStatus = async (deploymentId, token, platform, 
       return { done: true, status: 'failed', error: `Render build ${st}` };
     }
     return { done: false, status: st };
+  }
+};
+
+export const updateBackendEnvAndRedeploy = async (deployment, project, frontendUrl, backendProviderCtx) => {
+  try {
+    const platform = backendProviderCtx.platform;
+    const token = backendProviderCtx.token;
+    
+    const targetEnv = project.configuration.envVariables.backend?.find(e => e.isFrontendUrlTarget);
+    if (!targetEnv) {
+      await appendLog(deployment._id, 'info', 'env_setup', 'No backend variable marked for Frontend URL injection. Skipping backend background redeploy.');
+      return;
+    }
+    
+    await appendLog(deployment._id, 'info', 'env_setup', `Injecting Frontend URL into backend variable: ${targetEnv.key}`);
+    
+    targetEnv.valueEncrypted = encryptSecret(frontendUrl);
+    project.markModified('configuration.envVariables');
+    await project.save();
+    
+    const varsMap = {};
+    if (project.configuration.envVariables && project.configuration.envVariables.backend) {
+      for (const env of project.configuration.envVariables.backend) {
+        if (env.key && env.key.trim() !== '') {
+           varsMap[env.key] = decryptSecret(env.valueEncrypted);
+        }
+      }
+    }
+    varsMap[targetEnv.key] = frontendUrl;
+    
+    if (platform === 'railway') {
+      const providerProjectId = project.configuration.railwayProjectId;
+      const providerEnvironmentId = backendProviderCtx.providerEnvironmentId || deployment.providerEnvironmentId;
+      const providerServiceId = backendProviderCtx.providerServiceId || deployment.providerServiceId;
+      
+      await setRailwayVariables(token, providerProjectId, providerEnvironmentId, providerServiceId, varsMap);
+      await appendLog(deployment._id, 'info', 'deploy_trigger', 'Triggering Railway background redeployment to apply Frontend URL');
+      await triggerRailwayDeployment(token, providerServiceId, providerEnvironmentId);
+      
+    } else if (platform === 'render') {
+      const providerServiceId = backendProviderCtx.providerServiceId || deployment.providerServiceId;
+      const envVarsArray = Object.entries(varsMap).map(([key, value]) => ({ key, value }));
+      
+      await updateRenderEnvVars(token, providerServiceId, envVarsArray);
+      await appendLog(deployment._id, 'info', 'deploy_trigger', 'Triggering Render background redeployment to apply Frontend URL');
+      await triggerRenderDeploy(token, providerServiceId);
+    }
+    
+  } catch (err) {
+    await appendLog(deployment._id, 'error', 'env_setup', `Failed to inject Frontend URL into backend: ${err.message}`);
+    console.error("Failed to update backend env and redeploy:", err);
   }
 };

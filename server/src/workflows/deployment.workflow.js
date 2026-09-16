@@ -9,9 +9,12 @@ import {
   checkBackendProviderStatus,
   startFrontendProviderDeployment,
   checkFrontendProviderStatus,
-  appendLog
+  appendLog,
+  updateBackendEnvAndRedeploy
 } from '../services/deploymentProvider.service.js';
+import { encryptSecret } from '../utils/encryption.js';
 import { captureDeploymentScreenshot } from '../services/screenshot.service.js';
+import { createDefaultMonitors } from '../services/monitoring.service.js';
 
 export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload, step, sleep }) => {
   const {
@@ -138,6 +141,12 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
           await Deployment.findByIdAndUpdate(payload.existingFullDeploymentId, { status: 'failed', completedAt: new Date(), errorMessage: "Backend deployment failed" });
         }
       });
+      
+      // Auto-create monitors even if failed so that any succeeded service is monitored
+      await step.run("auto_create_monitors_failed_backend_v1", async () => {
+        try { await createDefaultMonitors(projectId); } catch (err) { console.error("Monitor create failed:", err); }
+      });
+      
       throw new Error("Backend deployment failed");
     }
   }
@@ -155,11 +164,19 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
     // 6. inject_frontend_env_vars
     const finalInjectedVars = [...injectedEnvVars];
     if (target === 'fullstack' && backendUrl) {
-      const injected = await step.run("inject_frontend_env_vars_v1", async () => {
-        await appendLog(existingFrontendDeploymentId, 'info', 'env_setup', `Injecting NEXT_PUBLIC_API_URL=${backendUrl}`);
-        return { key: 'NEXT_PUBLIC_API_URL', value: backendUrl };
-      });
-      finalInjectedVars.push(injected);
+      const targetEnv = project.configuration.envVariables.frontend?.find(e => e.isBackendUrlTarget);
+      if (targetEnv) {
+        const injected = await step.run("inject_frontend_env_vars_v1", async () => {
+          await appendLog(existingFrontendDeploymentId, 'info', 'env_setup', `Injecting ${targetEnv.key}=${backendUrl}`);
+          
+          targetEnv.valueEncrypted = encryptSecret(backendUrl);
+          project.markModified('configuration.envVariables');
+          await project.save();
+          
+          return { key: targetEnv.key, value: backendUrl };
+        });
+        finalInjectedVars.push(injected);
+      }
     }
 
     // 7. init_frontend_deploy
@@ -246,6 +263,13 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
         }
       });
 
+      if (target === 'fullstack' && frontendUrl && backendProviderCtx) {
+        await step.run("update_backend_env_with_frontend_url_v1", async () => {
+           const backendDeploy = await Deployment.findById(existingBackendDeploymentId);
+           await updateBackendEnvAndRedeploy(backendDeploy, project, frontendUrl, backendProviderCtx);
+        });
+      }
+
       await step.run("capture_screenshot_v1", async () => {
         if (frontendUrl) {
           const screenshotUrl = await captureDeploymentScreenshot(existingFrontendDeploymentId, frontendUrl);
@@ -270,9 +294,24 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
           await Deployment.findByIdAndUpdate(payload.existingFullDeploymentId, { status: 'failed', completedAt: new Date(), errorMessage: "Frontend deployment failed" });
         }
       });
+      
+      // Auto-create monitors even if failed so that any succeeded service is monitored
+      await step.run("auto_create_monitors_failed_frontend_v1", async () => {
+        try { await createDefaultMonitors(projectId); } catch (err) { console.error("Monitor create failed:", err); }
+      });
+      
       throw new Error("Frontend deployment failed");
     }
   }
+
+  // Auto-create monitors when everything completes successfully
+  await step.run("auto_create_monitors_v1", async () => {
+     try {
+       await createDefaultMonitors(projectId);
+     } catch (err) {
+       console.error("Monitor auto-creation failed:", err);
+     }
+  });
 
   return {
     target,
