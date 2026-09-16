@@ -112,6 +112,9 @@ app.get("/health", (req, res) => {
         "status": "healthy",
     })
 });
+app.get("/health-1", (req, res) => { res.send({ "status": "healthy" }) });
+app.get("/health-2", (req, res) => { res.send({ "status": "healthy" }) });
+app.get("/health-3", (req, res) => { res.send({ "status": "healthy" }) });
 
 // Add test endpoint
 app.post("/api/test", (req, res) => {

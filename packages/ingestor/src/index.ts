@@ -55,6 +55,9 @@ app.register(sourcemapsRouter, { prefix: '/v1/sourcemaps' });
 
 // Health check — used by load balancer
 app.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
+app.get('/health-1', async () => ({ status: 'ok', ts: Date.now() }));
+app.get('/health-2', async () => ({ status: 'ok', ts: Date.now() }));
+app.get('/health-3', async () => ({ status: 'ok', ts: Date.now() }));
 
 // Expose internal telemetry metrics (connection pools, queue depth)
 app.get('/metrics', async () => {
