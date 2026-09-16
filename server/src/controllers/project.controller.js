@@ -6,7 +6,7 @@ import User from "../models/User.js";
 import { decryptSecret } from "../utils/encryption.js";
 
 
-function generateProjectToken(projectId) {
+export function generateProjectToken(projectId) {
   if (!process.env.INGESTOR_JWT_SECRET) {
     console.warn("WARNING: INGESTOR_JWT_SECRET not set, falling back to secure random hex");
     return `da_${crypto.randomBytes(16).toString("hex")}`;
