@@ -40,17 +40,22 @@ export const startFrontendProviderDeployment = async (deployment, project, injec
   if (!token) throw new Error("Vercel is not connected. Please connect it first.");
   
   const user = await getVercelUser(token);
-  const envVars = [];
+  const envVarsMap = new Map();
   if (project.configuration.envVariables && project.configuration.envVariables.frontend) {
     for (const env of project.configuration.envVariables.frontend) {
       if (env.key && env.key.trim() !== '') {
-        envVars.push({ key: env.key, value: decryptSecret(env.valueEncrypted) });
+        envVarsMap.set(env.key, decryptSecret(env.valueEncrypted) || "");
       }
     }
   }
   if (injectedEnvVars && injectedEnvVars.length > 0) {
-    envVars.push(...injectedEnvVars);
+    for (const env of injectedEnvVars) {
+      if (env.key && env.key.trim() !== '') {
+        envVarsMap.set(env.key, env.value || "");
+      }
+    }
   }
+  const envVars = Array.from(envVarsMap, ([key, value]) => ({ key, value }));
 
   let providerServiceId = project.configuration.vercelProjectId;
   let deploymentUrl;
