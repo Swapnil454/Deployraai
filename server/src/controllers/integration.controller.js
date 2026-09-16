@@ -14,7 +14,7 @@ const getOauthProviders = () => ({
     authorizeUrl: "https://github.com/login/oauth/authorize",
     tokenUrl: "https://github.com/login/oauth/access_token",
     callbackUrl: process.env.GITHUB_CALLBACK_URL,
-    scopes: "read:user user:email public_repo"
+    scopes: "read:user user:email repo"
   },
   vercel: {
     clientId: process.env.VERCEL_CLIENT_ID,
@@ -98,7 +98,10 @@ export const connectProvider = async (req, res) => {
   res.cookie(`oauth_state_${provider}`, state, { httpOnly: true, maxAge: 10 * 60 * 1000 });
   res.cookie(`oauth_return_${provider}`, returnTo, { httpOnly: true, maxAge: 10 * 60 * 1000 });
 
-  const authUrl = `${config.authorizeUrl}?client_id=${config.clientId}&redirect_uri=${encodeURIComponent(config.callbackUrl)}&state=${state}&response_type=code&prompt=consent`;
+  let authUrl = `${config.authorizeUrl}?client_id=${config.clientId}&redirect_uri=${encodeURIComponent(config.callbackUrl)}&state=${state}&response_type=code&prompt=consent`;
+  if (config.scopes) {
+    authUrl += `&scope=${encodeURIComponent(config.scopes)}`;
+  }
   
   res.redirect(authUrl);
 };
