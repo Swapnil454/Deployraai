@@ -47,6 +47,25 @@ const apiLimiter = rateLimit({
 
 import { requireOrigin } from "./middleware/csrf.middleware.js";
 
+// Analytics routes need open CORS since they're called from arbitrary user websites
+// We mount this BEFORE the CSRF middleware so that tracking events don't get rejected for having a foreign Origin.
+app.use("/api/analytics", (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+});
+
+app.use("/api/analytics", async (req, res, next) => {
+    try {
+        const { default: router } = await import("./routes/analytics.routes.js");
+        return router(req, res, next);
+    } catch (err) {
+        next(err);
+    }
+});
+
 // Apply rate limiting and CSRF middleware
 app.use('/api/', apiLimiter, requireOrigin);
 app.use('/auth/', apiLimiter, requireOrigin);
@@ -81,24 +100,6 @@ app.use("/api/observability/projects", logPipelinesRoutes);
 app.use("/api/projects", incidentRoutes);
 app.use("/api/public/status", statusRoutes);
 app.use("/api/internal", internalRoutes);
-
-// Analytics routes need open CORS since they're called from arbitrary user websites
-app.use("/api/analytics", (req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type");
-    if (req.method === "OPTIONS") return res.sendStatus(204);
-    next();
-});
-
-app.use("/api/analytics", async (req, res, next) => {
-    try {
-        const { default: router } = await import("./routes/analytics.routes.js");
-        return router(req, res, next);
-    } catch (err) {
-        next(err);
-    }
-});
 
 
 app.get("/", (req, res) => {
