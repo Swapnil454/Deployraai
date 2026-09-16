@@ -60,3 +60,19 @@ services:
         sync: false
       - key: GITHUB_TOKEN
         sync: false
+
+  # 5. Ingestor API (Receives telemetry data)
+  - type: web
+    name: tracepilot-ingestor
+    env: node
+    buildCommand: npm install -g turbo && npm ci && turbo run build --filter=@yourplatform/ingestor
+    startCommand: npm run start --workspace=@yourplatform/ingestor
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4317
+      - key: DATABASE_URL
+        sync: false
+      - key: CLICKHOUSE_URL
+        sync: false
