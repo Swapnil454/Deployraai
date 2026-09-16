@@ -1,6 +1,9 @@
 import express from "express";
+import { trackAnalytics } from "../controllers/analytics.controller.js";
 
 const router = express.Router();
+
+router.post("/track", trackAnalytics);
 
 // Auto-Injector script served to Vercel builds
 router.get("/injector.js", (req, res) => {
