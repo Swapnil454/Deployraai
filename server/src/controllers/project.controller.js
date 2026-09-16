@@ -319,7 +319,9 @@ export const getProject = async (req, res) => {
           key: env.key,
           hasValue: !!env.valueEncrypted,
           value: val,
-          isSecret: env.isSecret
+          isSecret: env.isSecret,
+          isBackendUrlTarget: env.isBackendUrlTarget || false,
+          isFrontendUrlTarget: env.isFrontendUrlTarget || false
         };
       }) || [];
 
@@ -413,7 +415,9 @@ export const updateProjectConfig = async (req, res) => {
         return {
           key: env.key,
           isSecret: env.isSecret ?? true,
-          valueEncrypted: valEncrypted
+          valueEncrypted: valEncrypted,
+          isBackendUrlTarget: env.isBackendUrlTarget ?? false,
+          isFrontendUrlTarget: env.isFrontendUrlTarget ?? false
         };
       }).filter(e => e.valueEncrypted !== undefined);
     };

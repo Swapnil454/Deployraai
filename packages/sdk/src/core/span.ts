@@ -47,7 +47,15 @@ export function track(
 ): void {
   if (!isEnabled()) return;
 
-  if (typeof valueOrPayload === 'object' && valueOrPayload !== null) {
+  if (
+    typeof valueOrPayload === 'string' ||
+    typeof valueOrPayload === 'number' ||
+    typeof valueOrPayload === 'boolean'
+  ) {
+    // Original behavior — attribute on active span
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan) activeSpan.setAttribute(`app.${nameOrKey}`, valueOrPayload);
+  } else {
     // Custom business event — create its own span
     const span = tracer.startSpan(nameOrKey);
     span.setAttribute('custom.event', true);
@@ -57,10 +65,6 @@ export function track(
       span.setAttribute(`event.${k}`, v);
     }
     span.end(); // end immediately — it's an instantaneous event
-  } else {
-    // Original behavior — attribute on active span
-    const activeSpan = trace.getActiveSpan();
-    if (activeSpan) activeSpan.setAttribute(`app.${nameOrKey}`, valueOrPayload);
   }
 }
 

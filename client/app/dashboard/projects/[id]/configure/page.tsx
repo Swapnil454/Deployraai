@@ -301,6 +301,24 @@ export default function ConfigureProjectPage() {
       if (!sFront) finalConfig.frontendPlatform = "none";
       if (!sBack) finalConfig.backendPlatform = "none";
 
+      if (isFullstack) {
+        const hasBackendTarget = finalConfig.envVariables.frontend?.some((e: any) => e.isBackendUrlTarget);
+        const hasFrontendTarget = finalConfig.envVariables.backend?.some((e: any) => e.isFrontendUrlTarget);
+        
+        if (finalConfig.frontendPlatform !== "none" && finalConfig.backendPlatform !== "none") {
+          if (!hasBackendTarget && finalConfig.envVariables.frontend?.length > 0) {
+            showToast("Please mark exactly one Frontend variable to receive the Backend URL.", "error");
+            setSaving(false);
+            return;
+          }
+          if (!hasFrontendTarget && finalConfig.envVariables.backend?.length > 0) {
+            showToast("Please mark exactly one Backend variable to receive the Frontend URL.", "error");
+            setSaving(false);
+            return;
+          }
+        }
+      }
+
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/config`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -329,7 +347,7 @@ export default function ConfigureProjectPage() {
 
   const addEnv = (group: string) => {
     const updated = { ...config };
-    updated.envVariables[group].push({ key: "", value: "", isSecret: true });
+    updated.envVariables[group].push({ key: "", value: "", isSecret: true, isBackendUrlTarget: false, isFrontendUrlTarget: false });
     setConfig(updated);
   };
 
@@ -367,7 +385,7 @@ export default function ConfigureProjectPage() {
           value = value.substring(1, value.length - 1);
         }
 
-        newVars.push({ key, value, isSecret: true });
+        newVars.push({ key, value, isSecret: true, isBackendUrlTarget: false, isFrontendUrlTarget: false });
       }
 
       // Merge with existing variables
@@ -710,14 +728,48 @@ export default function ConfigureProjectPage() {
                           </button>
                         </div>
 
-                        <div className="flex items-center justify-between w-full sm:w-auto mt-1 sm:mt-0 pl-1 sm:pl-0">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between w-full sm:w-auto mt-2 sm:mt-0 pl-1 sm:pl-0 gap-2">
                            <label className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-400 cursor-pointer select-none">
                              <input type="checkbox" disabled={!isEditing} checked={env.isSecret} onChange={e => handleEnvChange(group, idx, "isSecret", e.target.checked)} className="rounded border-zinc-700 bg-black text-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-black disabled:opacity-50 h-3.5 w-3.5 transition-colors" />
                              Secret
                            </label>
                            
+                           {group === "frontend" && (
+                             <label className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-400 cursor-pointer select-none" title="This variable will be automatically updated with the deployed Backend URL">
+                               <input type="checkbox" disabled={!isEditing} checked={env.isBackendUrlTarget} onChange={e => {
+                                 // Uncheck others
+                                 if (e.target.checked) {
+                                   const updated = { ...config };
+                                   updated.envVariables.frontend.forEach((v: any, i: number) => {
+                                      if (i !== idx) v.isBackendUrlTarget = false;
+                                   });
+                                   setConfig(updated);
+                                 }
+                                 handleEnvChange(group, idx, "isBackendUrlTarget", e.target.checked);
+                               }} className="rounded-full border-indigo-700 bg-black text-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-black disabled:opacity-50 h-3.5 w-3.5 transition-colors" />
+                               Backend URL Target
+                             </label>
+                           )}
+
+                           {group === "backend" && (
+                             <label className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 cursor-pointer select-none" title="This variable will be automatically updated with the deployed Frontend URL">
+                               <input type="checkbox" disabled={!isEditing} checked={env.isFrontendUrlTarget} onChange={e => {
+                                 // Uncheck others
+                                 if (e.target.checked) {
+                                   const updated = { ...config };
+                                   updated.envVariables.backend.forEach((v: any, i: number) => {
+                                      if (i !== idx) v.isFrontendUrlTarget = false;
+                                   });
+                                   setConfig(updated);
+                                 }
+                                 handleEnvChange(group, idx, "isFrontendUrlTarget", e.target.checked);
+                               }} className="rounded-full border-emerald-700 bg-black text-emerald-500 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-black disabled:opacity-50 h-3.5 w-3.5 transition-colors" />
+                               Frontend URL Target
+                             </label>
+                           )}
+
                            {isEditing && (
-                             <button onClick={() => removeEnv(group, idx)} className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all ml-3 active:scale-95">
+                             <button onClick={() => removeEnv(group, idx)} className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all ml-1 active:scale-95">
                                <Trash2 className="h-3.5 w-3.5" />
                              </button>
                            )}

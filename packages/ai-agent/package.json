@@ -18,14 +18,14 @@
     "@octokit/rest": "^22.0.1",
     "fastify": "^4.29.1",
     "ioredis": "^5.11.1",
-    "pg": "^8.11.3"
-  },
-  "devDependencies": {
+    "pg": "^8.11.3",
     "@types/node": "^20.11.24",
     "@types/pg": "^8.11.2",
+    "typescript": "^5.4.0"
+  },
+  "devDependencies": {
     "nodemon": "^3.1.0",
     "ts-node-dev": "^2.0.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.4.0"
+    "tsx": "^4.19.0"
   }
 }

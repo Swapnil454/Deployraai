@@ -94,9 +94,14 @@ export default function SettingsPage() {
       if (res.ok) {
         setActiveDisconnectProvider(null);
         await refreshUser();
+      } else {
+        const errText = await res.text();
+        console.error("Disconnect failed:", res.status, errText);
+        alert(`Failed to disconnect: ${res.status} ${errText}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert(`Error: ${err.message}`);
     } finally {
       setDisconnecting(false);
     }
@@ -207,6 +212,7 @@ export default function SettingsPage() {
                 status={user.cloudflareConnected} 
                 subtext="Coming soon"
                 action={null}
+                onDisconnect={() => setActiveDisconnectProvider('cloudflare')}
               />
             </div>
           </div>
