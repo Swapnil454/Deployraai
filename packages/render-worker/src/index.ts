@@ -16,6 +16,9 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+app.get('/health-1', (req, res) => { res.status(200).json({ status: 'ok' }); });
+app.get('/health-2', (req, res) => { res.status(200).json({ status: 'ok' }); });
+app.get('/health-3', (req, res) => { res.status(200).json({ status: 'ok' }); });
 
 app.listen(PORT, () => {
   console.log(`Render Worker Health server listening on port ${PORT}`);

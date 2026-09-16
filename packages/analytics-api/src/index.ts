@@ -59,6 +59,9 @@ app.register(issuesRouter, { prefix: '/issues' });
 app.register(infrastructureRouter, { prefix: '/infrastructure' });
 
 app.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
+app.get('/health-1', async () => ({ status: 'ok', ts: Date.now() }));
+app.get('/health-2', async () => ({ status: 'ok', ts: Date.now() }));
+app.get('/health-3', async () => ({ status: 'ok', ts: Date.now() }));
 
 const start = async () => {
   try {

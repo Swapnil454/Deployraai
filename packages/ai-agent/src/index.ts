@@ -18,6 +18,9 @@ app.register(aiRouter, { prefix: '/ai' });
 app.register(githubRouter, { prefix: '/github' });
 
 app.get('/health', async () => ({ status: 'ok', service: 'ai-agent' }));
+app.get('/health-1', async () => ({ status: 'ok', service: 'ai-agent' }));
+app.get('/health-2', async () => ({ status: 'ok', service: 'ai-agent' }));
+app.get('/health-3', async () => ({ status: 'ok', service: 'ai-agent' }));
 
 const start = async () => {
   try {
