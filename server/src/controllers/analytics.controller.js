@@ -8,6 +8,7 @@ import { GitHubService } from "../services/providers/github.service.js";
 import { decryptSecret } from "../utils/encryption.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { trackAiUsage } from "../utils/aiTracker.js";
+import { generateProjectToken } from "./project.controller.js";
 
 
 const FRONTEND_ENTRY_FILES = [
@@ -70,8 +71,14 @@ export const autoInjectAnalytics = async (req, res) => {
 
     const project = await Project.findOne({ _id: projectId, userId });
     if (!project) return res.status(404).json({ error: "Project not found" });
+    
+    // Automatically enable analytics if it's not enabled yet
     if (!project.analytics?.enabled || !project.analytics?.trackingId) {
-      return res.status(400).json({ error: "Analytics not enabled for this project." });
+      if (!project.analytics) project.analytics = {};
+      project.analytics.enabled = true;
+      project.analytics.trackingId = generateProjectToken(project._id.toString());
+      project.analytics.enabledAt = new Date();
+      await project.save();
     }
 
     const user = await User.findById(userId);
