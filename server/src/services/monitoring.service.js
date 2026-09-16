@@ -91,8 +91,7 @@ export const createDefaultMonitors = async (projectId, passedFrontendUrl = null,
   let createdCount = 0;
 
   if (frontendUrl) {
-    // Check if exists
-    let feMonitor = await Monitor.findOne({ projectId, type: 'frontend', url: frontendUrl });
+    let feMonitor = await Monitor.findOne({ projectId, type: 'frontend' });
     if (!feMonitor) {
       feMonitor = new Monitor({
         userId: project.userId,
@@ -105,11 +104,14 @@ export const createDefaultMonitors = async (projectId, passedFrontendUrl = null,
       });
       await feMonitor.save();
       createdCount++;
+    } else if (feMonitor.url !== frontendUrl) {
+      feMonitor.url = frontendUrl;
+      await feMonitor.save();
     }
   }
 
   if (backendUrl) {
-    let beMonitor = await Monitor.findOne({ projectId, type: 'backend', url: backendUrl });
+    let beMonitor = await Monitor.findOne({ projectId, type: 'backend' });
     if (!beMonitor) {
       beMonitor = new Monitor({
         userId: project.userId,
@@ -122,6 +124,9 @@ export const createDefaultMonitors = async (projectId, passedFrontendUrl = null,
       });
       await beMonitor.save();
       createdCount++;
+    } else if (beMonitor.url !== backendUrl) {
+      beMonitor.url = backendUrl;
+      await beMonitor.save();
     }
   }
 

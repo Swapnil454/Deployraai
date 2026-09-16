@@ -3,7 +3,9 @@ import mongoose from "mongoose";
 const EnvVariableSchema = new mongoose.Schema({
   key: { type: String, required: true },
   valueEncrypted: { type: String, required: true },
-  isSecret: { type: Boolean, default: true }
+  isSecret: { type: Boolean, default: true },
+  isBackendUrlTarget: { type: Boolean, default: false },
+  isFrontendUrlTarget: { type: Boolean, default: false }
 }, { _id: false });
 
 const LogPipelineSchema = new mongoose.Schema({

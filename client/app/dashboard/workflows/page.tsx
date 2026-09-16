@@ -20,7 +20,9 @@ const StatusBadge = ({ status }: { status: string }) => {
   }
 };
 
-const getPathColor = (status: string) => {
+const getPathColor = (status: string, stepName?: string) => {
+  const n = (stepName || '').toLowerCase();
+  if (status === 'completed' && (n.includes('fail') || n.includes('error'))) return '#ef4444';
   if (status === 'completed') return '#22c55e';
   if (status === 'sleeping') return '#6366f1';
   if (status === 'failed' || status === 'failed_retrying') return '#ef4444';
@@ -45,23 +47,27 @@ const InfographicTimelineNode = React.memo(({ event, index, isLast }: { event: a
   const isTop = index % 2 !== 0; // Odd index => Circle on Top
   const stepNumber = String(index + 1).padStart(2, '0');
   
-  const pathColor = getPathColor(event.status);
+  const stepNameStr = event.label || event.stepName || '';
+  const pathColor = getPathColor(event.status, stepNameStr);
   
   let textColorClass = 'text-blue-500';
   let badgeBgClass = 'bg-blue-500/20';
   let isPulsing = false;
   
-  if (event.status === 'completed') {
+  const n = stepNameStr.toLowerCase();
+  const isFailureStep = n.includes('fail') || n.includes('error');
+  
+  if (event.status === 'failed' || event.status === 'failed_retrying' || (event.status === 'completed' && isFailureStep)) {
+    textColorClass = 'text-red-500';
+    badgeBgClass = 'bg-red-500/20';
+    isPulsing = isLast && event.status === 'failed_retrying';
+  } else if (event.status === 'completed') {
     textColorClass = 'text-[#22c55e]';
     badgeBgClass = 'bg-[#22c55e]/20';
   } else if (event.status === 'sleeping') {
     textColorClass = 'text-indigo-400';
     badgeBgClass = 'bg-indigo-500/20';
     isPulsing = isLast;
-  } else if (event.status === 'failed' || event.status === 'failed_retrying') {
-    textColorClass = 'text-red-500';
-    badgeBgClass = 'bg-red-500/20';
-    isPulsing = isLast && event.status === 'failed_retrying';
   } else if (event.status === 'cancelled') {
     textColorClass = 'text-zinc-400';
     badgeBgClass = 'bg-zinc-600/20';
@@ -172,7 +178,7 @@ const InfographicTimeline = React.memo(({ events }: { events: any[] }) => {
           const y2 = isTop ? 190 : 70;
           const midX = (x1 + x2) / 2;
           
-          const strokeColor = getPathColor(nextEvent.status);
+          const strokeColor = getPathColor(nextEvent.status, nextEvent.label || nextEvent.stepName);
 
           return (
             <g key={`path-group-${i}`}>
