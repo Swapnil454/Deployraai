@@ -89,8 +89,9 @@ const start = async () => {
     console.log('Running database migrations...');
     await initDb();
     
-    await app.listen({ port: 4317, host: '0.0.0.0' });
-    console.log('Ingestor running on port 4317');
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 4317;
+    await app.listen({ port, host: '0.0.0.0' });
+    console.log(`Ingestor running on port ${port}`);
     await restoreRenderPollers();
   } catch (err) {
     app.log.error(err);

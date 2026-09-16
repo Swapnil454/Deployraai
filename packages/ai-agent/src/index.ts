@@ -21,8 +21,9 @@ app.get('/health', async () => ({ status: 'ok', service: 'ai-agent' }));
 
 const start = async () => {
   try {
-    await app.listen({ port: 4319, host: '0.0.0.0' });
-    console.log('AI Agent running on port 4319');
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 4319;
+    await app.listen({ port, host: '0.0.0.0' });
+    console.log(`AI Agent running on port ${port}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);
