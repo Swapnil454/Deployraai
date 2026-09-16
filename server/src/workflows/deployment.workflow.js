@@ -169,9 +169,15 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
         const injected = await step.run("inject_frontend_env_vars_v1", async () => {
           await appendLog(existingFrontendDeploymentId, 'info', 'env_setup', `Injecting ${targetEnv.key}=${backendUrl}`);
           
-          targetEnv.valueEncrypted = encryptSecret(backendUrl);
-          project.markModified('configuration.envVariables');
-          await project.save();
+          // Refetch project to avoid VersionError since the workflow has been waiting for minutes
+          const latestProject = await Project.findById(project._id);
+          const latestTargetEnv = latestProject.configuration.envVariables.frontend?.find(e => e.isBackendUrlTarget);
+          
+          if (latestTargetEnv) {
+            latestTargetEnv.valueEncrypted = encryptSecret(backendUrl);
+            latestProject.markModified('configuration.envVariables');
+            await latestProject.save();
+          }
           
           return { key: targetEnv.key, value: backendUrl };
         });

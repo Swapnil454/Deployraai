@@ -1119,7 +1119,8 @@ export const rollbackDeployment = async (req, res) => {
 export const cancelDeployment = async (req, res) => {
   try {
     const { deploymentId } = req.params;
-    const Deployment = (await import('../models/Deployment.js')).default;
+    
+    // Deployment model is already imported at the top of the file
     const deployment = await Deployment.findById(deploymentId);
     if (!deployment) return res.status(404).json({ error: 'Deployment not found' });
     if (deployment.userId.toString() !== req.user.userId.toString()) return res.status(403).json({ error: 'Access denied' });
@@ -1128,24 +1129,24 @@ export const cancelDeployment = async (req, res) => {
       return res.status(400).json({ error: 'Deployment is not in a cancellable state' });
     }
     
-    deployment.status = 'failed';
-    if (!deployment.finalSummary) deployment.finalSummary = {};
-    deployment.finalSummary.failureReason = 'Cancelled by user';
-    deployment.logs.push({
-      level: 'error',
-      step: 'cancelled',
-      message: 'Deployment was cancelled by the user.',
-      timestamp: new Date()
+    // Use findByIdAndUpdate to avoid VersionError and validation issues on partial documents
+    await Deployment.findByIdAndUpdate(deploymentId, {
+      $set: { 
+         status: 'cancelled', 
+         'finalSummary.failureReason': 'Cancelled by user',
+         completedAt: new Date()
+      },
+      $push: { 
+         logs: { level: 'warning', step: 'cancelled', message: 'Deployment was cancelled by the user.', timestamp: new Date() } 
+      }
     });
-    
-    await deployment.save();
     
     if (deployment.type === 'full') {
       await Deployment.updateMany(
-        { orchestrationGroupId: deployment._id, status: { $in: ['running', 'queued'] } },
+        { orchestrationGroupId: deployment.orchestrationGroupId, status: { $in: ['running', 'queued'] } },
         { 
-          $set: { status: 'failed', 'finalSummary.failureReason': 'Cancelled by user' },
-          $push: { logs: { level: 'error', step: 'cancelled', message: 'Parent deployment cancelled', timestamp: new Date() } }
+          $set: { status: 'cancelled', 'finalSummary.failureReason': 'Cancelled by user', completedAt: new Date() },
+          $push: { logs: { level: 'warning', step: 'cancelled', message: 'Parent deployment cancelled', timestamp: new Date() } }
         }
       );
     }
