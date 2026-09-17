@@ -219,7 +219,7 @@ Task:
 Inject the script tag exactly as provided into the <head> section of the document.
 CRITICAL: Return ONLY the raw new file content. Do NOT wrap it in markdown formatting blocks like \`\`\`javascript.`;
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
     const result = await model.generateContent(frontendPrompt);
     await trackAiUsage(userId, projectId, 'analytics_insight');
 
@@ -355,7 +355,7 @@ Inject \`experimental: { instrumentationHook: true }\` into the config object sa
 If \`experimental\` already exists, add \`instrumentationHook: true\` to it.
 CRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javascript blocks. Do NOT remove existing configuration.`;
         
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
         const result = await model.generateContent(nextConfigPrompt);
         let newConfigContent = result.response.text().trim();
         if (newConfigContent.startsWith("\`\`\`")) {
@@ -407,7 +407,7 @@ registerOTel();
 Note: If the file uses ES6 modules (import), use \`import { registerOTel } from '@swapnil454/tracepilot/node'; registerOTel();\` instead.
 CRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javascript blocks.`;
 
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
         const result = await model.generateContent(expressPrompt);
         let newEntryContent = result.response.text().trim();
         if (newEntryContent.startsWith("\`\`\`")) {
