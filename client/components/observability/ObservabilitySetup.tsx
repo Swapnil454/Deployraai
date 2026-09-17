@@ -15,7 +15,7 @@ export function ObservabilitySetup({
   const [verifyError, setVerifyError] = useState('');
   
   // Tabs for different framework instructions
-  const [activeTab, setActiveTab] = useState<'next' | 'express'>('next');
+  const [activeTab, setActiveTab] = useState<'next' | 'express' | 'react' | 'python' | 'go'>('next');
   
   // AI Flow States: idle -> analyzing -> review -> injecting -> success
   const [aiState, setAiState] = useState<'idle' | 'analyzing' | 'review' | 'injecting' | 'success'>('idle');
@@ -119,6 +119,24 @@ export function ObservabilitySetup({
             >
               Node.js / Express
             </button>
+            <button 
+              onClick={() => setActiveTab('react')}
+              className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeTab === 'react' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+            >
+              React SPA
+            </button>
+            <button 
+              onClick={() => setActiveTab('python')}
+              className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeTab === 'python' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+            >
+              Python
+            </button>
+            <button 
+              onClick={() => setActiveTab('go')}
+              className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeTab === 'go' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+            >
+              Go
+            </button>
           </div>
         </div>
         
@@ -134,7 +152,10 @@ export function ObservabilitySetup({
               <div className="flex items-center bg-[#1a1a1a] px-3 py-2 border-b border-zinc-800">
                 <span className="text-[12px] text-zinc-400 font-medium bg-zinc-800/50 px-2 py-0.5 rounded">Backend Root Terminal</span>
                 <button onClick={() => {
-                  navigator.clipboard.writeText(`npm install @swapnil454/tracepilot`);
+                  let text = `npm install @swapnil454/tracepilot`;
+                  if (activeTab === 'python') text = `pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation opentelemetry-exporter-otlp`;
+                  if (activeTab === 'go') text = `go get go.opentelemetry.io/otel go.opentelemetry.io/otel/sdk go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`;
+                  navigator.clipboard.writeText(text);
                   setCopiedBackend(true);
                   setTimeout(() => setCopiedBackend(false), 2000);
                 }} className="ml-auto text-zinc-400 hover:text-white transition-colors">
@@ -142,7 +163,7 @@ export function ObservabilitySetup({
                 </button>
               </div>
               <div className="p-3 overflow-x-auto text-[12px] font-mono text-zinc-300 whitespace-nowrap">
-                npm install @swapnil454/tracepilot
+                {activeTab === 'python' ? 'pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation opentelemetry-exporter-otlp' : activeTab === 'go' ? 'go get go.opentelemetry.io/otel go.opentelemetry.io/otel/sdk go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp' : 'npm install @swapnil454/tracepilot'}
               </div>
             </div>
           </div>
@@ -155,6 +176,12 @@ export function ObservabilitySetup({
             <p className="text-[13px] text-zinc-400 mb-4 flex-1">
               {activeTab === 'next' ? (
                 <span>Create an <code>instrumentation.ts</code> file in the root of your project.</span>
+              ) : activeTab === 'react' ? (
+                <span>Wrap your root <code>App</code> component in <code>main.tsx</code> or <code>index.js</code>.</span>
+              ) : activeTab === 'python' ? (
+                <span>Add this to the very top of your <code>main.py</code> or <code>app.py</code> file.</span>
+              ) : activeTab === 'go' ? (
+                <span>Add this to your <code>main.go</code> file before starting the server.</span>
               ) : (
                 <span>Add this to the very top of your <code>index.js</code> or <code>app.js</code> file.</span>
               )}
@@ -167,16 +194,70 @@ export function ObservabilitySetup({
                      <span className="text-purple-400">instrumentation.ts:</span><br/>
                      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = '{process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces';<br/>
                      process.env.OTEL_SERVICE_NAME = '{project?.repoName || 'my-app'}';<br/>
-                     import &#123; registerOTel &#125; from '@swapnil454/tracepilot/next';<br/>
-                     export function register() &#123; registerOTel(); &#125;
+                     import &#123; initTracer, setupGlobalErrorCapture &#125; from '@swapnil454/tracepilot';<br/>
+                     export function register() &#123; initTracer(); setupGlobalErrorCapture(); &#125;
+                   </>
+                 ) : activeTab === 'react' ? (
+                   <>
+                     <span className="text-purple-400">main.tsx / index.js:</span><br/>
+                     import &#123; TracePilotProvider &#125; from '@swapnil454/tracepilot/react';<br/>
+                     <br/>
+                     &lt;TracePilotProvider<br/>
+                     &nbsp;&nbsp;token="{project?.repoName || 'my-app'}"<br/>
+                     &nbsp;&nbsp;serviceName="{project?.repoName || 'my-app'}"<br/>
+                     &nbsp;&nbsp;ingestorUrl="{process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces"<br/>
+                     &gt;<br/>
+                     &nbsp;&nbsp;&lt;App /&gt;<br/>
+                     &lt;/TracePilotProvider&gt;
+                   </>
+                 ) : activeTab === 'python' ? (
+                   <>
+                     <span className="text-purple-400">main.py:</span><br/>
+                     import os<br/>
+                     from opentelemetry import trace<br/>
+                     from opentelemetry.sdk.trace import TracerProvider<br/>
+                     from opentelemetry.sdk.trace.export import BatchSpanProcessor<br/>
+                     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter<br/>
+                     <br/>
+                     os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "{process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces"<br/>
+                     os.environ["OTEL_SERVICE_NAME"] = "{project?.repoName || 'my-app'}"<br/>
+                     <br/>
+                     trace.set_tracer_provider(TracerProvider())<br/>
+                     otlp_exporter = OTLPSpanExporter()<br/>
+                     trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(otlp_exporter))<br/>
+                   </>
+                 ) : activeTab === 'go' ? (
+                   <>
+                     <span className="text-purple-400">main.go:</span><br/>
+                     import (<br/>
+                     &nbsp;&nbsp;"context"<br/>
+                     &nbsp;&nbsp;"os"<br/>
+                     &nbsp;&nbsp;"go.opentelemetry.io/otel"<br/>
+                     &nbsp;&nbsp;"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"<br/>
+                     &nbsp;&nbsp;"go.opentelemetry.io/otel/sdk/resource"<br/>
+                     &nbsp;&nbsp;sdktrace "go.opentelemetry.io/otel/sdk/trace"<br/>
+                     &nbsp;&nbsp;semconv "go.opentelemetry.io/otel/semconv/v1.4.0"<br/>
+                     )<br/>
+                     <br/>
+                     func initTracer() *sdktrace.TracerProvider &#123;<br/>
+                     &nbsp;&nbsp;os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "{process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces")<br/>
+                     &nbsp;&nbsp;os.Setenv("OTEL_SERVICE_NAME", "{project?.repoName || 'my-app'}")<br/>
+                     &nbsp;&nbsp;exp, _ := otlptracehttp.New(context.Background())<br/>
+                     &nbsp;&nbsp;tp := sdktrace.NewTracerProvider(<br/>
+                     &nbsp;&nbsp;&nbsp;&nbsp;sdktrace.WithBatcher(exp),<br/>
+                     &nbsp;&nbsp;&nbsp;&nbsp;sdktrace.WithResource(resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceNameKey.String("{project?.repoName || 'my-app'}"))),<br/>
+                     &nbsp;&nbsp;)<br/>
+                     &nbsp;&nbsp;otel.SetTracerProvider(tp)<br/>
+                     &nbsp;&nbsp;return tp<br/>
+                     &#125;
                    </>
                  ) : (
                    <>
                      <span className="text-purple-400">index.js:</span><br/>
                      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = '{process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces';<br/>
                      process.env.OTEL_SERVICE_NAME = '{project?.repoName || 'my-app'}';<br/>
-                     const &#123; registerOTel &#125; = require('@swapnil454/tracepilot/node');<br/>
-                     registerOTel();
+                     const &#123; initExpressObservability &#125; = require('@swapnil454/tracepilot/express');<br/>
+                     initExpressObservability();
                    </>
                  )}
                </div>

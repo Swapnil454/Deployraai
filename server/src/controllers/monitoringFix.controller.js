@@ -98,8 +98,12 @@ Return ONLY raw JSON, without markdown formatting blocks.`;
 
     const result = await generateWithRetry(prompt);
     let jsonText = result.response.text().trim();
-    if (jsonText.startsWith('\`\`\`json')) jsonText = jsonText.replace(/^\`\`\`json/, '').replace(/\`\`\`$/, '').trim();
-    if (jsonText.startsWith('\`\`\`')) jsonText = jsonText.replace(/^\`\`\`/, '').replace(/\`\`\`$/, '').trim();
+    const blockMatch = jsonText.match(/```(?:json)?\n([\s\S]*?)```/);
+    if (blockMatch) {
+       jsonText = blockMatch[1].trim();
+    } else {
+       jsonText = jsonText.replace(/^```(?:json)?\n?/, "").replace(/```$/, "").trim();
+    }
 
     let analysis;
     try {
@@ -241,11 +245,11 @@ Return ONLY the raw new file content. Do NOT wrap it in markdown.`;
 
     const rewriteResult = await generateWithRetry(rewritePrompt);
     let newContent = rewriteResult.response.text().trim();
-    if (newContent.startsWith("\`\`\`")) {
-       const lines = newContent.split("\\n");
-       lines.shift();
-       if (lines.length > 0 && lines[lines.length - 1].startsWith("\`\`\`")) lines.pop();
-       newContent = lines.join("\\n");
+    const blockMatch = newContent.match(/```[a-z]*\n([\s\S]*?)```/);
+    if (blockMatch) {
+       newContent = blockMatch[1].trim();
+    } else {
+       newContent = newContent.replace(/^```[a-z]*\n/, "").replace(/```$/, "").trim();
     }
 
     if (!newContent || newContent === fileData.content) {
