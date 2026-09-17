@@ -106,9 +106,9 @@ export function TracePilotProvider({
     let flushInterval: any;
     let handleVisibilityChange: (() => void) | undefined;
     
-    if (enableSessionReplay && typeof window !== 'undefined' && process.env.NEXT_PUBLIC_TRACEPILOT_RUM_KEY) {
+    if (enableSessionReplay && typeof window !== 'undefined' && token) {
       let events: any[] = [];
-      const rumKey = process.env.NEXT_PUBLIC_TRACEPILOT_RUM_KEY;
+      const rumKey = token;
       
       const recordOptions = {
         emit(event: any) {

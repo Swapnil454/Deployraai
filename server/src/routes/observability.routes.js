@@ -54,6 +54,38 @@ router.post('/traces/v1/traces', async (req, res) => {
   }
 });
 
+// Unauthenticated RUM Ingestion Endpoint
+router.post('/rum/v1/rum', async (req, res) => {
+  try {
+    let authHeader = req.headers.authorization || '';
+    
+    // If tracepilot sends the service name, resolve it to the project's JWT token
+    if (authHeader.startsWith('Bearer ')) {
+      const possibleName = authHeader.replace('Bearer ', '').trim();
+      const project = await Project.findOne({ repoName: possibleName });
+      if (project?.analytics?.trackingId) {
+        authHeader = `Bearer ${project.analytics.trackingId}`;
+      }
+    }
+
+    const targetUrl = `${INGESTOR_URL}/v1/rum`;
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      data: req.body,
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/json',
+      },
+      timeout: 5000,
+    });
+    res.status(response.status).send(response.data);
+  } catch (error) {
+    console.error('RUM Ingestion API Error:', error.message);
+    res.status(error.response?.status || 502).json(error.response?.data || { error: 'RUM Ingestion failed' });
+  }
+});
+
 // Apply auth middleware to all OTHER routes (dashboard fetch)
 router.use(requireAuth);
 
