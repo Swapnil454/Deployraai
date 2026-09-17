@@ -5,12 +5,13 @@ import Project from '../models/Project.js';
 
 const router = express.Router();
 const ANALYTICS_API_URL = process.env.ANALYTICS_API_URL || 'http://localhost:4318';
+const INGESTOR_URL = process.env.INGESTOR_URL || 'http://localhost:4317';
 
 // Unauthenticated Trace Ingestion Endpoint
 // The tracepilot SDK sends POST to /api/observability/traces/v1/traces
 router.post('/traces/v1/traces', async (req, res) => {
   try {
-    const targetUrl = `${ANALYTICS_API_URL}/v1/traces`;
+    const targetUrl = `${INGESTOR_URL}/v1/traces`;
     const response = await axios({
       method: req.method,
       url: targetUrl,
