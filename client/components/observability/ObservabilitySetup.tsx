@@ -128,11 +128,11 @@ export function ObservabilitySetup({
               <div className="h-6 w-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">1</div>
               <h4 className="text-white font-medium">Install SDK</h4>
             </div>
-            <p className="text-[13px] text-zinc-400 mb-4 flex-1">Install the tracepilot package using npm, yarn, or pnpm.</p>
+            <p className="text-[13px] text-zinc-400 mb-4 flex-1">Open your backend project's root terminal and install the tracepilot package.</p>
             
             <div className="bg-black border border-zinc-800 rounded-md overflow-hidden mt-auto">
               <div className="flex items-center bg-[#1a1a1a] px-3 py-2 border-b border-zinc-800">
-                <span className="text-[12px] text-zinc-400 font-medium bg-zinc-800/50 px-2 py-0.5 rounded">Terminal</span>
+                <span className="text-[12px] text-zinc-400 font-medium bg-zinc-800/50 px-2 py-0.5 rounded">Backend Root Terminal</span>
                 <button onClick={() => {
                   navigator.clipboard.writeText(`npm install @swapnil454/tracepilot`);
                   setCopiedBackend(true);
