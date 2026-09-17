@@ -10,6 +10,9 @@ export function initExpressObservability() {
   setupGlobalErrorCapture();
 }
 
+// Alias to catch AI hallucinations
+export const registerOTel = initExpressObservability;
+
 // Express middleware — add with app.use(observabilityMiddleware())
 export function observabilityMiddleware(): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {

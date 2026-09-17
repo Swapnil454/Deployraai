@@ -6,7 +6,29 @@ import Project from '../models/Project.js';
 const router = express.Router();
 const ANALYTICS_API_URL = process.env.ANALYTICS_API_URL || 'http://localhost:4318';
 
-// Apply auth middleware to all routes
+// Unauthenticated Trace Ingestion Endpoint
+// The tracepilot SDK sends POST to /api/observability/traces/v1/traces
+router.post('/traces/v1/traces', async (req, res) => {
+  try {
+    const targetUrl = `${ANALYTICS_API_URL}/v1/traces`;
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      data: req.body,
+      headers: {
+        Authorization: req.headers.authorization || '',
+        'Content-Type': 'application/json',
+      },
+      timeout: 5000,
+    });
+    res.status(response.status).send(response.data);
+  } catch (error) {
+    console.error('Ingestion API Error:', error.message);
+    res.status(error.response?.status || 502).json({ error: 'Ingestion failed' });
+  }
+});
+
+// Apply auth middleware to all OTHER routes (dashboard fetch)
 router.use(requireAuth);
 
 // Catch-all proxy route
