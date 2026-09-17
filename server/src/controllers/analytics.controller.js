@@ -534,7 +534,11 @@ export const verifyObservability = async (req, res) => {
       const cookieToken = req.cookies?.[cookieName];
       const authHeader = cookieToken ? `Bearer ${cookieToken}` : (req.headers.authorization || '');
       
-      const response = await axios.get(`${ANALYTICS_API_URL}/api/observability/traces`, {
+      const traceApiUrl = `${ANALYTICS_API_URL}/api/observability/traces`;
+      console.log(`[VerifyObservability] Querying trace API at: ${traceApiUrl}`);
+      console.log(`[VerifyObservability] Params: projectId=${project.slug || projectId}`);
+      
+      const response = await axios.get(traceApiUrl, {
         params: { projectId: project.slug || projectId }, // Try slug first, fallback to id
         headers: { Authorization: authHeader },
         timeout: 10000
@@ -542,14 +546,23 @@ export const verifyObservability = async (req, res) => {
 
       // Simple heuristic: if we got traces back, it's verified
       const traces = response.data?.traces || response.data || [];
+      console.log(`[VerifyObservability] Trace API Response Status: ${response.status}`);
+      console.log(`[VerifyObservability] Parsed Traces Count: ${Array.isArray(traces) ? traces.length : 'Not an array'}`, response.data);
+
       if (Array.isArray(traces) && traces.length > 0) {
         if (!project.observability) project.observability = {};
         project.observability.verified = true;
         await project.save();
+        console.log(`[VerifyObservability] Project ${projectId} successfully verified!`);
         return res.json({ verified: true, success: true });
       }
     } catch (err) {
-      console.error("Failed to query traces:", err.message);
+      console.error("[VerifyObservability] Failed to query traces:");
+      console.error("  - Message:", err.message);
+      if (err.response) {
+         console.error("  - Response Status:", err.response.status);
+         console.error("  - Response Data:", err.response.data);
+      }
       // Fall through to false
     }
 
