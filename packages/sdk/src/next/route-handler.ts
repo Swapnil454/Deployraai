@@ -8,7 +8,7 @@ export function withRouteObservability(handler: Handler): Handler {
     const pathname = req.nextUrl?.pathname || new URL(req.url).pathname;
     const method = req.method;
 
-    if (!process.env.TRACEPILOT_TOKEN) {
+    if (!getConfig().token) {
       return handler(req, ctx);
     }
 

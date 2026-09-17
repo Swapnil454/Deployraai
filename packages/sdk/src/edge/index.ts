@@ -2,8 +2,8 @@ declare var EdgeRuntime: string | undefined;
 
 export function withEdgeTracepilot(handler: any) {
   return async function (request: Request, ...args: any[]) {
-    const token = process.env.TRACEPILOT_TOKEN;
-    const ingestorUrl = process.env.TRACEPILOT_INGESTOR_URL || 'https://ingestor.deployai.in';
+    const token = process.env.TRACEPILOT_TOKEN || process.env.OTEL_SERVICE_NAME;
+    const ingestorUrl = process.env.TRACEPILOT_INGESTOR_URL || process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'https://ingestor.deployai.in';
 
     if (!token) {
       return handler(request, ...args);

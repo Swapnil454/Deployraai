@@ -41,7 +41,7 @@ export function initTracer() {
       new HttpInstrumentation({
         // Don't trace calls to your own collector — would be recursive
         ignoreOutgoingRequestHook: (req) => {
-          return req.hostname?.includes('collector.yourplatform.com') ?? false;
+          return req.hostname?.includes('deployai.in') || req.hostname?.includes('localhost') || false;
         },
       }),
     ],
