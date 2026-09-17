@@ -7,8 +7,8 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 // Highly contrasting colors WITHIN each chart so overlapping lines never blend
 const CPU_COLORS = ['#fc0000ff', '#055eecff', '#09ec5cff']; // Red, Blue, Green
-const MEM_COLORS = ['#16f9d3ff', '#f10538ff', '#70cc00ff']; // Orange, Purple, Cyan
-const NET_COLORS = ['#ec4899', '#eab308', '#0051baff']; // Pink, Yellow, Light Gray
+const MEM_COLORS = ['#fc0000ff', '#055eecff', '#09ec5cff']; // Red, Blue, Green
+const NET_COLORS = ['#fc0000ff', '#055eecff', '#09ec5cff']; // Red, Blue, Green
 
 export default function InfrastructurePage() {
   const params = useParams();
@@ -20,6 +20,7 @@ export default function InfrastructurePage() {
   const [timeRange, setTimeRange] = useState(24); // hours
   const [groupBy, setGroupBy] = useState('k8s_pod_name');
   
+  const [demoMode, setDemoMode] = useState(false);
   const [isGroupDropdownOpen, setIsGroupDropdownOpen] = useState(false);
   const [isTimeDropdownOpen, setIsTimeDropdownOpen] = useState(false);
 
@@ -37,7 +38,7 @@ export default function InfrastructurePage() {
       const end = Date.now();
       const start = end - timeRange * 60 * 60 * 1000;
       
-      const metrics = 'system.cpu.utilization,system.memory.usage,network.io';
+      const metrics = 'system.cpu.utilization,system.memory.usage,http.throughput';
       
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/observability/infrastructure/metrics?projectId=${projectId}&start=${start}&end=${end}&metrics=${metrics}&groupBy=${groupBy}`, { 
         credentials: "include" 
@@ -54,8 +55,40 @@ export default function InfrastructurePage() {
     }
   };
 
+  const generateDemoData = (metricName: string, hours: number) => {
+    const data = [];
+    const now = Date.now();
+    const points = hours * 60;
+    
+    let base1 = metricName === 'system.cpu.utilization' ? 40 : metricName === 'system.memory.usage' ? 4000 : 500;
+    let base2 = metricName === 'system.cpu.utilization' ? 55 : metricName === 'system.memory.usage' ? 6000 : 800;
+    let base3 = metricName === 'system.cpu.utilization' ? 70 : metricName === 'system.memory.usage' ? 8000 : 1200;
+
+    for (let i = points; i >= 0; i--) {
+      const time = now - i * 60000;
+      
+      // Random walk for noisy data
+      base1 = Math.max(0, Math.min(metricName === 'system.cpu.utilization' ? 100 : 10000, base1 + (Math.random() - 0.5) * (metricName === 'system.cpu.utilization' ? 15 : 400)));
+      base2 = Math.max(0, Math.min(metricName === 'system.cpu.utilization' ? 100 : 10000, base2 + (Math.random() - 0.5) * (metricName === 'system.cpu.utilization' ? 15 : 400)));
+      base3 = Math.max(0, Math.min(metricName === 'system.cpu.utilization' ? 100 : 10000, base3 + (Math.random() - 0.5) * (metricName === 'system.cpu.utilization' ? 15 : 400)));
+
+      data.push({
+        formattedTime: new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        rawTime: time,
+        'api-pod-xyz': base1,
+        'frontend-pod-123': base2,
+        'worker-pod-abc': base3,
+      });
+    }
+    return { data, groups: ['api-pod-xyz', 'frontend-pod-123', 'worker-pod-abc'] };
+  };
+
   // Pivot data for Recharts
   const processChartData = (metricName: string) => {
+    if (demoMode) {
+      return generateDemoData(metricName, timeRange);
+    }
+
     const timeMap = new Map<string, any>();
     const groups = new Set<string>();
 
@@ -73,7 +106,17 @@ export default function InfrastructurePage() {
         const groupVal = d.group_val || 'unknown';
         groups.add(groupVal);
         
-        timeMap.get(timeKey)[groupVal] = d.avg_value;
+        let value = d.avg_value;
+        // Normalize values for charts
+        if (metricName === 'system.memory.usage') {
+          value = value / (1024 * 1024); // Bytes to MB
+        } else if (metricName === 'system.cpu.utilization') {
+          // Note: since the backend averages all states (including idle), this is just an approximation for now.
+          // We multiply by 100 to make it a percentage.
+          value = (value * 100); 
+        }
+
+        timeMap.get(timeKey)[groupVal] = value;
       }
     });
 
@@ -83,7 +126,7 @@ export default function InfrastructurePage() {
 
   const cpuChart = useMemo(() => processChartData('system.cpu.utilization'), [metricsData]);
   const memChart = useMemo(() => processChartData('system.memory.usage'), [metricsData]);
-  const netChart = useMemo(() => processChartData('network.io'), [metricsData]);
+  const netChart = useMemo(() => processChartData('http.throughput'), [metricsData]);
 
   const renderLineChart = (chartInfo: { data: any[], groups: string[] }, yAxisLabel: string, colors: string[]) => {
     if (chartInfo.data.length === 0) {
@@ -127,11 +170,11 @@ export default function InfrastructurePage() {
             {chartInfo.groups.map((group, i) => (
               <Line 
                 key={group}
-                type="monotone" 
+                type="linear" 
                 dataKey={group} 
                 stroke={colors[i % colors.length]} 
                 dot={false}
-                strokeWidth={1.2}
+                strokeWidth={1.5}
                 isAnimationActive={false}
               />
             ))}
@@ -154,6 +197,14 @@ export default function InfrastructurePage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setDemoMode(!demoMode)}
+              className={`flex items-center gap-2 border rounded-lg px-3 py-1.5 shadow-xl text-sm font-medium transition-colors ${demoMode ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/50' : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700'}`}
+            >
+              <Activity className="h-4 w-4" />
+              {demoMode ? 'Demo Mode: ON' : 'Demo Mode: OFF'}
+            </button>
+
             <div className="relative">
               <button 
                 onClick={() => { setIsGroupDropdownOpen(!isGroupDropdownOpen); setIsTimeDropdownOpen(false); }}
@@ -251,11 +302,11 @@ export default function InfrastructurePage() {
             {/* Network Chart */}
             <div className="bg-transparent border-y border-zinc-800 pt-6 pb-6">
               <div className="mb-6">
-                <h2 className="text-lg font-semibold text-white">Network I/O</h2>
+                <h2 className="text-lg font-semibold text-white">HTTP Throughput</h2>
                 <p className="text-sm text-zinc-400 mt-1">Across all instances</p>
               </div>
               <div>
-                {renderLineChart(netChart, ' KB/s', NET_COLORS)}
+                {renderLineChart(netChart, ' Req/Min', NET_COLORS)}
               </div>
             </div>
           </div>

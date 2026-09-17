@@ -1,10 +1,11 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { Resource } from '@opentelemetry/resources';
-import { ATTR_SERVICE_NAME, ATTR_DEPLOYMENT_ENVIRONMENT_NAME } from '@opentelemetry/semantic-conventions';
+import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_DEPLOYMENT_ENVIRONMENT } from '@opentelemetry/semantic-conventions';
 import { BatchSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-trace-base';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { PeriodicExportingMetricReader, ConsoleMetricExporter } from '@opentelemetry/sdk-metrics';
 import { HostMetrics } from '@opentelemetry/host-metrics';
+import * as os from 'os';
 import { getConfig, isEnabled } from './config';
 import { createExporter, createMetricExporter } from './transport';
 
@@ -32,8 +33,10 @@ export function initTracer() {
 
   sdk = new NodeSDK({
     resource: new Resource({
-      [ATTR_SERVICE_NAME]: config.projectId,
-      [ATTR_DEPLOYMENT_ENVIRONMENT_NAME]: config.environment,
+      [SEMRESATTRS_SERVICE_NAME]: config.projectId,
+      [SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]: config.environment,
+      'host.name': os.hostname(),
+      'k8s.pod.name': os.hostname(), // Fallback for dashboards that group by pod
       // Custom attributes that show up on every span
       'yourplatform.project_id': config.projectId,
       'yourplatform.deploy_id': config.deployId,

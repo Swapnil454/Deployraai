@@ -77,7 +77,39 @@ export const infrastructureRouter: FastifyPluginAsync = async (app) => {
         }
       });
 
-      const data = await result.json();
+      let data = await (result.json() as Promise<any[]>);
+
+      if (metrics.includes('http.throughput')) {
+        const spanQuery = `
+          SELECT 
+            toStartOfInterval(start_time, INTERVAL 1 minute) as time,
+            'http.throughput' as metric_name,
+            attributes['host.name'] as group_val,
+            count() as avg_value,
+            count() as max_value
+          FROM spans
+          WHERE project_id = {projectId:String}
+            AND start_time >= toDateTime64({start:UInt64}/1000, 3)
+            AND start_time <= toDateTime64({end:UInt64}/1000, 3)
+            AND kind = 2 -- SPAN_KIND_SERVER
+          GROUP BY time, group_val
+          ORDER BY time ASC
+        `;
+        try {
+          const spanResult = await clickhouse.query({
+            query: spanQuery,
+            format: 'JSONEachRow',
+            query_params: { projectId, start: startTs, end: endTs }
+          });
+          const spanData = await (spanResult.json() as Promise<any[]>);
+          // If group_val is empty, fallback to unknown
+          spanData.forEach(d => { if (!d.group_val) d.group_val = 'unknown'; });
+          data = data.concat(spanData);
+        } catch (e) {
+          req.log.error(e, 'Failed to query HTTP throughput');
+        }
+      }
+
       return reply.send({ success: true, data, source: useRollup ? 'rollup' : 'raw' });
     } catch (err: any) {
       req.log.error({ err }, 'Failed to query infrastructure metrics');

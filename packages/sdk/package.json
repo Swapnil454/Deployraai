@@ -1,6 +1,6 @@
 {
   "name": "@swapnil454/tracepilot",
-  "version": "0.2.9",
+  "version": "0.2.11",
   "description": "Zero-config OpenTelemetry auto-instrumentation for Next.js and Express",
   "keywords": [
     "opentelemetry",
@@ -66,7 +66,7 @@
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/core": "^1.26.0",
-    "@opentelemetry/exporter-metrics-otlp-http": "^0.222.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.53.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.53.0",
     "@opentelemetry/host-metrics": "^0.39.0",
     "@opentelemetry/instrumentation": "^0.53.0",
