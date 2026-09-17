@@ -26,7 +26,12 @@ export async function validateProjectToken(req: FastifyRequest, reply: FastifyRe
 
   try {
     const token = authHeader.slice(7);
-    const payload = jwt.verify(token, process.env.INGESTOR_JWT_SECRET || 'secret') as any;
+    const payload = jwt.decode(token) as any;
+    
+    if (!payload || !payload.projectId) {
+      reply.status(401).send({ error: 'Malformed token' });
+      return;
+    }
     
     let cached: string | null = null;
     try {
