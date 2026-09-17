@@ -54,6 +54,37 @@ router.post('/traces/v1/traces', async (req, res) => {
   }
 });
 
+// Unauthenticated Metrics Ingestion Endpoint
+router.post('/traces/v1/metrics', async (req, res) => {
+  try {
+    let authHeader = req.headers.authorization || '';
+    
+    if (authHeader.startsWith('Bearer ')) {
+      const possibleName = authHeader.replace('Bearer ', '').trim();
+      const project = await Project.findOne({ repoName: possibleName });
+      if (project?.analytics?.trackingId) {
+        authHeader = `Bearer ${project.analytics.trackingId}`;
+      }
+    }
+
+    const targetUrl = `${INGESTOR_URL}/v1/metrics`;
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      data: req.body,
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/json',
+      },
+      timeout: 5000,
+    });
+    res.status(response.status).send(response.data);
+  } catch (error) {
+    console.error('Metrics Ingestion API Error:', error.message);
+    res.status(error.response?.status || 502).json(error.response?.data || { error: 'Metrics Ingestion failed' });
+  }
+});
+
 // Unauthenticated RUM Ingestion Endpoint
 router.post(['/rum/v1/rum', '/traces/v1/rum'], async (req, res) => {
   try {
