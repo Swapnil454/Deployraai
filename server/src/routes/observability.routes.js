@@ -107,6 +107,7 @@ router.use('/', verifyProjectOwnership, async (req, res) => {
         Authorization: cookieToken ? `Bearer ${cookieToken}` : (req.headers.authorization || ''),
       },
       responseType: 'stream',
+      decompress: false,
       timeout: 30000, // 30s — prevent hanging if analytics-api is slow
     });
 
