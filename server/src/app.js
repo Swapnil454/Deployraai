@@ -62,6 +62,8 @@ app.use("/api/analytics", async (req, res, next) => {
     }
 });
 
+app.use("/api/observability", observabilityRoutes);
+
 // Global CORS for the dashboard
 app.use(cors({
     origin: process.env.FRONTEND_URL || "http://localhost:3000",
@@ -98,7 +100,6 @@ app.use("/api/fix-prs", fixPrRoutes);
 
 
 
-app.use("/api/observability", observabilityRoutes);
 app.use("/api", domainRoutes);
 app.use("/api", monitoringRoutes);
 app.use("/api/admin", adminRoutes);
