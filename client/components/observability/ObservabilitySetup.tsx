@@ -165,13 +165,17 @@ export function ObservabilitySetup({
                  {activeTab === 'next' ? (
                    <>
                      <span className="text-purple-400">instrumentation.ts:</span><br/>
-                     import &#123; registerOTel &#125; from '@swapnil454/tracepilot/next';<br/>
+                     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = '{process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces';<br/>
+                     process.env.OTEL_SERVICE_NAME = '{project?.repoName || 'my-app'}';<br/>
+                     import &#123; registerOTel &#125; from '@swapnil1454/tracepilot/next';<br/>
                      export function register() &#123; registerOTel(); &#125;
                    </>
                  ) : (
                    <>
                      <span className="text-purple-400">index.js:</span><br/>
-                     const &#123; registerOTel &#125; = require('@swapnil454/tracepilot/node');<br/>
+                     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = '{process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces';<br/>
+                     process.env.OTEL_SERVICE_NAME = '{project?.repoName || 'my-app'}';<br/>
+                     const &#123; registerOTel &#125; = require('@swapnil1454/tracepilot/node');<br/>
                      registerOTel();
                    </>
                  )}
