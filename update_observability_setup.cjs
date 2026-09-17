@@ -1,4 +1,6 @@
-"use client";
+const fs = require('fs');
+
+const content = `"use client";
 
 import { useState } from 'react';
 import { Check, Copy, Terminal, ExternalLink, Loader2, ArrowRight, Play, Eye } from 'lucide-react';
@@ -29,7 +31,7 @@ export function ObservabilitySetup({
     setVerifying(true);
     setVerifyError('');
     try {
-      const res = await fetch(`${apiUrl}/api/projects/${project._id}/observability/verify`, {
+      const res = await fetch(\`\${apiUrl}/api/projects/\${project._id}/analytics/verify\`, {
         method: 'POST',
         credentials: "include"
       });
@@ -50,7 +52,7 @@ export function ObservabilitySetup({
     setAiState('analyzing');
     setAiError('');
     try {
-      const res = await fetch(`${apiUrl}/api/projects/${project._id}/observability/analyze`, {
+      const res = await fetch(\`\${apiUrl}/api/projects/\${project._id}/observability/analyze\`, {
         method: 'POST',
         credentials: "include"
       });
@@ -72,7 +74,7 @@ export function ObservabilitySetup({
     setAiState('injecting');
     setAiError('');
     try {
-      const res = await fetch(`${apiUrl}/api/projects/${project._id}/observability/auto-inject`, {
+      const res = await fetch(\`\${apiUrl}/api/projects/\${project._id}/observability/auto-inject\`, {
         method: 'POST',
         credentials: "include"
       });
@@ -109,13 +111,13 @@ export function ObservabilitySetup({
           <div className="flex bg-zinc-900 rounded-md p-1 border border-zinc-800">
             <button 
               onClick={() => setActiveTab('next')}
-              className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeTab === 'next' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+              className={\`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors \${activeTab === 'next' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}\`}
             >
               Next.js
             </button>
             <button 
               onClick={() => setActiveTab('express')}
-              className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeTab === 'express' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+              className={\`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors \${activeTab === 'express' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}\`}
             >
               Node.js / Express
             </button>
@@ -134,7 +136,7 @@ export function ObservabilitySetup({
               <div className="flex items-center bg-[#1a1a1a] px-3 py-2 border-b border-zinc-800">
                 <span className="text-[12px] text-zinc-400 font-medium bg-zinc-800/50 px-2 py-0.5 rounded">Terminal</span>
                 <button onClick={() => {
-                  navigator.clipboard.writeText(`npm install @swapnil454/tracepilot`);
+                  navigator.clipboard.writeText(\`npm install @swapnil454/tracepilot\`);
                   setCopiedBackend(true);
                   setTimeout(() => setCopiedBackend(false), 2000);
                 }} className="ml-auto text-zinc-400 hover:text-white transition-colors">
@@ -342,3 +344,6 @@ export function ObservabilitySetup({
     </div>
   );
 }
+`;
+
+fs.writeFileSync('client/components/observability/ObservabilitySetup.tsx', content);
