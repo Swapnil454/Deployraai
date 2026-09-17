@@ -55,7 +55,7 @@ router.post('/traces/v1/traces', async (req, res) => {
 });
 
 // Unauthenticated RUM Ingestion Endpoint
-router.post('/rum/v1/rum', async (req, res) => {
+router.post(['/rum/v1/rum', '/traces/v1/rum'], async (req, res) => {
   try {
     let authHeader = req.headers.authorization || '';
     
