@@ -19,7 +19,13 @@ if (INGESTOR_URL.includes(process.env.RENDER_EXTERNAL_URL || 'deployraai.onrende
 // The tracepilot SDK sends POST to /api/observability/traces/v1/traces
 router.post('/traces/v1/traces', async (req, res) => {
   try {
+    console.log("Observability Proxy received headers:", req.headers);
     let authHeader = req.headers.authorization || '';
+    
+    // Fallback to x-tracepilot-project-id for frontend React SDK
+    if (!authHeader && req.headers['x-tracepilot-project-id']) {
+      authHeader = `Bearer ${req.headers['x-tracepilot-project-id']}`;
+    }
     
     // If tracepilot sends the service name, resolve it to the project's JWT token
     if (authHeader.startsWith('Bearer ')) {
