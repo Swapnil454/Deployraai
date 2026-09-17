@@ -88,11 +88,12 @@ export const connectProvider = async (req, res) => {
   }
 
   const state = crypto.randomBytes(16).toString("hex");
-  let returnTo = req.query.returnTo || `${process.env.FRONTEND_URL}/dashboard`;
+  let returnTo = req.query.returnTo || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard`;
   
   // Prevent Open Redirect: Ensure returnTo begins with the configured FRONTEND_URL
-  if (!returnTo.startsWith(process.env.FRONTEND_URL)) {
-    returnTo = `${process.env.FRONTEND_URL}/dashboard`;
+  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+  if (!returnTo.startsWith(FRONTEND_URL)) {
+    returnTo = `${FRONTEND_URL}/dashboard`;
   }
   
   res.cookie(`oauth_state_${provider}`, state, { httpOnly: true, maxAge: 10 * 60 * 1000 });
@@ -111,11 +112,12 @@ export const callbackProvider = async (req, res) => {
   const { code, state, error, error_description } = req.query;
   const config = getOauthProviders()[provider];
 
-  let returnTo = req.cookies[`oauth_return_${provider}`] || process.env.FRONTEND_URL;
+  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+  let returnTo = req.cookies[`oauth_return_${provider}`] || FRONTEND_URL;
   const storedState = req.cookies[`oauth_state_${provider}`];
   
-  if (!returnTo.startsWith(process.env.FRONTEND_URL)) {
-    returnTo = process.env.FRONTEND_URL;
+  if (!returnTo.startsWith(FRONTEND_URL)) {
+    returnTo = FRONTEND_URL;
   }
 
   // Clear cookies

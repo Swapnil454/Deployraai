@@ -736,7 +736,7 @@ export const explainDeploymentError = async (req, res) => {
     }
 
     if (!process.env.GEMINI_API_KEY) {
-       return res.status(500).json({ error: "AI Provider not configured. Please add GEMINI_API_KEY." });
+       return res.status(400).json({ error: "AI Provider not configured. Please add GEMINI_API_KEY." });
     }
 
     const sanitizedLogs = sanitizeDeploymentLogs(deployment.logs || []);

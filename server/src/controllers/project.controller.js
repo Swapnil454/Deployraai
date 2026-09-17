@@ -166,7 +166,13 @@ export const analyzeProject = async (req, res) => {
     if (error.response?.status === 401 || error.message.includes("token missing")) {
       return res.status(401).json({ error: "GitHub connection expired. Please reconnect GitHub." });
     }
-    res.status(500).json({ error: "Failed to analyze project" });
+    if (error.response?.status === 404) {
+      return res.status(400).json({ error: "Repository or branch not found on GitHub. Please check your spelling and permissions." });
+    }
+    if (error.response?.status === 403) {
+      return res.status(400).json({ error: "GitHub rate limit exceeded or access denied." });
+    }
+    res.status(400).json({ error: "Failed to analyze project. Please try again." });
   }
 };
 

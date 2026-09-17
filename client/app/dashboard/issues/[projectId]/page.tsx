@@ -57,7 +57,7 @@ export default function IssueInboxPage() {
     return <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">Open</Badge>;
   }
 
-  if (project && !project.analytics?.verified) {
+  if (project && !project.observability?.verified) {
     return (
       <div className="flex flex-col min-h-[calc(100vh-64px)] bg-[#050505] text-zinc-200 pb-20 font-sans p-6 pt-12">
         <ObservabilitySetup project={project} onVerified={fetchIssues} />

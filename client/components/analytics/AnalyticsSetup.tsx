@@ -3,19 +3,16 @@
 import { useState } from 'react';
 import { Check, Copy, Terminal, ExternalLink, Loader2, ArrowRight, Play, Eye } from 'lucide-react';
 
-export function ObservabilitySetup({ 
+export function AnalyticsSetup({ 
   project, 
   onVerified 
 }: { 
   project: any, 
   onVerified: () => void 
 }) {
-  const [copiedBackend, setCopiedBackend] = useState(false);
+  const [copiedFrontend, setCopiedFrontend] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState('');
-  
-  // Tabs for different framework instructions
-  const [activeTab, setActiveTab] = useState<'next' | 'express'>('next');
   
   // AI Flow States: idle -> analyzing -> review -> injecting -> success
   const [aiState, setAiState] = useState<'idle' | 'analyzing' | 'review' | 'injecting' | 'success'>('idle');
@@ -29,7 +26,7 @@ export function ObservabilitySetup({
     setVerifying(true);
     setVerifyError('');
     try {
-      const res = await fetch(`${apiUrl}/api/projects/${project._id}/observability/verify`, {
+      const res = await fetch(`${apiUrl}/api/projects/${project._id}/analytics/verify`, {
         method: 'POST',
         credentials: "include"
       });
@@ -37,7 +34,7 @@ export function ObservabilitySetup({
       if (res.ok && data.verified) {
         onVerified();
       } else {
-        setVerifyError(data.message || "Verification failed. Please ensure your backend is deployed and receiving traffic.");
+        setVerifyError(data.message || "Verification failed. Please ensure the code is deployed and you've visited the site.");
       }
     } catch (err: any) {
       setVerifyError(err.message || "An error occurred during verification.");
@@ -50,7 +47,7 @@ export function ObservabilitySetup({
     setAiState('analyzing');
     setAiError('');
     try {
-      const res = await fetch(`${apiUrl}/api/projects/${project._id}/observability/analyze`, {
+      const res = await fetch(`${apiUrl}/api/projects/${project._id}/analytics/analyze`, {
         method: 'POST',
         credentials: "include"
       });
@@ -72,7 +69,7 @@ export function ObservabilitySetup({
     setAiState('injecting');
     setAiError('');
     try {
-      const res = await fetch(`${apiUrl}/api/projects/${project._id}/observability/auto-inject`, {
+      const res = await fetch(`${apiUrl}/api/projects/${project._id}/analytics/auto-inject`, {
         method: 'POST',
         credentials: "include"
       });
@@ -93,56 +90,39 @@ export function ObservabilitySetup({
   return (
     <div className="bg-black border border-zinc-800 rounded-lg overflow-hidden">
       <div className="border-b border-zinc-800 bg-[#111] p-6 lg:p-8">
-        <h3 className="text-xl font-semibold text-white mb-2">Setup Observability SDK</h3>
-        <p className="text-zinc-400 text-[14px]">Install the Tracepilot SDK to collect Traces, Logs, and Infrastructure metrics.</p>
+        <h3 className="text-xl font-semibold text-white mb-2">Setup Web Analytics</h3>
+        <p className="text-zinc-400 text-[14px]">Choose how you want to install the tracking script.</p>
       </div>
 
       <div className="p-6 lg:p-8">
         
         {/* Manual Instructions */}
-        <div className="mb-6 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-zinc-500 text-[13px] font-medium">
-            <Terminal className="h-4 w-4" />
-            MANUAL SETUP
-          </div>
-          
-          <div className="flex bg-zinc-900 rounded-md p-1 border border-zinc-800">
-            <button 
-              onClick={() => setActiveTab('next')}
-              className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeTab === 'next' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
-            >
-              Next.js
-            </button>
-            <button 
-              onClick={() => setActiveTab('express')}
-              className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeTab === 'express' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
-            >
-              Node.js / Express
-            </button>
-          </div>
+        <div className="mb-6 flex items-center gap-2 text-zinc-500 text-[13px] font-medium">
+          <Terminal className="h-4 w-4" />
+          MANUAL SETUP
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-[#111] border border-zinc-800 rounded-lg p-6 flex flex-col">
             <div className="flex items-center gap-3 mb-4">
               <div className="h-6 w-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">1</div>
-              <h4 className="text-white font-medium">Install SDK</h4>
+              <h4 className="text-white font-medium">Add Script Tag</h4>
             </div>
-            <p className="text-[13px] text-zinc-400 mb-4 flex-1">Install the tracepilot package using npm, yarn, or pnpm.</p>
+            <p className="text-[13px] text-zinc-400 mb-4 flex-1">Copy and paste this script into the <code>&lt;head&gt;</code> of your application's layout file.</p>
             
             <div className="bg-black border border-zinc-800 rounded-md overflow-hidden mt-auto">
               <div className="flex items-center bg-[#1a1a1a] px-3 py-2 border-b border-zinc-800">
-                <span className="text-[12px] text-zinc-400 font-medium bg-zinc-800/50 px-2 py-0.5 rounded">Terminal</span>
+                <span className="text-[12px] text-zinc-400 font-medium bg-zinc-800/50 px-2 py-0.5 rounded">HTML</span>
                 <button onClick={() => {
-                  navigator.clipboard.writeText(`npm install @swapnil454/tracepilot`);
-                  setCopiedBackend(true);
-                  setTimeout(() => setCopiedBackend(false), 2000);
+                  navigator.clipboard.writeText(`<script defer src="${window.location.origin}/analytics.js" data-tracking-id="${project.analytics?.trackingId}"></script>`);
+                  setCopiedFrontend(true);
+                  setTimeout(() => setCopiedFrontend(false), 2000);
                 }} className="ml-auto text-zinc-400 hover:text-white transition-colors">
-                  {copiedBackend ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedFrontend ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                 </button>
               </div>
-              <div className="p-3 overflow-x-auto text-[12px] font-mono text-zinc-300 whitespace-nowrap">
-                npm install @swapnil454/tracepilot
+              <div className="p-3 overflow-x-auto text-[12px] font-mono text-zinc-300">
+                &lt;script defer src="{window.location.origin}/analytics.js" data-tracking-id="{project.analytics?.trackingId}"&gt;&lt;/script&gt;
               </div>
             </div>
           </div>
@@ -150,31 +130,15 @@ export function ObservabilitySetup({
           <div className="bg-[#111] border border-zinc-800 rounded-lg p-6 flex flex-col">
             <div className="flex items-center gap-3 mb-4">
               <div className="h-6 w-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">2</div>
-              <h4 className="text-white font-medium">Configure SDK</h4>
+              <h4 className="text-white font-medium">Find your layout</h4>
             </div>
-            <p className="text-[13px] text-zinc-400 mb-4 flex-1">
-              {activeTab === 'next' ? (
-                <span>Create an <code>instrumentation.ts</code> file in the root of your project.</span>
-              ) : (
-                <span>Add this to the very top of your <code>index.js</code> or <code>app.js</code> file.</span>
-              )}
-            </p>
+            <p className="text-[13px] text-zinc-400 mb-4 flex-1">Depending on your framework, the layout file is usually located at:</p>
             
             <div className="bg-black border border-zinc-800 rounded-md overflow-hidden mt-auto">
                <div className="p-3 text-[12px] font-mono text-zinc-300 leading-loose">
-                 {activeTab === 'next' ? (
-                   <>
-                     <span className="text-purple-400">instrumentation.ts:</span><br/>
-                     import &#123; registerOTel &#125; from '@swapnil454/tracepilot/next';<br/>
-                     export function register() &#123; registerOTel(); &#125;
-                   </>
-                 ) : (
-                   <>
-                     <span className="text-purple-400">index.js:</span><br/>
-                     const &#123; registerOTel &#125; = require('@swapnil454/tracepilot/node');<br/>
-                     registerOTel();
-                   </>
-                 )}
+                 <span className="text-purple-400">Next.js (App Router):</span> app/layout.tsx<br/>
+                 <span className="text-purple-400">Next.js (Pages Router):</span> pages/_document.tsx<br/>
+                 <span className="text-purple-400">React/Vite/Other:</span> index.html
                </div>
             </div>
           </div>
@@ -185,7 +149,7 @@ export function ObservabilitySetup({
               <h4 className="text-white font-medium">Deploy & Verify</h4>
             </div>
             <p className="text-[13px] text-zinc-400 leading-relaxed mb-6 flex-1">
-              Deploy your changes and visit the deployment to start collecting traces and logs.<br/>
+              Deploy your changes and visit the deployment to start collecting data.<br/>
             </p>
             <div className="mt-auto">
               <button 
@@ -221,10 +185,10 @@ export function ObservabilitySetup({
                     className="bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-white font-medium px-4 py-2 rounded-md transition-colors flex items-center gap-2"
                   >
                     <img src="/ai-icon.svg" alt="AI" className="w-5 h-5 object-contain" />
-                    <span className="text-[13px]">Analyze Backend Project</span>
+                    <span className="text-[13px]">Analyze Project</span>
                   </button>
                   <p className="text-[13px] text-zinc-400 mt-6 max-w-md text-center">
-                    Let DeployAI analyze your repository and automatically add the <strong>@swapnil454/tracepilot</strong> dependency and configuration to your backend.
+                    Let DeployAI analyze your repository and figure out the exact entry point to automatically configure Web Analytics for you.
                   </p>
                   {aiError && (
                      <div className="mt-4 text-red-400 text-[13px] bg-red-500/10 p-3 px-5 rounded-md border border-red-500/20 text-center max-w-lg">
@@ -237,8 +201,8 @@ export function ObservabilitySetup({
             {aiState === 'analyzing' && (
               <div className="p-8 flex flex-col items-center justify-center min-h-[250px]">
                  <Loader2 className="h-8 w-8 animate-spin text-zinc-400 mb-4" />
-                 <p className="text-zinc-300 font-medium text-sm">Analyzing Backend Configuration...</p>
-                 <p className="text-zinc-500 text-xs mt-2">Detecting framework and package.json location</p>
+                 <p className="text-zinc-300 font-medium text-sm">Analyzing Project Structure...</p>
+                 <p className="text-zinc-500 text-xs mt-2">Connecting to GitHub to detect framework and layout files</p>
               </div>
             )}
 
@@ -302,7 +266,7 @@ export function ObservabilitySetup({
                 </p>
                 <div className="bg-black border border-zinc-800 p-4 rounded-md mb-6">
                   <p className="text-[14px] text-zinc-400">
-                    Successfully injected SDK code into <code className="text-zinc-200">{injectResult.file}</code>.
+                    Successfully injected Web Analytics script into <code className="text-zinc-200">{injectResult.file}</code>.
                   </p>
                 </div>
                 

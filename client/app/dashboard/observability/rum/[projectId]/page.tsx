@@ -230,7 +230,7 @@ export default function RumDashboard() {
   // Show setup wizard only when the project has never sent any data.
   // If there IS data but the project isn't marked verified, we still show the dashboard.
   const hasAnyData = vitals.length > 0 || sessions.length > 0;
-  if (project && !project.analytics?.verified && !hasAnyData && !loading) {
+  if (project && !project.observability?.verified && !hasAnyData && !loading) {
     return (
       <div className="min-h-[calc(100vh-64px)] bg-[#050505] text-zinc-200 font-sans p-6 pt-12">
         <ObservabilitySetup project={project} onVerified={fetchData} />
