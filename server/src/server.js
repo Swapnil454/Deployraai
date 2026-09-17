@@ -32,7 +32,7 @@ try {
 }
 
 // ── Startup environment guard ────────────────────────────────────────────────
-const REQUIRED_ENV = ["JWT_SECRET", "MONGO_URI"];
+const REQUIRED_ENV = ["JWT_SECRET", "MONGO_URI", "DATABASE_URL", "CLICKHOUSE_URL"];
 const missingEnv = REQUIRED_ENV.filter((k) => !process.env[k]);
 if (missingEnv.length > 0) {
   console.error(`[FATAL] Missing required environment variables: ${missingEnv.join(", ")}`);
