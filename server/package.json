@@ -4,7 +4,6 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "cd ../packages/ingestor && npm install && npm run build && cd ../analytics-api && npm install && npm run build",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js"
   },
