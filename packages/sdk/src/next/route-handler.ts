@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withSpan } from '../core/span';
+import { getConfig } from '../core/config';
 
 type Handler = (req: NextRequest, ctx?: any) => Promise<NextResponse>;
 
