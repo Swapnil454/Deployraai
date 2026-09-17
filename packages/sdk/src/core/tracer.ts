@@ -3,10 +3,13 @@ import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_DEPLOYMENT_ENVIRONMENT_NAME } from '@opentelemetry/semantic-conventions';
 import { BatchSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-trace-base';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
+import { PeriodicExportingMetricReader, ConsoleMetricExporter } from '@opentelemetry/sdk-metrics';
+import { HostMetrics } from '@opentelemetry/host-metrics';
 import { getConfig, isEnabled } from './config';
-import { createExporter } from './transport';
+import { createExporter, createMetricExporter } from './transport';
 
 let sdk: NodeSDK | null = null;
+let hostMetrics: HostMetrics | null = null;
 
 export function initTracer() {
   if (!isEnabled()) return;
@@ -20,6 +23,12 @@ export function initTracer() {
   if (config.debug) {
     exporters.push(new ConsoleSpanExporter() as any);
   }
+
+  const metricExporter = createMetricExporter();
+  const metricReader = new PeriodicExportingMetricReader({
+    exporter: config.debug ? (new ConsoleMetricExporter() as any) : metricExporter,
+    exportIntervalMillis: 10000, // Export metrics every 10 seconds
+  });
 
   sdk = new NodeSDK({
     resource: new Resource({
@@ -36,6 +45,7 @@ export function initTracer() {
       exportTimeoutMillis: 5000,
       maxExportBatchSize: 128,
     }) as any),
+    metricReader: metricReader as any,
     instrumentations: [
       // Auto-instruments all Node.js http/https calls
       new HttpInstrumentation({
@@ -48,6 +58,10 @@ export function initTracer() {
   });
 
   sdk.start();
+  
+  // Start host metrics collection using the global meter provider configured by NodeSDK
+  hostMetrics = new HostMetrics({ name: 'host-metrics' });
+  hostMetrics.start();
 
   // Graceful shutdown — flush remaining spans before process exits
   process.on('SIGTERM', () => sdk?.shutdown());
