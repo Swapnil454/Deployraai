@@ -6,6 +6,30 @@ import http from "http";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import HumanSupportCase from "./models/HumanSupportCase.js";
+import { fork } from "child_process";
+import path from "path";
+import { fileURLToPath } from "url";
+import fs from "fs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Spawn microservices (ingestor and analytics-api) if they exist
+try {
+  const ingestorPath = path.join(__dirname, '../../packages/ingestor/dist/index.js');
+  const analyticsPath = path.join(__dirname, '../../packages/analytics-api/dist/index.js');
+  
+  if (fs.existsSync(ingestorPath)) {
+      fork(ingestorPath, [], { env: { ...process.env, PORT: '4317' } });
+      console.log("[System] Started embedded ingestor on port 4317");
+  }
+  if (fs.existsSync(analyticsPath)) {
+      fork(analyticsPath, [], { env: { ...process.env, PORT: '4318' } });
+      console.log("[System] Started embedded analytics-api on port 4318");
+  }
+} catch (e) {
+  console.error("[System] Failed to spawn microservices:", e.message);
+}
 
 // ── Startup environment guard ────────────────────────────────────────────────
 const REQUIRED_ENV = ["JWT_SECRET", "MONGO_URI"];

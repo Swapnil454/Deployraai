@@ -4,20 +4,39 @@ import { requireAuth, verifyProjectOwnership } from '../middleware/auth.middlewa
 import Project from '../models/Project.js';
 
 const router = express.Router();
-const ANALYTICS_API_URL = process.env.ANALYTICS_API_URL || 'http://localhost:4318';
-const INGESTOR_URL = process.env.INGESTOR_URL || 'http://localhost:4317';
+let ANALYTICS_API_URL = process.env.ANALYTICS_API_URL || 'http://localhost:4318';
+let INGESTOR_URL = process.env.INGESTOR_URL || 'http://localhost:4317';
+
+// If deployed on Render and they mistakenly pointed the URLs to the main Express app, force localhost since we now auto-spawn them.
+if (ANALYTICS_API_URL.includes(process.env.RENDER_EXTERNAL_URL || 'deployraai.onrender.com')) {
+  ANALYTICS_API_URL = 'http://localhost:4318';
+}
+if (INGESTOR_URL.includes(process.env.RENDER_EXTERNAL_URL || 'deployraai.onrender.com')) {
+  INGESTOR_URL = 'http://localhost:4317';
+}
 
 // Unauthenticated Trace Ingestion Endpoint
 // The tracepilot SDK sends POST to /api/observability/traces/v1/traces
 router.post('/traces/v1/traces', async (req, res) => {
   try {
+    let authHeader = req.headers.authorization || '';
+    
+    // If tracepilot sends the service name, resolve it to the project's JWT token
+    if (authHeader.startsWith('Bearer ')) {
+      const possibleName = authHeader.replace('Bearer ', '').trim();
+      const project = await Project.findOne({ repoName: possibleName });
+      if (project?.analytics?.trackingId) {
+        authHeader = `Bearer ${project.analytics.trackingId}`;
+      }
+    }
+
     const targetUrl = `${INGESTOR_URL}/v1/traces`;
     const response = await axios({
       method: req.method,
       url: targetUrl,
       data: req.body,
       headers: {
-        Authorization: req.headers.authorization || '',
+        Authorization: authHeader,
         'Content-Type': 'application/json',
       },
       timeout: 5000,
