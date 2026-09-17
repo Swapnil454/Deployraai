@@ -16,18 +16,26 @@ export async function checkUsageCap(req: any, reply: any) {
   const capCacheKey = `cache:monthly_span_cap:${projectId}`;
   let monthly_span_cap: number | null = null;
   
-  const cachedCap = await redis.get(capCacheKey);
-  if (cachedCap !== null) {
-    monthly_span_cap = parseInt(cachedCap, 10);
-  } else {
+  try {
+    const cachedCap = await redis.get(capCacheKey);
+    if (cachedCap !== null) {
+      monthly_span_cap = parseInt(cachedCap, 10);
+    } else {
+      const project = await db.query(
+        'SELECT monthly_span_cap FROM projects WHERE id = $1', [projectId]
+      );
+      if (!project.rows[0]) return;
+      
+      monthly_span_cap = project.rows[0].monthly_span_cap;
+      await redis.set(capCacheKey, monthly_span_cap ? monthly_span_cap.toString() : '0', 'EX', 300);
+    }
+  } catch (err) {
+    console.warn("Redis unavailable in checkUsageCap (cap fetch):", err.message);
     const project = await db.query(
       'SELECT monthly_span_cap FROM projects WHERE id = $1', [projectId]
     );
     if (!project.rows[0]) return;
-    
     monthly_span_cap = project.rows[0].monthly_span_cap;
-    // Cache for 5 minutes (300 seconds)
-    await redis.set(capCacheKey, monthly_span_cap ? monthly_span_cap.toString() : '0', 'EX', 300);
   }
 
   if (!monthly_span_cap) return; // no cap set — allow
@@ -35,7 +43,12 @@ export async function checkUsageCap(req: any, reply: any) {
   const monthKey = getMonthKey();
   const cacheKey = `usage:spans:${projectId}:${monthKey}`;
   
-  let used = await redis.get(cacheKey);
+  let used: string | null = null;
+  try {
+    used = await redis.get(cacheKey);
+  } catch (err) {
+    console.warn("Redis unavailable in checkUsageCap (usage fetch):", err.message);
+  }
   
   // If not in cache, fallback to clickhouse query (not postgres) or just let it pass until sync runs
   // A "best-effort" approach: if redis misses, we allow the request but trigger a background sync.
@@ -62,12 +75,19 @@ export async function checkUsageCap(req: any, reply: any) {
     spanCount = 1; // default fallback
   }
 
+  let currentCount = 0;
   // Increment in Redis (will be corrected by hourly sync)
-  const currentCount = await redis.incrby(cacheKey, spanCount);
-  
-  if (used === null) {
-    // If we just created the key, give it a TTL of 32 days so it auto-expires after the month ends
-    await redis.expire(cacheKey, 32 * 24 * 60 * 60);
+  try {
+    currentCount = await redis.incrby(cacheKey, spanCount);
+    
+    if (used === '0') {
+      // If we just created the key, give it a TTL of 32 days so it auto-expires after the month ends
+      await redis.expire(cacheKey, 32 * 24 * 60 * 60);
+    }
+  } catch (err) {
+    console.warn("Redis unavailable in checkUsageCap (incrby):", err.message);
+    // Let it pass if redis is down
+    return;
   }
   
   // Enforce at 105% buffer to account for sync lag and avoid false positives
