@@ -1,6 +1,6 @@
 {
   "name": "@swapnil454/tracepilot",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Zero-config OpenTelemetry auto-instrumentation for Next.js and Express",
   "keywords": [
     "opentelemetry",
@@ -35,6 +35,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/express/index.d.ts",
+      "import": "./dist/express/index.mjs",
+      "require": "./dist/express/index.js"
     },
     "./next": {
       "types": "./dist/next/index.d.ts",
