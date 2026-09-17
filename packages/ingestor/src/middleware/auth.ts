@@ -28,9 +28,15 @@ export async function validateProjectToken(req: FastifyRequest, reply: FastifyRe
     const token = authHeader.slice(7);
     const payload = jwt.verify(token, process.env.INGESTOR_JWT_SECRET || 'secret') as any;
     
-    // Check Redis Cache to avoid expensive bcrypt.compare on every request
-    const cacheKey = `token:valid:${payload.projectId}`;
-    const cached = await redis.get(cacheKey);
+    let cached: string | null = null;
+    try {
+      // Check Redis Cache to avoid expensive bcrypt.compare on every request
+      const cacheKey = `token:valid:${payload.projectId}`;
+      cached = await redis.get(cacheKey);
+    } catch (redisErr) {
+      // Ignore Redis connection errors so we can fallback to the database
+      console.warn("Redis cache unavailable for token validation:", redisErr.message);
+    }
 
     if (!cached) {
       let isValid = false;
@@ -59,7 +65,10 @@ export async function validateProjectToken(req: FastifyRequest, reply: FastifyRe
       }
 
       // Cache the validation success for 5 minutes
-      await redis.set(cacheKey, '1', 'EX', 300);
+      try {
+        const cacheKey = `token:valid:${payload.projectId}`;
+        await redis.set(cacheKey, '1', 'EX', 300);
+      } catch (e) {}
     }
 
     // Attach auth context
@@ -68,6 +77,7 @@ export async function validateProjectToken(req: FastifyRequest, reply: FastifyRe
       deployId: 'dynamic-deploy-id' // Could be extracted from headers if SDK passes it
     };
   } catch (err) {
+    console.error("Token validation error:", err.message);
     reply.status(401).send({ error: 'Invalid or expired token' });
     return;
   }
