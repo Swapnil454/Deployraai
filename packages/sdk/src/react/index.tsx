@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { WebTracerProvider } from '@opentelemetry/sdk-trace-web';
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-web';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { Resource } from '@opentelemetry/resources';
 import { trace, context, SpanStatusCode } from '@opentelemetry/api';
@@ -101,6 +101,16 @@ export function TracePilotProvider({
       onTTFB(reportVitals, { reportAllChanges: true });
     }
 
+    // --- 2.5 ALWAYS FLUSH TRACES ON VISIBILITY CHANGE ---
+    const handleTraceFlushOnHide = () => {
+      if (document.visibilityState === 'hidden') {
+        webProvider.forceFlush().catch(console.error);
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleTraceFlushOnHide);
+    }
+
     // --- 3. SESSION REPLAY (rrweb) ---
     let stopFn: (() => void) | undefined;
     let flushInterval: any;
@@ -182,8 +192,11 @@ export function TracePilotProvider({
       webProvider.forceFlush().catch(console.error);
       if (stopFn) stopFn();
       if (flushInterval) clearInterval(flushInterval);
-      if (typeof document !== 'undefined' && handleVisibilityChange) {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (typeof document !== 'undefined') {
+        if (handleVisibilityChange) {
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+        }
+        document.removeEventListener('visibilitychange', handleTraceFlushOnHide);
       }
       __flushRRWebEvents = null;
     };

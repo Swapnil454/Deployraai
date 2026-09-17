@@ -115,7 +115,7 @@ export const tracesRumRouter: FastifyPluginAsync = async (app) => {
           WHERE project_id = {projectId: String}
             AND name = 'web-vitals'
             AND start_time >= now() - INTERVAL ${chInterval}
-            AND attributes['web.vital.name'] IN ('LCP', 'INP', 'CLS')
+            AND attributes['web.vital.name'] IN ('LCP', 'INP', 'CLS', 'FCP', 'TTFB')
           GROUP BY bucket, metric
           ORDER BY bucket ASC
         `,
