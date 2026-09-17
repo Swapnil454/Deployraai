@@ -564,22 +564,28 @@ export const verifyObservability = async (req, res) => {
       const cookieToken = req.cookies?.[cookieName];
       const authHeader = cookieToken ? `Bearer ${cookieToken}` : (req.headers.authorization || '');
       
-      const traceApiUrl = `${ANALYTICS_API_URL}/api/observability/traces`;
+      const traceApiUrl = `${ANALYTICS_API_URL}/traces`;
       console.log(`[VerifyObservability] Querying trace API at: ${traceApiUrl}`);
       console.log(`[VerifyObservability] Params: projectId=${project.slug || projectId}`);
       
-      const response = await axios.get(traceApiUrl, {
-        params: { projectId: project.slug || projectId }, // Try slug first, fallback to id
-        headers: { Authorization: authHeader },
-        timeout: 10000
-      });
+      let tracesVerified = false;
+      try {
+        const response = await axios.get(traceApiUrl, {
+          params: { projectId: project.slug || projectId },
+          headers: { Authorization: authHeader },
+          timeout: 5000
+        });
+        const traces = response.data?.traces || response.data || [];
+        if (Array.isArray(traces) && traces.length > 0) tracesVerified = true;
+      } catch (err) {
+        console.warn(`[VerifyObservability] Trace check failed (ClickHouse offline?):`, err.message);
+      }
 
-      // Simple heuristic: if we got traces back, it's verified
-      const traces = response.data?.traces || response.data || [];
-      console.log(`[VerifyObservability] Trace API Response Status: ${response.status}`);
-      console.log(`[VerifyObservability] Parsed Traces Count: ${Array.isArray(traces) ? traces.length : 'Not an array'}`, response.data);
+      // Check RUM as a fallback. If they installed the frontend SDK, they are verified.
+      const AnalyticsEvent = (await import("../models/AnalyticsEvent.js")).default;
+      const hasRum = await AnalyticsEvent.exists({ projectId: project._id });
 
-      if (Array.isArray(traces) && traces.length > 0) {
+      if (tracesVerified || hasRum) {
         if (!project.observability) project.observability = {};
         project.observability.verified = true;
         await project.save();
