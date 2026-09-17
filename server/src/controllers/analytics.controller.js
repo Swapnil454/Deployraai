@@ -406,10 +406,10 @@ Prepend the following code at the absolute top of the file (before any other imp
 \`\`\`javascript
 process.env.OTEL_EXPORTER_OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || '\${process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "https://api.deployai.in"}/api/observability/traces';
 process.env.OTEL_SERVICE_NAME = '${project.repoName}';
-const { registerOTel } = require('@swapnil1454/tracepilot/node');
+const { registerOTel } = require('@swapnil454/tracepilot/node');
 registerOTel();
 \`\`\`
-Note: If the file uses ES6 modules (import), use \`import { registerOTel } from '@swapnil1454/tracepilot/node';\` instead of require, but KEEP the process.env assignments BEFORE any other code.
+Note: If the file uses ES6 modules (import), use \`import { registerOTel } from '@swapnil454/tracepilot/node';\` instead of require, but KEEP the process.env assignments BEFORE any other code.
 CRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javascript blocks.`;
 
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
