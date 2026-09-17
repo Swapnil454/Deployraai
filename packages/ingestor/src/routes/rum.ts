@@ -7,11 +7,14 @@ import jwt from 'jsonwebtoken';
 
 export const rumRouter: FastifyPluginAsync = async (app) => {
   app.post('/', async (req, reply) => {
-    const token = req.headers['authorization']?.replace('Bearer ', '') || req.headers['x-tracepilot-project-id'] || req.headers['x-rum-key'];
+    let token = req.headers['authorization']?.replace('Bearer ', '') || req.headers['x-tracepilot-project-id'] || req.headers['x-rum-key'];
+    if (Array.isArray(token)) token = token[0];
     
     if (!token) {
       return reply.status(401).send({ error: 'Missing token' });
     }
+    
+    token = token as string;
 
     try {
       const { sessionId, events, sequence_num = 0, url, user_agent } = req.body as any;
