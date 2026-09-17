@@ -224,11 +224,11 @@ CRITICAL: Return ONLY the raw new file content. Do NOT wrap it in markdown forma
     await trackAiUsage(userId, projectId, 'analytics_insight');
 
     let newContent = result.response.text().trim();
-    if (newContent.startsWith("\`\`\`")) {
-       const lines = newContent.split("\n");
-       lines.shift();
-       if (lines.length > 0 && lines[lines.length - 1].startsWith("\`\`\`")) lines.pop();
-       newContent = lines.join("\n");
+    const blockMatch = newContent.match(/```[a-z]*\n([\s\S]*?)```/);
+    if (blockMatch) {
+       newContent = blockMatch[1].trim();
+    } else {
+       newContent = newContent.replace(/^```[a-z]*\n/, "").replace(/```$/, "").trim();
     }
 
     if (newContent === entryFile.content) return res.status(400).json({ error: "AI failed to modify the file." });
@@ -286,56 +286,104 @@ export const autoInjectObservability = async (req, res) => {
     const newBranchName = `deployai/observability-inject-${timestamp}`;
     await github.createBranch(repoOwner, repoName, newBranchName, defaultSha);
 
-    let backendPkgPath = "package.json";
     const backendRoot = project.analysis?.backend?.path || ".";
-    if (backendRoot !== ".") {
-       backendPkgPath = `${backendRoot}/package.json`;
-    }
+    const getPath = (p) => backendRoot !== "." ? `${backendRoot}/${p}` : p;
     
-    const pkgFile = await github.getFileContent(repoOwner, repoName, backendPkgPath, newBranchName).catch(() => null);
-    if (!pkgFile) return res.status(400).json({ error: "Could not find package.json in backend directory." });
+    // 1. Language Detection (Fix: Check Backend specific files first to avoid Monorepo collision)
+    const [pkgFile, reqFile, pyprojectFile, goModFile] = await Promise.all([
+      github.getFileContent(repoOwner, repoName, getPath("package.json"), newBranchName).catch(() => null),
+      github.getFileContent(repoOwner, repoName, getPath("requirements.txt"), newBranchName).catch(() => null),
+      github.getFileContent(repoOwner, repoName, getPath("pyproject.toml"), newBranchName).catch(() => null),
+      github.getFileContent(repoOwner, repoName, getPath("go.mod"), newBranchName).catch(() => null)
+    ]);
+
+    let language = "unknown";
+    let pkgJson = null;
+
+    // Fix: Prioritize explicit backend markers (reqFile, goModFile) over generic package.json in case of Monorepo
+    if (reqFile || pyprojectFile) {
+      language = "python";
+    } else if (goModFile) {
+      language = "go";
+    } else if (pkgFile) {
+      language = "node";
+      try { pkgJson = JSON.parse(pkgFile.content); } catch (e) {}
+      if (pkgJson) {
+         const hasReact = !!(pkgJson.dependencies?.react || pkgJson.devDependencies?.react);
+         const hasNext = !!(pkgJson.dependencies?.next || pkgJson.devDependencies?.next);
+         const hasExpress = !!(pkgJson.dependencies?.express || pkgJson.devDependencies?.express);
+         
+         if (hasReact && !hasNext && !hasExpress) {
+           language = "react"; // Pure SPA
+         } else if (hasNext) {
+           language = "next";
+         } else {
+           language = "express"; // Fallback to express/node
+         }
+      }
+    }
+
+    if (language === "unknown") {
+      return res.status(400).json({ error: "Could not detect language. Supported files not found (package.json, requirements.txt, pyproject.toml, go.mod)." });
+    }
 
     if (!process.env.GEMINI_API_KEY) return res.status(400).json({ error: "AI Provider not configured. Please add GEMINI_API_KEY." });
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    // 1. Natively parse package.json and inject dependency
-    const pkgJson = JSON.parse(pkgFile.content);
-    if (!pkgJson.dependencies) pkgJson.dependencies = {};
-    pkgJson.dependencies["@swapnil454/tracepilot"] = "^0.1.2";
-    const newPkgContent = JSON.stringify(pkgJson, null, 2);
+    const extractCodeBlock = (text) => {
+      const blockMatch = text.match(/```[a-z]*\n([\s\S]*?)```/);
+      return blockMatch ? blockMatch[1].trim() : text.replace(/^```.*\n/, "").replace(/```$/, "").trim();
+    };
 
     const treeEntries = [];
-    const modifiedFiles = [backendPkgPath];
+    const modifiedFiles = [];
 
-    const pkgBlobRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/blobs`, { content: newPkgContent, encoding: "utf-8" });
-    treeEntries.push({ path: backendPkgPath, mode: "100644", type: "blob", sha: pkgBlobRes.data.sha });
+    // --- NODE.JS DEPENDENCY INJECTION ---
+    if (["next", "express", "react"].includes(language) && pkgJson && pkgFile) {
+      if (!pkgJson.dependencies) pkgJson.dependencies = {};
+      pkgJson.dependencies["@swapnil454/tracepilot"] = "^0.2.2";
+      const newPkgContent = JSON.stringify(pkgJson, null, 2);
+      const pkgBlobRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/blobs`, { content: newPkgContent, encoding: "utf-8" });
+      treeEntries.push({ path: getPath("package.json"), mode: "100644", type: "blob", sha: pkgBlobRes.data.sha });
+      modifiedFiles.push(getPath("package.json"));
+    }
 
-    const isNext = !!(pkgJson.dependencies.next || (pkgJson.devDependencies && pkgJson.devDependencies.next));
+    // --- PYTHON DEPENDENCY INJECTION ---
+    if (language === "python") {
+      const pyDeps = "opentelemetry-api\nopentelemetry-sdk\nopentelemetry-instrumentation\nopentelemetry-exporter-otlp\nopentelemetry-instrumentation-fastapi\nopentelemetry-instrumentation-flask\n";
+      if (reqFile) {
+         let newReqContent = reqFile.content.trim() + "\n" + pyDeps;
+         const reqBlobRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/blobs`, { content: newReqContent, encoding: "utf-8" });
+         treeEntries.push({ path: getPath("requirements.txt"), mode: "100644", type: "blob", sha: reqBlobRes.data.sha });
+         modifiedFiles.push(getPath("requirements.txt"));
+      } else if (pyprojectFile) {
+         const prompt = `Inject the following dependencies into this pyproject.toml file safely: opentelemetry-api, opentelemetry-sdk, opentelemetry-instrumentation, opentelemetry-exporter-otlp, opentelemetry-instrumentation-fastapi, opentelemetry-instrumentation-flask.\n\nOriginal:\n\`\`\`\n${pyprojectFile.content}\n\`\`\`\nReturn ONLY the modified raw toml file.`;
+         const result = await model.generateContent(prompt);
+         let newContent = extractCodeBlock(result.response.text());
+         const pyBlobRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/blobs`, { content: newContent, encoding: "utf-8" });
+         treeEntries.push({ path: getPath("pyproject.toml"), mode: "100644", type: "blob", sha: pyBlobRes.data.sha });
+         modifiedFiles.push(getPath("pyproject.toml"));
+      }
+    }
 
-    if (isNext) {
-      // 2a. Inject instrumentation.ts for Next.js natively
-      // Check if src directory exists in the repo
-      const srcExists = await github.getFileContent(repoOwner, repoName, backendRoot !== "." ? `${backendRoot}/src` : `src`, newBranchName).catch(() => null);
+    // --- NEXT.JS LOGIC ---
+    if (language === "next") {
+      const srcExists = await github.getFileContent(repoOwner, repoName, getPath("src"), newBranchName).catch(() => null);
       const isSrc = !!srcExists;
       
-      const instrumentationContent = `import { registerOTel } from '@swapnil454/tracepilot/next';\n\nexport function register() {\n  registerOTel();\n}\n`;
-      let instrumentationPath;
-      if (backendRoot !== ".") {
-        instrumentationPath = isSrc ? `${backendRoot}/src/instrumentation.ts` : `${backendRoot}/instrumentation.ts`;
-      } else {
-        instrumentationPath = isSrc ? `src/instrumentation.ts` : `instrumentation.ts`;
-      }
+      const instrumentationContent = `import { initTracer, setupGlobalErrorCapture } from '@swapnil454/tracepilot';\n\nexport function register() {\n  initTracer();\n  setupGlobalErrorCapture();\n}\n`;
+      const instrumentationPath = getPath(isSrc ? "src/instrumentation.ts" : "instrumentation.ts");
 
       const instBlobRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/blobs`, { content: instrumentationContent, encoding: "utf-8" });
       treeEntries.push({ path: instrumentationPath, mode: "100644", type: "blob", sha: instBlobRes.data.sha });
       modifiedFiles.push(instrumentationPath);
 
-      // 2b. Safely enable instrumentationHook via AI in next.config.js/mjs
       const configExts = ['next.config.js', 'next.config.mjs', 'next.config.ts'];
       let nextConfigFile = null;
       let nextConfigPath = null;
       for (const ext of configExts) {
-        const path = backendRoot !== "." ? `${backendRoot}/${ext}` : ext;
+        const path = getPath(ext);
         const file = await github.getFileContent(repoOwner, repoName, path, newBranchName).catch(() => null);
         if (file) {
           nextConfigFile = file;
@@ -345,43 +393,31 @@ export const autoInjectObservability = async (req, res) => {
       }
 
       if (nextConfigFile) {
-        const nextConfigPrompt = `You are an expert Next.js developer AI.
-We need to enable the \`instrumentationHook\` in this \`next.config.js\` file.
-
-Original File Content:
-\`\`\`
-${nextConfigFile.content}
-\`\`\`
-
-Task:
-Inject \`experimental: { instrumentationHook: true }\` into the config object safely. 
-If \`experimental\` already exists, add \`instrumentationHook: true\` to it.
-CRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javascript blocks. Do NOT remove existing configuration.`;
-        
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const nextConfigPrompt = `You are an expert Next.js developer AI.\nWe need to enable the \`instrumentationHook\` in this \`next.config.js\` file.\n\nOriginal File Content:\n\`\`\`\n${nextConfigFile.content}\n\`\`\`\n\nTask:\nInject \`experimental: { instrumentationHook: true }\` into the config object safely. \nIf \`experimental\` already exists, add \`instrumentationHook: true\` to it.\nCRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javascript blocks. Do NOT remove existing configuration.`;
         const result = await model.generateContent(nextConfigPrompt);
-        let newConfigContent = result.response.text().trim();
-        if (newConfigContent.startsWith("\`\`\`")) {
-           const lines = newConfigContent.split("\n");
-           lines.shift();
-           if (lines.length > 0 && lines[lines.length - 1].startsWith("\`\`\`")) lines.pop();
-           newConfigContent = lines.join("\n");
-        }
-
+        let newConfigContent = extractCodeBlock(result.response.text());
         if (newConfigContent !== nextConfigFile.content) {
           const cfgBlobRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/blobs`, { content: newConfigContent, encoding: "utf-8" });
           treeEntries.push({ path: nextConfigPath, mode: "100644", type: "blob", sha: cfgBlobRes.data.sha });
           modifiedFiles.push(nextConfigPath);
         }
       }
-    } else {
-      // 3. Inject Tracepilot into Express/Node.js entry file
-      const entryFiles = [pkgJson.main, 'index.js', 'src/index.js', 'server.js', 'src/server.js', 'app.js', 'src/app.js'].filter(Boolean);
+    } 
+    // --- EXPRESS / REACT / PYTHON / GO ENTRY FILE INJECTION ---
+    else {
+      let entryFiles = [];
+      if (language === "express") entryFiles = [pkgJson?.main, 'src/main.ts', 'src/index.ts', 'index.js', 'src/index.js', 'server.js', 'src/server.js', 'app.js', 'src/app.js'];
+      if (language === "react") entryFiles = ['src/main.tsx', 'src/index.tsx', 'src/main.jsx', 'src/index.jsx', 'src/index.js'];
+      if (language === "python") entryFiles = ['main.py', 'app.py', 'server.py', 'src/main.py', 'src/app.py'];
+      if (language === "go") entryFiles = ['main.go', 'cmd/main.go', 'server.go'];
+
+      entryFiles = entryFiles.filter(Boolean);
+
       let entryFile = null;
       let entryPath = null;
 
       for (const p of entryFiles) {
-        const path = backendRoot !== "." ? `${backendRoot}/${p}` : p;
+        const path = getPath(p);
         const file = await github.getFileContent(repoOwner, repoName, path, newBranchName).catch(() => null);
         if (file) {
           entryFile = file;
@@ -391,36 +427,23 @@ CRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javasc
       }
 
       if (entryFile) {
-        const expressPrompt = `You are an expert Node.js developer AI.
-We need to initialize the tracepilot SDK at the very top of this entry file.
+        let aiPrompt = "";
 
-File Path: ${entryPath}
-
-Original File Content:
-\`\`\`
-${entryFile.content}
-\`\`\`
-
-Task:
-Prepend the following code at the absolute top of the file (before any other imports or requires):
-\`\`\`javascript
-process.env.OTEL_EXPORTER_OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || '\${process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "https://api.deployai.in"}/api/observability/traces';
-process.env.OTEL_SERVICE_NAME = '${project.repoName}';
-const { registerOTel } = require('@swapnil454/tracepilot/node');
-registerOTel();
-\`\`\`
-Note: If the file uses ES6 modules (import), use \`import { registerOTel } from '@swapnil454/tracepilot/node';\` instead of require, but KEEP the process.env assignments BEFORE any other code.
-CRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javascript blocks.`;
-
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-        const result = await model.generateContent(expressPrompt);
-        let newEntryContent = result.response.text().trim();
-        if (newEntryContent.startsWith("\`\`\`")) {
-           const lines = newEntryContent.split("\n");
-           lines.shift();
-           if (lines.length > 0 && lines[lines.length - 1].startsWith("\`\`\`")) lines.pop();
-           newEntryContent = lines.join("\n");
+        if (language === "express") {
+          aiPrompt = `You are an expert Node.js developer AI.\nWe need to initialize the tracepilot SDK at the very top of this entry file.\n\nFile Path: ${entryPath}\n\nOriginal File Content:\n\`\`\`\n${entryFile.content}\n\`\`\`\n\nTask:\nPrepend the following code at the absolute top of the file (before any other imports or requires):\n\`\`\`javascript\nprocess.env.OTEL_EXPORTER_OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || '${process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "https://api.deployai.in"}/api/observability/traces';\nprocess.env.OTEL_SERVICE_NAME = '${project.repoName}';\nconst { initExpressObservability } = require('@swapnil454/tracepilot/express');\ninitExpressObservability();\n\`\`\`\nNote: If the file uses ES6 modules (import), use \`import { initExpressObservability } from '@swapnil454/tracepilot/express';\` instead of require, but KEEP the process.env assignments BEFORE any other code.\nCRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javascript blocks.`;
+        } 
+        else if (language === "react") {
+          aiPrompt = `You are an expert React developer AI.\nWe need to wrap the root application component with TracePilotProvider.\n\nFile Path: ${entryPath}\n\nOriginal:\n\`\`\`\n${entryFile.content}\n\`\`\`\n\nTask:\n1. Import TracePilotProvider: \`import { TracePilotProvider } from '@swapnil454/tracepilot/react';\`\n2. Wrap the <App /> (or equivalent root component) with <TracePilotProvider token="${project.repoName}" serviceName="${project.repoName}" ingestorUrl="${process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces"> ... </TracePilotProvider>\nCRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`tsx blocks.`;
         }
+        else if (language === "python") {
+          aiPrompt = `You are an expert Python developer AI.\nWe need to initialize OpenTelemetry and instrument the framework.\n\nOriginal:\n\`\`\`\n${entryFile.content}\n\`\`\`\n\nTask:\n1. Prepend the standard OpenTelemetry setup:\n\`\`\`python\nimport os\nfrom opentelemetry import trace\nfrom opentelemetry.sdk.trace import TracerProvider\nfrom opentelemetry.sdk.trace.export import BatchSpanProcessor\nfrom opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter\n\nos.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://api.deployai.in/api/observability/traces"\nos.environ["OTEL_SERVICE_NAME"] = "${project.repoName}"\n\ntrace.set_tracer_provider(TracerProvider())\notlp_exporter = OTLPSpanExporter()\ntrace.get_tracer_provider().add_span_processor(BatchSpanProcessor(otlp_exporter))\n\`\`\`\n\n2. CRITICAL FIX: If you detect a FastAPI app (e.g. \`app = FastAPI()\`), you MUST add \`from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor\` and \`FastAPIInstrumentor.instrument_app(app)\` directly after the app is created.\n3. If you detect Flask, do the same using \`FlaskInstrumentor\`.\nCRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`python blocks.`;
+        }
+        else if (language === "go") {
+          aiPrompt = `You are an expert Go developer AI.\nWe need to initialize OpenTelemetry safely.\n\nOriginal:\n\`\`\`\n${entryFile.content}\n\`\`\`\n\nTask:\n1. Add the necessary imports.\n2. Inject an initTracer() function that sets up OTLP to "https://api.deployai.in/api/observability/traces" with service name "${project.repoName}".\n3. Call \`tp := initTracer()\` at the very beginning of the main() function, and IMMEDIATELY add \`defer tp.Shutdown(context.Background())\` to prevent memory leaks!\n4. If an HTTP router (Gin, Fiber, net/http) is present, wrap it with OpenTelemetry middleware.\nCRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`go blocks.`;
+        }
+
+        const result = await model.generateContent(aiPrompt);
+        let newEntryContent = extractCodeBlock(result.response.text());
 
         if (newEntryContent !== entryFile.content) {
           const entryBlobRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/blobs`, { content: newEntryContent, encoding: "utf-8" });
@@ -428,6 +451,10 @@ CRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javasc
           modifiedFiles.push(entryPath);
         }
       }
+    }
+
+    if (modifiedFiles.length === 0) {
+      return res.status(400).json({ error: "AI could not safely modify any files. Please use manual setup." });
     }
 
     const treeRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/trees`, {
@@ -456,6 +483,7 @@ CRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javasc
     return res.status(500).json({ error: error.message || "Failed to auto-inject observability" });
   }
 };
+
 
 export const verifyAnalytics = async (req, res) => {
   try {
