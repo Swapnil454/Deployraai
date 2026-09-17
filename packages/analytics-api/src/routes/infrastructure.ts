@@ -91,7 +91,7 @@ export const infrastructureRouter: FastifyPluginAsync = async (app) => {
           WHERE project_id = {projectId:String}
             AND start_time >= toDateTime64({start:UInt64}/1000, 3)
             AND start_time <= toDateTime64({end:UInt64}/1000, 3)
-            AND kind = 2 -- SPAN_KIND_SERVER
+            AND mapContains(attributes, 'http.method')
           GROUP BY time, group_val
           ORDER BY time ASC
         `;
