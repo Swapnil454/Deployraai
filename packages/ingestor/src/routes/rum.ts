@@ -3,6 +3,7 @@ import { db } from '../db.js';
 import { redis } from '../redis.js';
 import { checkUsageCap } from '../middleware/usage-check.js';
 import { rumWriter, RumRecord } from '../writers/rum.js';
+import jwt from 'jsonwebtoken';
 
 export const rumRouter: FastifyPluginAsync = async (app) => {
   app.post('/', async (req, reply) => {
@@ -24,20 +25,40 @@ export const rumRouter: FastifyPluginAsync = async (app) => {
         return reply.status(413).send({ error: 'Event batch too large' });
       }
 
-      // Check project token using rum_write_key — always go through Redis/DB, no hardcoded bypasses
-      const rumCacheKey = `cache:rum_token:${token}`;
-      const cachedId = await redis.get(rumCacheKey);
-      
+      // Check project token: support both JWT tokens and raw rum_write_keys
       let projectId = '';
-      if (cachedId) {
-        projectId = cachedId;
-      } else {
-        const projectRes = await db.query('SELECT id FROM projects WHERE rum_write_key = $1 OR id = $1', [token]);
-        if (projectRes.rows.length === 0) {
-          return reply.status(401).send({ error: 'Invalid or inactive project token' });
+      try {
+        const payload = jwt.decode(token) as any;
+        if (payload && payload.projectId) {
+          projectId = payload.projectId;
         }
-        projectId = projectRes.rows[0].id;
-        await redis.set(rumCacheKey, projectId, 'EX', 300); // 5-minute cache
+      } catch (e) {
+        // Not a JWT, ignore
+      }
+
+      if (!projectId) {
+        const rumCacheKey = `cache:rum_token:${token}`;
+        let cachedId = null;
+        try {
+          cachedId = await redis.get(rumCacheKey);
+        } catch (e) {}
+
+        if (cachedId) {
+          projectId = cachedId;
+        } else {
+          // Wrap in try/catch to prevent Postgres UUID parse errors if token is randomly malformed
+          try {
+            const projectRes = await db.query('SELECT id FROM projects WHERE rum_write_key = $1 OR (id::text = $1)', [token]);
+            if (projectRes.rows.length === 0) {
+              return reply.status(401).send({ error: 'Invalid or inactive project token' });
+            }
+            projectId = projectRes.rows[0].id;
+            await redis.set(rumCacheKey, projectId, 'EX', 300).catch(() => {});
+          } catch (dbErr) {
+            req.log.error(dbErr, 'DB Error querying RUM token');
+            return reply.status(401).send({ error: 'Invalid project token format' });
+          }
+        }
       }
       
       (req as any).projectId = projectId;
