@@ -44,7 +44,7 @@ router.post('/traces/v1/traces', async (req, res) => {
     res.status(response.status).send(response.data);
   } catch (error) {
     console.error('Ingestion API Error:', error.message);
-    res.status(error.response?.status || 502).json({ error: 'Ingestion failed' });
+    res.status(error.response?.status || 502).json(error.response?.data || { error: 'Ingestion failed' });
   }
 });
 
