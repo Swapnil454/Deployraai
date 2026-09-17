@@ -89,12 +89,12 @@ app.use("/api/fix-prs", fixPrRoutes);
 
 
 
+app.use("/api/observability", observabilityRoutes);
 app.use("/api", domainRoutes);
 app.use("/api", monitoringRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/projects/:projectId/workflows", workflowRoutes);
 app.use("/api/support", supportRoutes);
-app.use("/api/observability", observabilityRoutes);
 app.use("/api/projects", alertRoutes);
 app.use("/api/projects", issueRoutes);
 app.use("/api/projects", sloRoutes);
