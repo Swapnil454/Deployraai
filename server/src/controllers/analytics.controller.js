@@ -219,7 +219,7 @@ Task:
 Inject the script tag exactly as provided into the <head> section of the document.
 CRITICAL: Return ONLY the raw new file content. Do NOT wrap it in markdown formatting blocks like \`\`\`javascript.`;
 
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const result = await model.generateContent(frontendPrompt);
     await trackAiUsage(userId, projectId, 'analytics_insight');
 
@@ -255,6 +255,9 @@ CRITICAL: Return ONLY the raw new file content. Do NOT wrap it in markdown forma
   } catch (error) {
     if (error.response?.status === 401) return res.status(401).json({ error: "GitHub integration expired." });
     if (error.response?.status === 404) return res.status(404).json({ error: "Repository not found." });
+    if (error.message?.includes("503") || error.message?.includes("Service Unavailable")) {
+       return res.status(503).json({ error: "Google AI Service is currently experiencing high demand. Please try again in a few moments." });
+    }
     return res.status(500).json({ error: error.message || "Failed to auto-inject analytics" });
   }
 };
@@ -355,7 +358,7 @@ Inject \`experimental: { instrumentationHook: true }\` into the config object sa
 If \`experimental\` already exists, add \`instrumentationHook: true\` to it.
 CRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javascript blocks. Do NOT remove existing configuration.`;
         
-        const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         const result = await model.generateContent(nextConfigPrompt);
         let newConfigContent = result.response.text().trim();
         if (newConfigContent.startsWith("\`\`\`")) {
@@ -407,7 +410,7 @@ registerOTel();
 Note: If the file uses ES6 modules (import), use \`import { registerOTel } from '@swapnil454/tracepilot/node'; registerOTel();\` instead.
 CRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javascript blocks.`;
 
-        const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         const result = await model.generateContent(expressPrompt);
         let newEntryContent = result.response.text().trim();
         if (newEntryContent.startsWith("\`\`\`")) {
@@ -445,6 +448,9 @@ CRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javasc
   } catch (error) {
     if (error.response?.status === 401) return res.status(401).json({ error: "GitHub integration expired." });
     if (error.response?.status === 404) return res.status(404).json({ error: "Repository not found." });
+    if (error.message?.includes("503") || error.message?.includes("Service Unavailable")) {
+       return res.status(503).json({ error: "Google AI Service is currently experiencing high demand. Please try again in a few moments." });
+    }
     return res.status(500).json({ error: error.message || "Failed to auto-inject observability" });
   }
 };
