@@ -13,6 +13,17 @@ export async function initDb() {
   const client = await db.connect();
   try {
     await client.query(`
+      CREATE TABLE IF NOT EXISTS projects (
+        id VARCHAR(255) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        platform VARCHAR(255),
+        token_hash TEXT,
+        user_id VARCHAR(255),
+        rum_write_key VARCHAR(255),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS rum_events (
         id SERIAL PRIMARY KEY,
         project_id VARCHAR(255) NOT NULL,
