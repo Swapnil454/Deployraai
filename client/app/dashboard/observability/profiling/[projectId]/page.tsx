@@ -10,7 +10,7 @@ import * as d3 from 'd3';
 import flamegraph from 'd3-flame-graph';
 import './d3-flamegraph.css';
 import { ProfilingTable } from '@/components/observability/ProfilingTable';
-import { Table, Flame, AlertCircle, Terminal, Copy, Check, ExternalLink } from 'lucide-react';
+import { Table, Flame, AlertCircle, Terminal, Copy, Check, ExternalLink, Wand2, Loader2, CheckCircle2 } from 'lucide-react';
 
 function D3Flamegraph({ data, profileType }: { data: any, profileType: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -111,6 +111,14 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
   const [profileType, setProfileType] = useState('cpu');
   const [viewMode, setViewMode] = useState<'table' | 'flamegraph'>('table');
   
+  const [aiState, setAiState] = useState<'idle' | 'analyzing' | 'review' | 'injecting' | 'success'>('idle');
+  const [prUrl, setPrUrl] = useState('');
+  const [prBranch, setPrBranch] = useState('');
+  const [modifiedFiles, setModifiedFiles] = useState<string[]>([]);
+  const [aiError, setAiError] = useState('');
+  
+  const [activeSetupTab, setActiveSetupTab] = useState<'node' | 'go' | 'python' | 'java'>('node');
+
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -147,6 +155,35 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
     }
     fetchServices();
   }, [projectId]);
+
+  const handleAutoInject = async () => {
+    setAiState('analyzing');
+    setAiError('');
+    try {
+      // Artificial delay for UI feel
+      await new Promise(r => setTimeout(r, 1500));
+      setAiState('injecting');
+      
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${projectId}/profiling/auto-inject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) throw new Error(data.error || 'Failed to auto-inject profiling');
+      
+      setPrUrl(data.prUrl);
+      setPrBranch(data.branch);
+      setModifiedFiles(data.files || []);
+      setAiState('success');
+    } catch (err: any) {
+      console.error(err);
+      setAiError(err.message || 'An unexpected error occurred');
+      setAiState('idle');
+    }
+  };
   
   const fetchProfile = async () => {
     if (!projectId || !serviceName) {
@@ -206,64 +243,237 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
 
         <div className="bg-zinc-950/60 border border-zinc-800/60 rounded-xl overflow-hidden shadow-2xl backdrop-blur-xl">
           <div className="border-b border-zinc-800/60 bg-zinc-900/40 p-6 lg:p-8">
-            <h3 className="text-xl font-semibold text-white mb-2">Connect Your Profiler</h3>
-            <p className="text-zinc-400 text-sm">Send standard pprof profiles to the ingestor to automatically generate Flamegraphs.</p>
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="text-xl font-semibold text-white mb-2">Connect Your Profiler</h3>
+                <p className="text-zinc-400 text-sm">Send standard pprof profiles to the ingestor to automatically generate Flamegraphs.</p>
+              </div>
+              <button 
+                onClick={handleAutoInject}
+                disabled={aiState !== 'idle'}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-md font-medium text-sm flex items-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {aiState === 'idle' ? (
+                  <>
+                    <Wand2 className="w-4 h-4" />
+                    Auto Inject (AI)
+                  </>
+                ) : (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {aiState === 'analyzing' ? 'Analyzing Backend...' : 'Generating PR...'}
+                  </>
+                )}
+              </button>
+            </div>
+            
+            {aiError && (
+              <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-md text-sm flex items-center gap-2">
+                <AlertCircle className="w-4 h-4" />
+                {aiError}
+              </div>
+            )}
+            
+            {aiState === 'success' && (
+              <div className="mt-6 bg-green-500/10 border border-green-500/20 rounded-lg p-6 flex flex-col items-center text-center">
+                <div className="w-12 h-12 bg-green-500/20 rounded-full flex items-center justify-center mb-4 text-green-400">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <h4 className="text-white font-semibold text-lg mb-2">Pull Request Created!</h4>
+                <p className="text-green-400/80 text-sm mb-6 max-w-md">
+                  DeployAI has successfully generated the code to instrument profiling and opened a PR on your repository.
+                </p>
+                <div className="flex gap-4">
+                  <a 
+                    href={prUrl} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="bg-green-600 hover:bg-green-500 text-white px-5 py-2.5 rounded-md font-medium text-sm flex items-center gap-2 transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Review Pull Request
+                  </a>
+                  <button 
+                    onClick={() => {
+                      setAiState('idle');
+                      setPrUrl('');
+                      setAiError('');
+                    }}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-white px-5 py-2.5 rounded-md font-medium text-sm transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="p-6 lg:p-8 space-y-8">
-            <div className="space-y-4">
-              <h4 className="text-sm font-medium text-white flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs">1</div>
-                Node.js (Using pprof)
-              </h4>
-              <div className="bg-black border border-zinc-800/80 rounded-lg p-4 font-mono text-sm overflow-x-auto text-zinc-300">
-                <div className="text-zinc-500 mb-2"># Install pprof package</div>
-                <div className="text-zinc-300">npm install @datadog/pprof</div>
-                <br/>
-                <div className="text-zinc-500 mb-2">// In your application startup</div>
-                <div className="text-indigo-400">const pprof = require('@datadog/pprof');</div>
-                <div className="text-indigo-400">const axios = require('axios');</div>
-                <br/>
-                <div>setInterval(async () =&gt; {'{'}</div>
-                <div className="pl-4">const profile = await pprof.time.profile({'{'} durationMillis: 10000 {'}'});</div>
-                <div className="pl-4">const buf = await pprof.encode(profile);</div>
-                <div className="pl-4 mt-2 text-zinc-500">// Send to DeployRAAI Ingestor</div>
-                <div className="pl-4">await axios.post('https://deployraai-ingestor.yourdomain.com/v1/profiles', buf, {'{'}</div>
-                <div className="pl-8">headers: {'{'}</div>
-                <div className="pl-12">'x-project-id': '{projectId}',</div>
-                <div className="pl-12">'x-service-name': 'my-node-service',</div>
-                <div className="pl-12">'x-profile-type': 'cpu',</div>
-                <div className="pl-12">'Content-Type': 'application/octet-stream'</div>
-                <div className="pl-8">{'}'}</div>
-                <div className="pl-4">{'}'});</div>
-                <div>{'}'}, 60000);</div>
+          <div className="p-6 lg:p-8 space-y-6">
+            <div className="flex items-center gap-2 pb-4 border-b border-zinc-800/60">
+              <div className="flex items-center gap-2 text-zinc-500 text-[13px] font-medium mr-4">
+                <Terminal className="h-4 w-4" />
+                MANUAL SETUP
+              </div>
+              
+              <div className="flex bg-zinc-900 rounded-md p-1 border border-zinc-800">
+                <button 
+                  onClick={() => setActiveSetupTab('node')}
+                  className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeSetupTab === 'node' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+                >
+                  Node.js
+                </button>
+                <button 
+                  onClick={() => setActiveSetupTab('go')}
+                  className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeSetupTab === 'go' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+                >
+                  Go
+                </button>
+                <button 
+                  onClick={() => setActiveSetupTab('python')}
+                  className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeSetupTab === 'python' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+                >
+                  Python
+                </button>
+                <button 
+                  onClick={() => setActiveSetupTab('java')}
+                  className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeSetupTab === 'java' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+                >
+                  Java
+                </button>
               </div>
             </div>
 
-            <div className="space-y-4 pt-4 border-t border-zinc-800/60">
-              <h4 className="text-sm font-medium text-white flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs">2</div>
-                Golang (Using net/http/pprof)
-              </h4>
-              <div className="bg-black border border-zinc-800/80 rounded-lg p-4 font-mono text-sm overflow-x-auto text-zinc-300">
-                <div className="text-zinc-500 mb-2">// Send a local pprof buffer to the ingestor periodically</div>
-                <div className="text-indigo-400">import "runtime/pprof"</div>
-                <br/>
-                <div>func captureAndSendProfile() {'{'}</div>
-                <div className="pl-4">var buf bytes.Buffer</div>
-                <div className="pl-4">pprof.StartCPUProfile(&amp;buf)</div>
-                <div className="pl-4">time.Sleep(10 * time.Second)</div>
-                <div className="pl-4">pprof.StopCPUProfile()</div>
-                <br/>
-                <div className="pl-4">req, _ := http.NewRequest("POST", "https://deployraai-ingestor.yourdomain.com/v1/profiles", &amp;buf)</div>
-                <div className="pl-4">req.Header.Set("x-project-id", "{projectId}")</div>
-                <div className="pl-4">req.Header.Set("x-service-name", "my-go-service")</div>
-                <div className="pl-4">req.Header.Set("x-profile-type", "cpu")</div>
-                <div className="pl-4">req.Header.Set("Content-Type", "application/octet-stream")</div>
-                <div className="pl-4">http.DefaultClient.Do(req)</div>
-                <div>{'}'}</div>
+            {activeSetupTab === 'node' && (
+              <div className="space-y-4">
+                <div className="bg-black border border-zinc-800/80 rounded-lg p-4 font-mono text-sm overflow-x-auto text-zinc-300">
+                  <div className="text-zinc-500 mb-2"># Install pprof package</div>
+                  <div className="text-zinc-300">npm install @datadog/pprof axios</div>
+                  <br/>
+                  <div className="text-zinc-500 mb-2">// In your application startup (e.g., server.js or index.js)</div>
+                  <div className="text-indigo-400">const pprof = require('@datadog/pprof');</div>
+                  <div className="text-indigo-400">const axios = require('axios');</div>
+                  <br/>
+                  <div>setInterval(async () =&gt; {'{'}</div>
+                  <div className="pl-4">const profile = await pprof.time.profile({'{'} durationMillis: 10000 {'}'});</div>
+                  <div className="pl-4">const buf = await pprof.encode(profile);</div>
+                  <div className="pl-4 mt-2 text-zinc-500">// Send to DeployRAAI Ingestor</div>
+                  <div className="pl-4">await axios.post('https://deployraai-ingestor.yourdomain.com/v1/profiles', buf, {'{'}</div>
+                  <div className="pl-8">headers: {'{'}</div>
+                  <div className="pl-12">'x-project-id': '{projectId}',</div>
+                  <div className="pl-12">'x-service-name': 'my-node-service',</div>
+                  <div className="pl-12">'x-profile-type': 'cpu',</div>
+                  <div className="pl-12">'Content-Type': 'application/octet-stream'</div>
+                  <div className="pl-8">{'}'}</div>
+                  <div className="pl-4">{'}'});</div>
+                  <div>{'}'}, 60000);</div>
+                </div>
               </div>
-            </div>
+            )}
+
+            {activeSetupTab === 'go' && (
+              <div className="space-y-4">
+                <div className="bg-black border border-zinc-800/80 rounded-lg p-4 font-mono text-sm overflow-x-auto text-zinc-300">
+                  <div className="text-zinc-500 mb-2">// Send a local pprof buffer to the ingestor periodically</div>
+                  <div className="text-indigo-400">import (</div>
+                  <div className="text-indigo-400 pl-4">"bytes"</div>
+                  <div className="text-indigo-400 pl-4">"net/http"</div>
+                  <div className="text-indigo-400 pl-4">"runtime/pprof"</div>
+                  <div className="text-indigo-400 pl-4">"time"</div>
+                  <div className="text-indigo-400">)</div>
+                  <br/>
+                  <div>func captureAndSendProfile() {'{'}</div>
+                  <div className="pl-4">var buf bytes.Buffer</div>
+                  <div className="pl-4">pprof.StartCPUProfile(&amp;buf)</div>
+                  <div className="pl-4">time.Sleep(10 * time.Second)</div>
+                  <div className="pl-4">pprof.StopCPUProfile()</div>
+                  <br/>
+                  <div className="pl-4">req, _ := http.NewRequest("POST", "https://deployraai-ingestor.yourdomain.com/v1/profiles", &amp;buf)</div>
+                  <div className="pl-4">req.Header.Set("x-project-id", "{projectId}")</div>
+                  <div className="pl-4">req.Header.Set("x-service-name", "my-go-service")</div>
+                  <div className="pl-4">req.Header.Set("x-profile-type", "cpu")</div>
+                  <div className="pl-4">req.Header.Set("Content-Type", "application/octet-stream")</div>
+                  <div className="pl-4">http.DefaultClient.Do(req)</div>
+                  <div>{'}'}</div>
+                  <br/>
+                  <div className="text-zinc-500 mb-2">// Call in your main()</div>
+                  <div>func main() {'{'}</div>
+                  <div className="pl-4 text-indigo-400">go func() {'{'}</div>
+                  <div className="pl-8 text-indigo-400">for {'{'}</div>
+                  <div className="pl-12 text-indigo-400">captureAndSendProfile()</div>
+                  <div className="pl-12 text-indigo-400">time.Sleep(50 * time.Second)</div>
+                  <div className="pl-8 text-indigo-400">{'}'}</div>
+                  <div className="pl-4 text-indigo-400">{'}'}()</div>
+                  <div>{'}'}</div>
+                </div>
+              </div>
+            )}
+
+            {activeSetupTab === 'python' && (
+              <div className="space-y-4">
+                <div className="bg-black border border-zinc-800/80 rounded-lg p-4 font-mono text-sm overflow-x-auto text-zinc-300">
+                  <div className="text-zinc-500 mb-2"># Install requirements</div>
+                  <div className="text-zinc-300">pip install yappi requests</div>
+                  <br/>
+                  <div className="text-zinc-500 mb-2"># In your main.py or app.py</div>
+                  <div className="text-indigo-400">import yappi</div>
+                  <div className="text-indigo-400">import requests</div>
+                  <div className="text-indigo-400">import threading</div>
+                  <div className="text-indigo-400">import time</div>
+                  <br/>
+                  <div>def profile_loop():</div>
+                  <div className="pl-4">while True:</div>
+                  <div className="pl-8">yappi.start()</div>
+                  <div className="pl-8">time.sleep(10)</div>
+                  <div className="pl-8">yappi.stop()</div>
+                  <br/>
+                  <div className="pl-8">stats = yappi.get_func_stats()</div>
+                  <div className="pl-8 text-zinc-500"># Convert stats to standard format or just send raw output</div>
+                  <div className="pl-8">raw_data = stats.as_string()</div>
+                  <br/>
+                  <div className="pl-8">requests.post(</div>
+                  <div className="pl-12">'https://deployraai-ingestor.yourdomain.com/v1/profiles',</div>
+                  <div className="pl-12">data=raw_data,</div>
+                  <div className="pl-12">headers={'{'}</div>
+                  <div className="pl-16">'x-project-id': '{projectId}',</div>
+                  <div className="pl-16">'x-service-name': 'my-python-service',</div>
+                  <div className="pl-16">'x-profile-type': 'cpu',</div>
+                  <div className="pl-16">'Content-Type': 'application/octet-stream'</div>
+                  <div className="pl-12">{'}'}</div>
+                  <div className="pl-8">)</div>
+                  <div className="pl-8">yappi.clear_stats()</div>
+                  <div className="pl-8">time.sleep(50)</div>
+                  <br/>
+                  <div className="text-zinc-500 mb-2"># Start in background on app startup</div>
+                  <div>threading.Thread(target=profile_loop, daemon=True).start()</div>
+                </div>
+              </div>
+            )}
+
+            {activeSetupTab === 'java' && (
+              <div className="space-y-4">
+                <div className="bg-black border border-zinc-800/80 rounded-lg p-4 font-mono text-sm overflow-x-auto text-zinc-300">
+                  <div className="text-zinc-500 mb-2">// Using Java Flight Recorder (JFR) + Jcmd</div>
+                  <div className="text-zinc-300 mb-4">
+                    // Simply start your Java app with JFR enabled and write a shell script<br/>
+                    // to periodically dump the profile and HTTP POST it.
+                  </div>
+                  
+                  <div className="text-zinc-500 mb-2"># 1. Start your java app</div>
+                  <div>java -XX:StartFlightRecording=disk=true,dumponexit=true,filename=profile.jfr -jar app.jar</div>
+                  <br/>
+                  <div className="text-zinc-500 mb-2"># 2. Run this cron/script</div>
+                  <div>PID=$(jcmd | grep app.jar | awk '{'{'}print $1{'}'}')</div>
+                  <div>jcmd $PID JFR.dump name=1 filename=current.jfr</div>
+                  <br/>
+                  <div>curl -X POST https://deployraai-ingestor.yourdomain.com/v1/profiles \</div>
+                  <div className="pl-4">-H "x-project-id: {projectId}" \</div>
+                  <div className="pl-4">-H "x-service-name: my-java-service" \</div>
+                  <div className="pl-4">-H "x-profile-type: cpu" \</div>
+                  <div className="pl-4">-H "Content-Type: application/octet-stream" \</div>
+                  <div className="pl-4">--data-binary @current.jfr</div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

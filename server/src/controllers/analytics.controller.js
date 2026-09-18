@@ -610,3 +610,180 @@ export const verifyObservability = async (req, res) => {
     return res.status(500).json({ error: "Failed to verify observability" });
   }
 };
+
+export const autoInjectProfiling = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.userId;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const user = await User.findById(userId);
+    if (!user || !user.githubAccessTokenEncrypted) return res.status(400).json({ error: "GitHub not connected" });
+
+    const githubToken = decryptSecret(user.githubAccessTokenEncrypted);
+    const github = new GitHubService(githubToken);
+
+    let { repoOwner, repoName, repoFullName } = project;
+    if (!repoOwner) [repoOwner, repoName] = repoFullName.split('/');
+
+    const defaultBranch = await github.getDefaultBranch(repoOwner, repoName);
+    const defaultSha = await github.getBranchSha(repoOwner, repoName, defaultBranch);
+
+    const timestamp = Date.now();
+    const newBranchName = `deployai/profiling-inject-${timestamp}`;
+    await github.createBranch(repoOwner, repoName, newBranchName, defaultSha);
+
+    const backendRoot = project.analysis?.backend?.path || ".";
+    const getPath = (p) => backendRoot !== "." ? `${backendRoot}/${p}` : p;
+    
+    // Language Detection
+    const [pkgFile, reqFile, pyprojectFile, goModFile, pomFile, gradleFile] = await Promise.all([
+      github.getFileContent(repoOwner, repoName, getPath("package.json"), newBranchName).catch(() => null),
+      github.getFileContent(repoOwner, repoName, getPath("requirements.txt"), newBranchName).catch(() => null),
+      github.getFileContent(repoOwner, repoName, getPath("pyproject.toml"), newBranchName).catch(() => null),
+      github.getFileContent(repoOwner, repoName, getPath("go.mod"), newBranchName).catch(() => null),
+      github.getFileContent(repoOwner, repoName, getPath("pom.xml"), newBranchName).catch(() => null),
+      github.getFileContent(repoOwner, repoName, getPath("build.gradle"), newBranchName).catch(() => null)
+    ]);
+
+    let language = "unknown";
+    let pkgJson = null;
+
+    if (reqFile || pyprojectFile) {
+      language = "python";
+    } else if (goModFile) {
+      language = "go";
+    } else if (pomFile || gradleFile) {
+      language = "java";
+    } else if (pkgFile) {
+      language = "node";
+      try { pkgJson = JSON.parse(pkgFile.content); } catch (e) {}
+    }
+
+    if (language === "unknown") {
+      return res.status(400).json({ error: "Could not detect language for Profiling. Supported files not found (package.json, requirements.txt, go.mod, pom.xml)." });
+    }
+
+    if (!process.env.GEMINI_API_KEY) return res.status(400).json({ error: "AI Provider not configured. Please add GEMINI_API_KEY." });
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+    const extractCodeBlock = (text) => {
+      const blockMatch = text.match(/```[a-z]*\n([\s\S]*?)```/);
+      return blockMatch ? blockMatch[1].trim() : text.replace(/^```.*\n/, "").replace(/```$/, "").trim();
+    };
+
+    const treeEntries = [];
+    const modifiedFiles = [];
+
+    // --- NODE.JS DEPENDENCY INJECTION ---
+    if (language === "node" && pkgJson && pkgFile) {
+      if (!pkgJson.dependencies) pkgJson.dependencies = {};
+      pkgJson.dependencies["@datadog/pprof"] = "^3.2.0";
+      pkgJson.dependencies["axios"] = "^1.7.2";
+      const newPkgContent = JSON.stringify(pkgJson, null, 2);
+      const pkgBlobRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/blobs`, { content: newPkgContent, encoding: "utf-8" });
+      treeEntries.push({ path: getPath("package.json"), mode: "100644", type: "blob", sha: pkgBlobRes.data.sha });
+      modifiedFiles.push(getPath("package.json"));
+    }
+
+    // --- PYTHON DEPENDENCY INJECTION ---
+    if (language === "python") {
+      const pyDeps = "yappi\nrequests\n";
+      if (reqFile) {
+         let newReqContent = reqFile.content.trim() + "\n" + pyDeps;
+         const reqBlobRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/blobs`, { content: newReqContent, encoding: "utf-8" });
+         treeEntries.push({ path: getPath("requirements.txt"), mode: "100644", type: "blob", sha: reqBlobRes.data.sha });
+         modifiedFiles.push(getPath("requirements.txt"));
+      } else if (pyprojectFile) {
+         const prompt = `Inject the following dependencies into this pyproject.toml file safely: yappi, requests.\n\nOriginal:\n\`\`\`\n${pyprojectFile.content}\n\`\`\`\nReturn ONLY the modified raw toml file.`;
+         const result = await model.generateContent(prompt);
+         let newContent = extractCodeBlock(result.response.text());
+         const pyBlobRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/blobs`, { content: newContent, encoding: "utf-8" });
+         treeEntries.push({ path: getPath("pyproject.toml"), mode: "100644", type: "blob", sha: pyBlobRes.data.sha });
+         modifiedFiles.push(getPath("pyproject.toml"));
+      }
+    }
+
+    let entryFiles = [];
+    if (language === "node") entryFiles = [pkgJson?.main, 'src/main.ts', 'src/index.ts', 'index.js', 'src/index.js', 'server.js', 'src/server.js', 'app.js', 'src/app.js'];
+    if (language === "python") entryFiles = ['main.py', 'app.py', 'server.py', 'src/main.py', 'src/app.py'];
+    if (language === "go") entryFiles = ['main.go', 'cmd/main.go', 'server.go'];
+    if (language === "java") entryFiles = ['src/main/java/Main.java', 'src/main/java/Application.java', 'src/main/java/com/example/Main.java', 'src/main/java/com/example/Application.java'];
+
+    entryFiles = entryFiles.filter(Boolean);
+
+    let entryFile = null;
+    let entryPath = null;
+
+    for (const p of entryFiles) {
+      const path = getPath(p);
+      const file = await github.getFileContent(repoOwner, repoName, path, newBranchName).catch(() => null);
+      if (file) {
+        entryFile = file;
+        entryPath = path;
+        break;
+      }
+    }
+
+    if (entryFile) {
+      let aiPrompt = `You are an expert developer AI. Add Continuous Profiling to this application. \nFile Path: ${entryPath}\n\nOriginal File Content:\n\`\`\`\n${entryFile.content}\n\`\`\`\n\nTask:\nSet up a recurring task (e.g., every 60 seconds) to capture a CPU profile and HTTP POST the pprof buffer to 'https://deployraai-ingestor.yourdomain.com/v1/profiles' with headers: 'x-project-id': '${project._id}', 'x-service-name': '${project.repoName}', 'x-profile-type': 'cpu', 'Content-Type': 'application/octet-stream'.\n`;
+
+      if (language === "node") {
+        aiPrompt += `Use @datadog/pprof for Node.js. Inject the setup at the very top of the file.\nCRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javascript blocks.`;
+      } 
+      else if (language === "python") {
+        aiPrompt += `Use yappi and requests for Python. Make sure to generate pprof format string from yappi and POST it in a background thread.\nCRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`python blocks.`;
+      }
+      else if (language === "go") {
+        aiPrompt += `Use standard runtime/pprof and net/http for Go. Run the profiling loop in a goroutine launched from main().\nCRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`go blocks.`;
+      }
+      else if (language === "java") {
+         aiPrompt += `Use standard JFR or relevant profiling and HTTP client for Java. Start the profiling loop in a background thread from main().\nCRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`java blocks.`;
+      }
+
+      const result = await model.generateContent(aiPrompt);
+      let newEntryContent = extractCodeBlock(result.response.text());
+
+      if (newEntryContent !== entryFile.content) {
+        const entryBlobRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/blobs`, { content: newEntryContent, encoding: "utf-8" });
+        treeEntries.push({ path: entryPath, mode: "100644", type: "blob", sha: entryBlobRes.data.sha });
+        modifiedFiles.push(entryPath);
+      }
+    }
+
+    if (treeEntries.length === 0) {
+      return res.status(400).json({ error: "Could not find a suitable entry file to auto-inject profiling." });
+    }
+
+    const baseTreeRes = await github.api.get(`/repos/${repoOwner}/${repoName}/git/trees/${defaultSha}`);
+    const newTreeRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/trees`, {
+      base_tree: baseTreeRes.data.sha,
+      tree: treeEntries
+    });
+
+    const commitRes = await github.api.post(`/repos/${repoOwner}/${repoName}/git/commits`, {
+      message: "feat: auto-inject Continuous Profiling (DeployAI)",
+      tree: newTreeRes.data.sha,
+      parents: [defaultSha]
+    });
+
+    await github.api.patch(`/repos/${repoOwner}/${repoName}/git/refs/heads/${newBranchName}`, {
+      sha: commitRes.data.sha
+    });
+
+    const prBody = `DeployAI automatically injected Continuous Profiling into your project.\n\nFiles modified:\n${modifiedFiles.map(f => `- \`${f}\``).join('\n')}\n\n*Safety note: Please review the AI generated code carefully before merging.*`;
+    const pr = await github.createPullRequest(repoOwner, repoName, "feat: inject Continuous Profiling Setup", prBody, newBranchName, defaultBranch);
+
+    return res.json({ prUrl: pr.html_url, prNumber: pr.number, branch: newBranchName, files: modifiedFiles });
+  } catch (error) {
+    if (error.response?.status === 401) return res.status(401).json({ error: "GitHub integration expired." });
+    if (error.response?.status === 404) return res.status(404).json({ error: "Repository not found." });
+    if (error.message?.includes("503") || error.message?.includes("Service Unavailable")) {
+       return res.status(503).json({ error: "Google AI Service is currently experiencing high demand. Please try again in a few moments." });
+    }
+    return res.status(500).json({ error: error.message || "Failed to auto-inject profiling" });
+  }
+};
