@@ -5,18 +5,25 @@ import { checkUsageCap } from '../middleware/usage-check.js';
 import { profileWriter, ProfileRecord } from '../writers/profiles.js';
 
 export async function profilesRouter(app: FastifyInstance) {
-  // Add a raw body parser for application/x-protobuf if not already handled
-  app.addContentTypeParser('application/x-protobuf', { parseAs: 'buffer' }, (req, body, done) => {
+  // Add a raw body parser for application/x-protobuf and application/octet-stream
+  app.addContentTypeParser(['application/x-protobuf', 'application/octet-stream'], { parseAs: 'buffer' }, (req, body, done) => {
     done(null, body);
   });
 
   const handler = async (req: any, reply: any) => {
+    console.log('[Ingestor] Received profiles payload:', {
+      projectId: req.auth?.projectId,
+      serviceName: req.headers['x-service-name'],
+      profileType: req.headers['x-profile-type'],
+      contentLength: req.headers['content-length']
+    });
     const { projectId } = req.auth;
     const serviceName = (req.headers['x-service-name'] as string) || 'unknown';
     const profileType = (req.headers['x-profile-type'] as string) || 'cpu'; // 'cpu' or 'memory'
 
     const buffer = req.body as Buffer;
     if (!buffer || !Buffer.isBuffer(buffer)) {
+      console.error('[Ingestor] Bad request: body is not a buffer', typeof req.body);
       return reply.status(400).send({ error: 'Body must be a valid protobuf buffer' });
     }
 

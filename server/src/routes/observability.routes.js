@@ -118,8 +118,16 @@ router.post(['/rum/v1/rum', '/traces/v1/rum'], async (req, res) => {
 });
 // Unauthenticated Profiles Ingestion Endpoint
 router.post('/profiles/v1/profiles', express.raw({ type: 'application/octet-stream', limit: '20mb' }), async (req, res) => {
+  console.log('[Proxy] Received profiles request:', {
+    method: req.method,
+    headers: req.headers,
+    bodyType: typeof req.body,
+    isBuffer: Buffer.isBuffer(req.body),
+    bodyLength: req.body?.length
+  });
   try {
     const targetUrl = `${INGESTOR_URL}/v1/profiles`;
+    console.log('[Proxy] Forwarding to:', targetUrl);
     const response = await axios({
       method: req.method,
       url: targetUrl,
@@ -133,9 +141,14 @@ router.post('/profiles/v1/profiles', express.raw({ type: 'application/octet-stre
       timeout: 15000,
       responseType: 'arraybuffer' // handle raw buffer data correctly if response returns any
     });
+    console.log('[Proxy] Ingestor response status:', response.status);
     res.status(response.status).send(response.data);
   } catch (error) {
-    console.error('Profiles Ingestion API Error:', error.message);
+    console.error('[Proxy] Profiles Ingestion API Error:', error.message);
+    if (error.response) {
+      console.error('[Proxy] Ingestor returned status:', error.response.status);
+      console.error('[Proxy] Ingestor response data:', error.response.data ? Buffer.from(error.response.data).toString() : 'no data');
+    }
     res.status(error.response?.status || 502).json(error.response?.data ? JSON.parse(Buffer.from(error.response.data).toString()) : { error: 'Profiles Ingestion failed' });
   }
 });
