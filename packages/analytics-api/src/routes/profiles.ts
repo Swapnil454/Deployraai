@@ -164,7 +164,7 @@ export const profilesRouter: FastifyPluginAsync = async (app) => {
         query_params: queryParams,
         format: 'JSONEachRow'
       });
-      const rows = await resultSet.json<any[]>();
+      const rows = await resultSet.json<any>();
 
       if (!rows || rows.length === 0) {
         const empty = { name: 'root', value: 0 };
@@ -215,7 +215,7 @@ export const profilesRouter: FastifyPluginAsync = async (app) => {
         query_params: { projectId },
         format: 'JSONEachRow'
       });
-      const rows = await resultSet.json<any[]>();
+      const rows = await resultSet.json<any>();
       
       const services = rows.map(r => r.service_name);
       
