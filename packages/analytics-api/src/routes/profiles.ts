@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import { db } from '../db.js';
+import { clickhouse } from '../clickhouse.js';
 import { requireAuth } from '../middleware/auth.js';
 import { buildFlamegraphTrie, ProfileRow } from '../utils/trie.js';
 
@@ -121,40 +121,63 @@ export const profilesRouter: FastifyPluginAsync = async (app) => {
     }
 
     try {
-      // ── Database Query (fully parameterized, no string interpolation) ─────────
-      const query = `
-        SELECT stack_trace, SUM(value) AS total_value
-        FROM profiles
-        WHERE project_id  = $1
-          AND service_name = $2
-          AND profile_type = $3
-          AND timestamp   >= $4
-          AND timestamp   <= $5
-        GROUP BY stack_trace
-        ORDER BY total_value DESC
-        LIMIT 5000
-      `;
+      // ─── ClickHouse Query (fully parameterized) ────────────────────────────────
+      let query = '';
+      let queryParams: Record<string, unknown> = {};
+      
+      if (serviceName === 'go-profiler-test') {
+        // Global Demo Mode: return demo data regardless of project or timestamp
+        query = `
+          SELECT stack_trace, sum(value) AS total_value
+          FROM profiles
+          WHERE service_name = {serviceName: String}
+            AND profile_type = {profileType: String}
+          GROUP BY stack_trace
+          ORDER BY total_value DESC
+          LIMIT 5000
+        `;
+        queryParams = { serviceName, profileType };
+      } else {
+        query = `
+          SELECT stack_trace, sum(value) AS total_value
+          FROM profiles
+          WHERE project_id = {projectId: String}
+            AND service_name = {serviceName: String}
+            AND profile_type = {profileType: String}
+            AND timestamp >= {startTime: DateTime64}
+            AND timestamp <= {endTime: DateTime64}
+          GROUP BY stack_trace
+          ORDER BY total_value DESC
+          LIMIT 5000
+        `;
+        queryParams = {
+          projectId,
+          serviceName,
+          profileType,
+          startTime: Math.floor(start.getTime()),
+          endTime: Math.floor(end.getTime())
+        };
+      }
 
-      const result = await db.query(query, [
-        projectId,
-        serviceName,
-        profileType,
-        start.toISOString(),
-        end.toISOString(),
-      ]);
+      const resultSet = await clickhouse.query({
+        query,
+        query_params: queryParams,
+        format: 'JSONEachRow'
+      });
+      const rows = await resultSet.json<any[]>();
 
-      if (!result.rows || result.rows.length === 0) {
+      if (!rows || rows.length === 0) {
         const empty = { name: 'root', value: 0 };
         return reply.status(200).send(empty);
       }
 
-      const rows: ProfileRow[] = result.rows.map((row) => ({
+      const profileRows: ProfileRow[] = rows.map((row) => ({
         stack_trace: (row.stack_trace || '').split(';'),
         total_value: Number(row.total_value),
       }));
 
       // ── Build Trie ────────────────────────────────────────────────────────────
-      const trie = buildFlamegraphTrie(rows);
+      const trie = buildFlamegraphTrie(profileRows);
 
       // ── Cache the result ──────────────────────────────────────────────────────
       flamegraphCache.set(cacheKey, trie);
@@ -170,27 +193,41 @@ export const profilesRouter: FastifyPluginAsync = async (app) => {
       });
     }
   });
-};
 
-// ─── Automated 7-Day Data Retention Job ─────────────────────────────────────
-// Runs every 6 hours to purge profiling data older than 7 days.
-// Prevents unbounded disk growth in production.
-const RETENTION_DAYS = 7;
-const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
-
-async function runRetentionJob() {
-  try {
-    const result = await db.query(
-      `DELETE FROM profiles WHERE timestamp < NOW() - INTERVAL '${RETENTION_DAYS} days'`
-    );
-    if ((result.rowCount ?? 0) > 0) {
-      console.log(`[Retention] Pruned ${result.rowCount} profile rows older than ${RETENTION_DAYS} days.`);
+  // ─── GET /profiles/services ───────────────────────────────────────────────
+  app.get('/services', {
+    preHandler: requireAuth,
+  }, async (req, reply) => {
+    const { projectId } = req.query as { projectId: string };
+    
+    if (!projectId) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'projectId is required' });
     }
-  } catch (err: any) {
-    console.error('[Retention] Data retention job failed:', err.message);
-  }
-}
-
-// Fire once on startup, then schedule every 6 hours
-runRetentionJob();
-setInterval(runRetentionJob, SIX_HOURS_MS);
+    
+    try {
+      const query = `
+        SELECT DISTINCT service_name
+        FROM profiles
+        WHERE project_id = {projectId: String}
+      `;
+      const resultSet = await clickhouse.query({
+        query,
+        query_params: { projectId },
+        format: 'JSONEachRow'
+      });
+      const rows = await resultSet.json<any[]>();
+      
+      const services = rows.map(r => r.service_name);
+      
+      // Always include the global demo
+      if (!services.includes('go-profiler-test')) {
+        services.push('go-profiler-test');
+      }
+      
+      return reply.status(200).send({ services });
+    } catch (err: any) {
+      req.log.error({ err, projectId }, '[Profiles] Failed to fetch services');
+      return reply.status(500).send({ error: 'Internal Server Error' });
+    }
+  });
+};

@@ -4,23 +4,23 @@ import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, Activity, Server, Cpu, Database, Network, Calendar, Filter } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
 
 // Highly contrasting colors WITHIN each chart so overlapping lines never blend
-const CPU_COLORS = ['#fc0000ff', '#055eecff', '#09ec5cff']; // Red, Blue, Green
-const MEM_COLORS = ['#fc0000ff', '#055eecff', '#09ec5cff']; // Red, Blue, Green
-const NET_COLORS = ['#fc0000ff', '#055eecff', '#09ec5cff']; // Red, Blue, Green
+const CPU_COLORS = ['#fc0000ff', '#2364ccff', '#09ec5cff']; // Red, Blue, Green
+const MEM_COLORS = ['#10c5ccff', '#d4fe00ff', '#ec0982ff']; // Red, Blue, Green
+const NET_COLORS = ['#7600fccb', '#a8a04bff', '#23b381ff']; // Red, Blue, Green
 
 export default function InfrastructurePage() {
   const params = useParams();
   const router = useRouter();
-  const projectId = params.id;
+  const projectId = params.id as string;
 
   const [loading, setLoading] = useState(true);
   const [metricsData, setMetricsData] = useState<any[]>([]);
+  const [project, setProject] = useState<any>(null);
   const [timeRange, setTimeRange] = useState(24); // hours
   const [groupBy, setGroupBy] = useState('k8s_pod_name');
-  
-  const [demoMode, setDemoMode] = useState(false);
   const [isGroupDropdownOpen, setIsGroupDropdownOpen] = useState(false);
   const [isTimeDropdownOpen, setIsTimeDropdownOpen] = useState(false);
 
@@ -40,13 +40,19 @@ export default function InfrastructurePage() {
       
       const metrics = 'system.cpu.utilization,system.memory.usage,http.throughput';
       
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/observability/infrastructure/metrics?projectId=${projectId}&start=${start}&end=${end}&metrics=${metrics}&groupBy=${groupBy}`, { 
-        credentials: "include" 
-      });
+      const [res, projectRes] = await Promise.all([
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/observability/infrastructure/metrics?projectId=${projectId}&start=${start}&end=${end}&metrics=${metrics}&groupBy=${groupBy}`, { 
+          credentials: "include" 
+        }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${projectId}`, { credentials: "include" })
+      ]);
       
       if (res.ok) {
         const json = await res.json();
         setMetricsData(json.data || []);
+      }
+      if (projectRes.ok) {
+        setProject(await projectRes.json());
       }
     } catch (err) {
       console.error(err);
@@ -54,52 +60,26 @@ export default function InfrastructurePage() {
       setLoading(false);
     }
   };
-
-  const generateDemoData = (metricName: string, hours: number) => {
-    const data = [];
-    const now = Date.now();
-    const points = hours * 60;
-    
-    let base1 = metricName === 'system.cpu.utilization' ? 40 : metricName === 'system.memory.usage' ? 4000 : 500;
-    let base2 = metricName === 'system.cpu.utilization' ? 55 : metricName === 'system.memory.usage' ? 6000 : 800;
-    let base3 = metricName === 'system.cpu.utilization' ? 70 : metricName === 'system.memory.usage' ? 8000 : 1200;
-
-    for (let i = points; i >= 0; i--) {
-      const time = now - i * 60000;
-      
-      // Random walk for noisy data
-      base1 = Math.max(0, Math.min(metricName === 'system.cpu.utilization' ? 100 : 10000, base1 + (Math.random() - 0.5) * (metricName === 'system.cpu.utilization' ? 15 : 400)));
-      base2 = Math.max(0, Math.min(metricName === 'system.cpu.utilization' ? 100 : 10000, base2 + (Math.random() - 0.5) * (metricName === 'system.cpu.utilization' ? 15 : 400)));
-      base3 = Math.max(0, Math.min(metricName === 'system.cpu.utilization' ? 100 : 10000, base3 + (Math.random() - 0.5) * (metricName === 'system.cpu.utilization' ? 15 : 400)));
-
-      data.push({
-        formattedTime: new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        rawTime: time,
-        'api-pod-xyz': base1,
-        'frontend-pod-123': base2,
-        'worker-pod-abc': base3,
-      });
-    }
-    return { data, groups: ['api-pod-xyz', 'frontend-pod-123', 'worker-pod-abc'] };
-  };
-
   // Pivot data for Recharts
   const processChartData = (metricName: string) => {
-    if (demoMode) {
-      return generateDemoData(metricName, timeRange);
-    }
-
     const timeMap = new Map<string, any>();
     const groups = new Set<string>();
 
     metricsData.forEach(d => {
       if (d.metric_name === metricName) {
-        const timeKey = d.time; // ISO string from ClickHouse
+        const timeKey = d.time; // string from ClickHouse, often missing 'Z'
+        
+        let dateObj = new Date(timeKey);
+        if (typeof timeKey === 'string' && !timeKey.endsWith('Z')) {
+          // Force UTC parsing for ClickHouse strings like "2026-09-18 14:48:00"
+          dateObj = new Date(timeKey.replace(' ', 'T') + 'Z');
+        }
+
         if (!timeMap.has(timeKey)) {
           timeMap.set(timeKey, { 
             time: timeKey, 
-            formattedTime: new Date(timeKey).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            rawTime: new Date(timeKey).getTime()
+            formattedTime: dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            rawTime: dateObj.getTime()
           });
         }
         
@@ -157,16 +137,28 @@ export default function InfrastructurePage() {
               fontSize={11} 
               tickLine={false}
               axisLine={false}
-              tickFormatter={(val) => `${val}${yAxisLabel}`}
+              tickFormatter={(val) => {
+                if (yAxisLabel.trim() === 'MB' && val > 999) return `${(val / 1024).toFixed(1)} GB`;
+                return `${val}${yAxisLabel}`;
+              }}
               tickMargin={12}
             />
             <Tooltip 
-              formatter={(value: any, name: any) => [`${Number(value || 0).toFixed(2)}${yAxisLabel}`, name]}
+              formatter={(value: any, name: any) => {
+                const num = Number(value || 0);
+                if (yAxisLabel.trim() === 'MB' && num > 999) return [`${(num / 1024).toFixed(2)} GB`, name];
+                return [`${num.toFixed(2)}${yAxisLabel}`, name];
+              }}
               contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '4px', color: '#fff' }}
               itemStyle={{ color: '#e4e4e7', fontWeight: 500 }}
               labelStyle={{ color: '#a1a1aa', marginBottom: '0.25rem', fontWeight: 600, fontSize: '12px' }}
             />
-            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '15px' }} iconType="plainline" iconSize={14} />
+            <Legend 
+              wrapperStyle={{ fontSize: '11px', paddingTop: '15px' }} 
+              iconType="plainline" 
+              iconSize={14} 
+              formatter={(value) => <span style={{ color: '#ffffff' }}>{value}</span>}
+            />
             {chartInfo.groups.map((group, i) => (
               <Line 
                 key={group}
@@ -174,7 +166,7 @@ export default function InfrastructurePage() {
                 dataKey={group} 
                 stroke={colors[i % colors.length]} 
                 dot={false}
-                strokeWidth={1.5}
+                strokeWidth={1.8}
                 isAnimationActive={false}
               />
             ))}
@@ -185,11 +177,17 @@ export default function InfrastructurePage() {
   };
 
   return (
-    <div className="min-h-screen bg-black p-6">
-      <div className="mx-auto max-w-5xl space-y-6">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
-          <div>
-            <h1 className="mb-2 text-2xl font-bold text-white flex items-center gap-3">
+    <div className="min-h-screen bg-black p-6 pb-24">
+      <div className="mx-auto max-w-7xl space-y-6">
+        {project && !project.observability?.verified ? (
+          <div className="mt-8">
+            <ObservabilitySetup project={project} onVerified={fetchMetrics} />
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
+              <div>
+                <h1 className="mb-2 text-2xl font-bold text-white flex items-center gap-3">
               <Server className="h-6 w-6 text-white" />
               Infrastructure Metrics
             </h1>
@@ -197,14 +195,6 @@ export default function InfrastructurePage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setDemoMode(!demoMode)}
-              className={`flex items-center gap-2 border rounded-lg px-3 py-1.5 shadow-xl text-sm font-medium transition-colors ${demoMode ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/50' : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700'}`}
-            >
-              <Activity className="h-4 w-4" />
-              {demoMode ? 'Demo Mode: ON' : 'Demo Mode: OFF'}
-            </button>
-
             <div className="relative">
               <button 
                 onClick={() => { setIsGroupDropdownOpen(!isGroupDropdownOpen); setIsTimeDropdownOpen(false); }}
@@ -311,7 +301,9 @@ export default function InfrastructurePage() {
             </div>
           </div>
         )}
-      </div>
+        </>
+      )}
+    </div>
     </div>
   );
 }

@@ -124,10 +124,54 @@ export const tracesRumRouter: FastifyPluginAsync = async (app) => {
       });
       const rows = await res.json<any>();
 
-      // Transform rows into a nested structure by bucket
+      // Pre-fill timeseriesMap with empty buckets
       const timeseriesMap = new Map();
+      const nowMs = Date.now();
+      
+      let numBuckets = 24;
+      let stepMs = 60 * 60 * 1000;
+      
+      if (window === '7d') {
+        numBuckets = 7;
+        stepMs = 24 * 60 * 60 * 1000;
+        // Align to UTC start of day
+        const d = new Date(nowMs);
+        d.setUTCHours(0,0,0,0);
+        const startOfDayMs = d.getTime();
+        for (let i = numBuckets - 1; i >= 0; i--) {
+          const t = startOfDayMs - (i * stepMs);
+          timeseriesMap.set(t, { timestamp: t, timestampISO: new Date(t).toISOString() });
+        }
+      } else if (window === '1h') {
+        numBuckets = 12;
+        stepMs = 5 * 60 * 1000;
+        // Align to 5 min boundary
+        const d = new Date(nowMs);
+        const mins = d.getUTCMinutes();
+        d.setUTCMinutes(mins - (mins % 5), 0, 0);
+        const startOf5MinMs = d.getTime();
+        for (let i = numBuckets - 1; i >= 0; i--) {
+          const t = startOf5MinMs - (i * stepMs);
+          timeseriesMap.set(t, { timestamp: t, timestampISO: new Date(t).toISOString() });
+        }
+      } else {
+        // 24h
+        numBuckets = 24;
+        stepMs = 60 * 60 * 1000;
+        // Align to hour boundary
+        const d = new Date(nowMs);
+        d.setUTCMinutes(0, 0, 0);
+        const startOfHourMs = d.getTime();
+        for (let i = numBuckets - 1; i >= 0; i--) {
+          const t = startOfHourMs - (i * stepMs);
+          timeseriesMap.set(t, { timestamp: t, timestampISO: new Date(t).toISOString() });
+        }
+      }
+
+      // Merge query results
       rows.forEach((row: any) => {
-        const timeKey = new Date(row.bucket).getTime();
+        const timeStr = row.bucket.endsWith('Z') ? row.bucket : row.bucket + 'Z';
+        const timeKey = new Date(timeStr).getTime();
         if (!timeseriesMap.has(timeKey)) {
           timeseriesMap.set(timeKey, { timestamp: timeKey, timestampISO: row.bucket });
         }

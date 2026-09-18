@@ -1,4 +1,4 @@
-import { db } from '../db.js';
+import { clickhouse } from '../clickhouse.js';
 
 export interface ProfileRecord {
   projectId: string;
@@ -12,20 +12,13 @@ export interface ProfileRecord {
 class ProfileWriter {
   private buffer: ProfileRecord[] = [];
   private flushTimer: NodeJS.Timeout | null = null;
-  // Reduce batch size to prevent hitting Postgres' 65,535 parameter limit.
-  // 6 columns * 2000 rows = 12,000 parameters (well within safe limits).
-  private readonly BATCH_SIZE = 2000; 
-  private readonly FLUSH_INTERVAL_MS = 2000;
+  // ClickHouse is optimized for huge batches
+  private readonly BATCH_SIZE = 50000; 
+  private readonly FLUSH_INTERVAL_MS = 3000;
   private isFlushing = false;
 
   async write(profiles: ProfileRecord[]): Promise<void> {
     if (!profiles || profiles.length === 0) return;
-    
-    // Hard cap memory usage to prevent V8 Heap OOM under intense profiling traffic
-    if (this.buffer.length > 50000) {
-      console.warn('[ProfileWriter] Load shedding: Buffer exceeded 50,000 items, dropping incoming profiles to prevent OOM.');
-      return;
-    }
 
     this.buffer.push(...profiles);
 
@@ -50,29 +43,29 @@ class ProfileWriter {
         const batch = this.buffer.splice(0, this.BATCH_SIZE);
         if (batch.length === 0) break;
 
-        const values: string[] = [];
-        const flatArgs: any[] = [];
-        let index = 1;
-
-        for (const s of batch) {
-          values.push(`($${index++}, $${index++}, $${index++}, $${index++}::timestamptz, $${index++}, $${index++})`);
-          flatArgs.push(s.projectId, s.serviceName, s.profileType, s.timestamp.toISOString(), s.stackTrace, s.value);
-        }
-
         try {
-          const insertQuery = `
-            INSERT INTO profiles (project_id, service_name, profile_type, timestamp, stack_trace, value)
-            VALUES ${values.join(', ')}
-          `;
-          await db.query(insertQuery, flatArgs);
+          await clickhouse.insert({
+            table: 'profiles',
+            values: batch.map(s => ({
+              project_id: s.projectId,
+              service_name: s.serviceName,
+              profile_type: s.profileType,
+              timestamp: s.timestamp.getTime(), // ClickHouse DateTime64 takes millisecond timestamp
+              stack_trace: s.stackTrace,
+              value: s.value
+            })),
+            format: 'JSONEachRow'
+          });
         } catch (dbErr: any) {
-          console.error('[ProfileWriter] Failed to write profiles to Postgres:', dbErr.message);
+          console.error('[ProfileWriter] Failed to write profiles to ClickHouse:', dbErr.message);
           
-          // Requeue for retry, but apply load shedding if pipeline backed up
+          // Requeue for retry
           this.buffer.unshift(...batch);
-          if (this.buffer.length > 50000) {
-            console.warn('[ProfileWriter] Buffer exceeded 50,000 items, dropping oldest profiles to prevent OOM.');
-            this.buffer.splice(0, this.buffer.length - 50000);
+          
+          // Safety cap in case of extended ClickHouse outage
+          if (this.buffer.length > 500000) {
+            console.warn('[ProfileWriter] Buffer exceeded 500,000 items, dropping oldest profiles to prevent OOM.');
+            this.buffer.splice(0, this.buffer.length - 500000);
           }
           break; // Exit while loop to back off, will retry on next timer
         }

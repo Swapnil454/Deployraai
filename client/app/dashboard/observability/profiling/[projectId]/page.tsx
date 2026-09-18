@@ -107,7 +107,9 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [serviceName, setServiceName] = useState('go-profiler-test');
+  
+  const [availableServices, setAvailableServices] = useState<string[]>([]);
+  const [serviceName, setServiceName] = useState('');
   const [profileType, setProfileType] = useState('cpu');
   const [viewMode, setViewMode] = useState<'table' | 'flamegraph'>('table');
   
@@ -125,10 +127,38 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [dropdownRef]);
+
+  // Fetch available services for this project
+  useEffect(() => {
+    async function fetchServices() {
+      if (!projectId) return;
+      try {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/profiles/services?projectId=${projectId}`, {
+          credentials: "include"
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAvailableServices(data.services || []);
+          if (data.services && data.services.length > 0) {
+            // Select the first real service if available, else fallback to demo
+            const realService = data.services.find((s: string) => s !== 'go-profiler-test');
+            setServiceName(realService || 'go-profiler-test');
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch profiling services", err);
+        setAvailableServices(['go-profiler-test']);
+        setServiceName('go-profiler-test');
+      }
+    }
+    fetchServices();
+  }, [projectId]);
   
   const fetchProfile = async () => {
-    if (!projectId) {
-      setError('No project selected');
+    if (!projectId || !serviceName) {
+      if (!serviceName && !loading && availableServices.length === 0) {
+        setError('No services have emitted profiling data yet.');
+      }
       return;
     }
     
@@ -153,8 +183,6 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
         setError('No profiling data found for this service in the last 30 minutes.');
         setProfile(null);
       } else {
-        // Pyroscope renderer expects the standard flamegraph JSON node format
-        // Our backend generates exactly this format.
         setProfile(data);
       }
     } catch (err: any) {
@@ -165,7 +193,7 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
   };
 
   useEffect(() => {
-    if (projectId) {
+    if (projectId && serviceName) {
       fetchProfile();
     }
   }, [projectId, serviceName, profileType]);
@@ -227,7 +255,7 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
             
             {isDropdownOpen && (
               <div className="absolute top-full left-0 mt-1 w-full bg-zinc-900 border border-zinc-700/80 rounded-md shadow-xl overflow-hidden z-50 backdrop-blur-2xl">
-                {['go-profiler-test', 'frontend', 'backend'].map((svc) => (
+                {(availableServices.length > 0 ? availableServices : ['go-profiler-test']).map((svc) => (
                   <button
                     key={svc}
                     onClick={() => {

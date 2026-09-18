@@ -74,13 +74,14 @@ import { db, initDb } from './db.js';
 import { renderPollerRegistry } from './pollers/render-poller.js';
 
 import { usagePoller } from './pollers/usage-poller.js';
-
 import { runRetentionPoller } from './pollers/retention-poller.js';
+import { topologyPoller } from './pollers/topology-poller.js';
 
 async function restoreRenderPollers() {
   // ...
   
   usagePoller.start();
+  topologyPoller.start();
 
   // Run retention poller immediately, then every hour
   runRetentionPoller();

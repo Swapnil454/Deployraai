@@ -214,8 +214,30 @@ export const Header = ({ projects }: { projects: any[] }) => {
           </h2>
         </div>
 
-        {/* Right: Empty spacer to balance flex */}
-        <div className="flex-1"></div>
+        {/* Right: Project ID / Setup info */}
+        <div className="flex-1 flex justify-end items-center">
+          {currentProject && (
+            <div className="flex items-center gap-2 bg-zinc-900/50 border border-zinc-800/80 px-2 py-1 rounded-md">
+              <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest select-none">Project ID</span>
+              <code className="text-[11px] text-zinc-300 font-mono select-all">
+                {currentProject._id}
+              </code>
+              <button 
+                onClick={(e) => {
+                  navigator.clipboard.writeText(currentProject._id);
+                  const btn = e.currentTarget;
+                  const originalHtml = btn.innerHTML;
+                  btn.innerHTML = '<span class="text-[10px] text-emerald-400 font-bold px-1">Copied!</span>';
+                  setTimeout(() => { btn.innerHTML = originalHtml; }, 2000);
+                }}
+                className="text-zinc-500 hover:text-white transition-colors p-0.5 rounded cursor-pointer"
+                title="Copy Project ID"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

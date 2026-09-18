@@ -67,9 +67,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex min-h-screen bg-black text-white">
+    <div className="flex h-screen bg-black text-white overflow-hidden">
       <Sidebar user={user} />
-      <main className="flex-1 flex flex-col overflow-auto h-screen relative">
+      <main className="flex-1 flex flex-col h-screen overflow-y-auto relative">
         <Header projects={projects} />
         {children}
       </main>

@@ -48,7 +48,7 @@ export async function initDb() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_rum_events_project_time ON rum_events (project_id, created_at DESC)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_rum_events_session ON rum_events (session_id)`);
   } catch (err) {
-    console.error('Failed to init RUM table', err);
+    console.error('Failed to init Postgres tables', err);
   } finally {
     client.release();
   }
@@ -73,6 +73,23 @@ export async function initDb() {
         ) ENGINE = MergeTree()
         PARTITION BY toYYYYMM(timestamp)
         ORDER BY (project_id, metric_name, k8s_pod_name, host_name, timestamp)
+        TTL timestamp + INTERVAL 7 DAY
+      `
+    });
+
+    await clickhouse.command({
+      query: `
+        CREATE TABLE IF NOT EXISTS profiles (
+          project_id LowCardinality(String),
+          service_name LowCardinality(String),
+          profile_type LowCardinality(String),
+          timestamp DateTime64(3),
+          stack_trace String,
+          value UInt64,
+          INDEX idx_project_id project_id TYPE minmax GRANULARITY 1
+        ) ENGINE = MergeTree()
+        PARTITION BY toYYYYMM(timestamp)
+        ORDER BY (project_id, service_name, profile_type, timestamp)
         TTL timestamp + INTERVAL 7 DAY
       `
     });

@@ -20,53 +20,49 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
       // ARCHITECTURE RECOMMENDATION: The ingestor pipeline MUST be refactored to pre-calculate 
       // edge relationships and write them directly into an AggregatingMergeTree (e.g. 'span_edges') 
       // to avoid querying and joining raw spans for topology generation.
+      const nodesQuery = `
+        SELECT 
+          attributes['service.name'] as service_name,
+          COUNT(*) as request_count,
+          avg(duration_ms) as avg_latency_ms,
+          sum(if(status_code = 2, 1, 0)) / COUNT(*) as error_rate
+        FROM spans
+        WHERE project_id = {projectId: String} 
+          AND start_time > now() - INTERVAL 1 HOUR
+          AND attributes['service.name'] != ''
+        GROUP BY attributes['service.name']
+      `;
+
+      const nodesResult = await clickhouse.query({
+        query: nodesQuery,
+        query_params: { projectId },
+        format: 'JSONEachRow'
+      });
+      const nodeRows = await nodesResult.json<any>();
+      
+      const nodesMap = new Map<string, { id: string, type: string, reqCount: number, errCount: number, totalLatency: number }>();
+      
+      for (const row of nodeRows) {
+        nodesMap.set(row.service_name, {
+          id: row.service_name,
+          type: 'service',
+          reqCount: Number(row.request_count),
+          errCount: Number(row.request_count) * Number(row.error_rate),
+          totalLatency: Number(row.request_count) * Number(row.avg_latency_ms)
+        });
+      }
+
       const query = `
-        WITH recent_spans AS (
-          SELECT 
-            span_id,
-            parent_span_id,
-            attributes['service.name'] as service_name,
-            attributes['db.system'] as db_system,
-            duration_ms,
-            status_code
-          FROM spans
-          WHERE project_id = {projectId: String} 
-            AND start_time > now() - INTERVAL 1 HOUR
-            AND attributes['service.name'] != '' -- Predicate pushdown to drastically reduce CTE footprint
-        ),
-        edges AS (
-          -- Edge type 1: Service to Service (parent-child relationship)
-          SELECT 
-            parent.service_name as source,
-            child.service_name as target,
-            'service' as target_type,
-            child.duration_ms as duration_ms,
-            child.status_code as status_code
-          FROM recent_spans child
-          JOIN recent_spans parent ON child.parent_span_id = parent.span_id
-          WHERE child.service_name != '' 
-            AND parent.service_name != child.service_name
-            
-          UNION ALL
-          
-          -- Edge type 2: Service to Database
-          SELECT 
-            service_name as source,
-            db_system as target,
-            'database' as target_type,
-            duration_ms,
-            status_code
-          FROM recent_spans
-          WHERE db_system != ''
-        )
         SELECT 
           source, 
           target,
           any(target_type) as target_type,
-          COUNT(*) as request_count,
-          avg(duration_ms) as avg_latency_ms,
-          sum(if(status_code = 2, 1, 0)) / COUNT(*) as error_rate
-        FROM edges
+          sum(request_count) as request_count,
+          sum(error_count) / max2(sum(request_count), 1) as error_rate,
+          sum(total_duration_ms) / max2(sum(request_count), 1) as avg_latency_ms
+        FROM topology_edges_1m
+        WHERE project_id = {projectId: String}
+          AND bucket >= now() - INTERVAL 1 HOUR
         GROUP BY source, target
       `;
 
@@ -77,21 +73,8 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
       });
       const rows = await result.json<any>();
       
-      const nodesMap = new Map<string, { id: string, type: string, reqCount: number, errCount: number, totalLatency: number }>();
       const edges = [];
       
-      const addNodeStat = (id: string, type: string, count: number, errRate: number, avgLat: number) => {
-        if (!nodesMap.has(id)) {
-          nodesMap.set(id, { id, type, reqCount: 0, errCount: 0, totalLatency: 0 });
-        }
-        const node = nodesMap.get(id)!;
-        node.reqCount += count;
-        node.errCount += count * errRate;
-        node.totalLatency += (avgLat * count);
-        // Ensure type isn't downgraded from 'database' to 'service' if seen in multiple edges
-        if (type === 'database') node.type = 'database';
-      };
-
       for (const row of rows) {
         const sourceId = row.source;
         const targetId = row.target;
@@ -100,8 +83,36 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
         // instead of brittle javascript string-matching.
         const targetType = row.target_type || 'service';
         
-        addNodeStat(sourceId, 'service', Number(row.request_count), Number(row.error_rate), Number(row.avg_latency_ms));
-        addNodeStat(targetId, targetType, Number(row.request_count), Number(row.error_rate), Number(row.avg_latency_ms));
+        // Add target node if it doesn't exist (e.g. database)
+        if (!nodesMap.has(targetId)) {
+          nodesMap.set(targetId, { 
+            id: targetId, 
+            type: targetType, 
+            reqCount: 0, 
+            errCount: 0, 
+            totalLatency: 0 
+          });
+        }
+        
+        // Accumulate stats for non-service nodes (like databases) from edges
+        if (targetType === 'database') {
+          const node = nodesMap.get(targetId)!;
+          node.type = 'database';
+          node.reqCount += Number(row.request_count);
+          node.errCount += Number(row.request_count) * Number(row.error_rate);
+          node.totalLatency += Number(row.request_count) * Number(row.avg_latency_ms);
+        }
+
+        // Add to source node if missing (fallback)
+        if (!nodesMap.has(sourceId)) {
+          nodesMap.set(sourceId, {
+            id: sourceId,
+            type: 'service',
+            reqCount: Number(row.request_count),
+            errCount: Number(row.request_count) * Number(row.error_rate),
+            totalLatency: Number(row.request_count) * Number(row.avg_latency_ms)
+          });
+        }
         
         edges.push({
           id: `${sourceId}-${targetId}`,

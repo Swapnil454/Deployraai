@@ -192,8 +192,9 @@ export function ObservabilitySetup({
                  {activeTab === 'next' ? (
                    <>
                      <span className="text-purple-400">instrumentation.ts:</span><br/>
-                     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = '{process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces';<br/>
-                     process.env.OTEL_SERVICE_NAME = '{project?.repoName || 'my-app'}';<br/>
+                     process.env.TRACEPILOT_TOKEN = '{project?._id || 'your-project-id'}';<br/>
+                     process.env.TRACEPILOT_SERVICE_NAME = '{project?.repoName || 'my-app'}';<br/>
+                     process.env.TRACEPILOT_ENVIRONMENT = 'production';<br/>
                      import &#123; initTracer, setupGlobalErrorCapture &#125; from '@swapnil454/tracepilot';<br/>
                      export function register() &#123; initTracer(); setupGlobalErrorCapture(); &#125;
                    </>
@@ -203,9 +204,9 @@ export function ObservabilitySetup({
                      import &#123; TracePilotProvider &#125; from '@swapnil454/tracepilot/react';<br/>
                      <br/>
                      &lt;TracePilotProvider<br/>
-                     &nbsp;&nbsp;token="{project?.repoName || 'my-app'}"<br/>
+                     &nbsp;&nbsp;token="{project?._id || 'your-project-id'}"<br/>
                      &nbsp;&nbsp;serviceName="{project?.repoName || 'my-app'}"<br/>
-                     &nbsp;&nbsp;ingestorUrl="{process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces"<br/>
+                     &nbsp;&nbsp;environment="production"<br/>
                      &gt;<br/>
                      &nbsp;&nbsp;&lt;App /&gt;<br/>
                      &lt;/TracePilotProvider&gt;
@@ -214,48 +215,36 @@ export function ObservabilitySetup({
                    <>
                      <span className="text-purple-400">main.py:</span><br/>
                      import os<br/>
-                     from opentelemetry import trace<br/>
-                     from opentelemetry.sdk.trace import TracerProvider<br/>
-                     from opentelemetry.sdk.trace.export import BatchSpanProcessor<br/>
-                     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter<br/>
+                     from tracepilot import init_tracepilot<br/>
                      <br/>
-                     os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "{process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces"<br/>
-                     os.environ["OTEL_SERVICE_NAME"] = "{project?.repoName || 'my-app'}"<br/>
+                     os.environ["TRACEPILOT_TOKEN"] = "{project?._id || 'your-project-id'}"<br/>
+                     os.environ["TRACEPILOT_SERVICE_NAME"] = "{project?.repoName || 'my-app'}"<br/>
+                     os.environ["TRACEPILOT_ENVIRONMENT"] = "production"<br/>
                      <br/>
-                     trace.set_tracer_provider(TracerProvider())<br/>
-                     otlp_exporter = OTLPSpanExporter()<br/>
-                     trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(otlp_exporter))<br/>
+                     init_tracepilot()<br/>
                    </>
                  ) : activeTab === 'go' ? (
                    <>
                      <span className="text-purple-400">main.go:</span><br/>
                      import (<br/>
-                     &nbsp;&nbsp;"context"<br/>
                      &nbsp;&nbsp;"os"<br/>
-                     &nbsp;&nbsp;"go.opentelemetry.io/otel"<br/>
-                     &nbsp;&nbsp;"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"<br/>
-                     &nbsp;&nbsp;"go.opentelemetry.io/otel/sdk/resource"<br/>
-                     &nbsp;&nbsp;sdktrace "go.opentelemetry.io/otel/sdk/trace"<br/>
-                     &nbsp;&nbsp;semconv "go.opentelemetry.io/otel/semconv/v1.4.0"<br/>
+                     &nbsp;&nbsp;"github.com/swapnil454/tracepilot-go"<br/>
                      )<br/>
                      <br/>
-                     func initTracer() *sdktrace.TracerProvider &#123;<br/>
-                     &nbsp;&nbsp;os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "{process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces")<br/>
-                     &nbsp;&nbsp;os.Setenv("OTEL_SERVICE_NAME", "{project?.repoName || 'my-app'}")<br/>
-                     &nbsp;&nbsp;exp, _ := otlptracehttp.New(context.Background())<br/>
-                     &nbsp;&nbsp;tp := sdktrace.NewTracerProvider(<br/>
-                     &nbsp;&nbsp;&nbsp;&nbsp;sdktrace.WithBatcher(exp),<br/>
-                     &nbsp;&nbsp;&nbsp;&nbsp;sdktrace.WithResource(resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceNameKey.String("{project?.repoName || 'my-app'}"))),<br/>
-                     &nbsp;&nbsp;)<br/>
-                     &nbsp;&nbsp;otel.SetTracerProvider(tp)<br/>
-                     &nbsp;&nbsp;return tp<br/>
+                     func main() &#123;<br/>
+                     &nbsp;&nbsp;os.Setenv("TRACEPILOT_TOKEN", "{project?._id || 'your-project-id'}")<br/>
+                     &nbsp;&nbsp;os.Setenv("TRACEPILOT_SERVICE_NAME", "{project?.repoName || 'my-app'}")<br/>
+                     &nbsp;&nbsp;os.Setenv("TRACEPILOT_ENVIRONMENT", "production")<br/>
+                     &nbsp;&nbsp;tp := tracepilot.Init()<br/>
+                     &nbsp;&nbsp;defer tp.Shutdown()<br/>
                      &#125;
                    </>
                  ) : (
                    <>
                      <span className="text-purple-400">index.js:</span><br/>
-                     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = '{process.env.NEXT_PUBLIC_API_URL || 'https://api.deployai.in'}/api/observability/traces';<br/>
-                     process.env.OTEL_SERVICE_NAME = '{project?.repoName || 'my-app'}';<br/>
+                     process.env.TRACEPILOT_TOKEN = '{project?._id || 'your-project-id'}';<br/>
+                     process.env.TRACEPILOT_SERVICE_NAME = '{project?.repoName || 'my-app'}';<br/>
+                     process.env.TRACEPILOT_ENVIRONMENT = 'production';<br/>
                      const &#123; initExpressObservability &#125; = require('@swapnil454/tracepilot/express');<br/>
                      initExpressObservability();
                    </>
