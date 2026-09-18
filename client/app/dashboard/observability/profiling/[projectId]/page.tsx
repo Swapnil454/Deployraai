@@ -10,7 +10,7 @@ import * as d3 from 'd3';
 import flamegraph from 'd3-flame-graph';
 import './d3-flamegraph.css';
 import { ProfilingTable } from '@/components/observability/ProfilingTable';
-import { Table, Flame } from 'lucide-react';
+import { Table, Flame, AlertCircle, Terminal, Copy, Check, ExternalLink } from 'lucide-react';
 
 function D3Flamegraph({ data, profileType }: { data: any, profileType: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -99,8 +99,6 @@ function D3Flamegraph({ data, profileType }: { data: any, profileType: string })
   );
 }
 
-import { AlertCircle, Database, Ghost } from 'lucide-react';
-
 export default function ProfilingPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = use(params);
   
@@ -140,15 +138,11 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
           const data = await res.json();
           setAvailableServices(data.services || []);
           if (data.services && data.services.length > 0) {
-            // Select the first real service if available, else fallback to demo
-            const realService = data.services.find((s: string) => s !== 'go-profiler-test');
-            setServiceName(realService || 'go-profiler-test');
+            setServiceName(data.services[0]);
           }
         }
       } catch (err) {
         console.error("Failed to fetch profiling services", err);
-        setAvailableServices(['go-profiler-test']);
-        setServiceName('go-profiler-test');
       }
     }
     fetchServices();
@@ -197,6 +191,84 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
       fetchProfile();
     }
   }, [projectId, serviceName, profileType]);
+  if (availableServices.length === 0) {
+    return (
+      <div className="p-6 space-y-6 max-w-[1200px] mx-auto">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-3">
+            <Activity className="w-8 h-8 text-indigo-400" />
+            Continuous Profiling
+          </h1>
+          <p className="text-zinc-400 mt-2 max-w-2xl text-sm leading-relaxed">
+            Discover performance bottlenecks, optimize resource usage, and lower cloud costs with production-grade CPU and Memory flamegraphs.
+          </p>
+        </div>
+
+        <div className="bg-zinc-950/60 border border-zinc-800/60 rounded-xl overflow-hidden shadow-2xl backdrop-blur-xl">
+          <div className="border-b border-zinc-800/60 bg-zinc-900/40 p-6 lg:p-8">
+            <h3 className="text-xl font-semibold text-white mb-2">Connect Your Profiler</h3>
+            <p className="text-zinc-400 text-sm">Send standard pprof profiles to the ingestor to automatically generate Flamegraphs.</p>
+          </div>
+
+          <div className="p-6 lg:p-8 space-y-8">
+            <div className="space-y-4">
+              <h4 className="text-sm font-medium text-white flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs">1</div>
+                Node.js (Using pprof)
+              </h4>
+              <div className="bg-black border border-zinc-800/80 rounded-lg p-4 font-mono text-sm overflow-x-auto text-zinc-300">
+                <div className="text-zinc-500 mb-2"># Install pprof package</div>
+                <div className="text-zinc-300">npm install @datadog/pprof</div>
+                <br/>
+                <div className="text-zinc-500 mb-2">// In your application startup</div>
+                <div className="text-indigo-400">const pprof = require('@datadog/pprof');</div>
+                <div className="text-indigo-400">const axios = require('axios');</div>
+                <br/>
+                <div>setInterval(async () =&gt; {'{'}</div>
+                <div className="pl-4">const profile = await pprof.time.profile({'{'} durationMillis: 10000 {'}'});</div>
+                <div className="pl-4">const buf = await pprof.encode(profile);</div>
+                <div className="pl-4 mt-2 text-zinc-500">// Send to DeployRAAI Ingestor</div>
+                <div className="pl-4">await axios.post('https://deployraai-ingestor.yourdomain.com/v1/profiles', buf, {'{'}</div>
+                <div className="pl-8">headers: {'{'}</div>
+                <div className="pl-12">'x-project-id': '{projectId}',</div>
+                <div className="pl-12">'x-service-name': 'my-node-service',</div>
+                <div className="pl-12">'x-profile-type': 'cpu',</div>
+                <div className="pl-12">'Content-Type': 'application/octet-stream'</div>
+                <div className="pl-8">{'}'}</div>
+                <div className="pl-4">{'}'});</div>
+                <div>{'}'}, 60000);</div>
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-4 border-t border-zinc-800/60">
+              <h4 className="text-sm font-medium text-white flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs">2</div>
+                Golang (Using net/http/pprof)
+              </h4>
+              <div className="bg-black border border-zinc-800/80 rounded-lg p-4 font-mono text-sm overflow-x-auto text-zinc-300">
+                <div className="text-zinc-500 mb-2">// Send a local pprof buffer to the ingestor periodically</div>
+                <div className="text-indigo-400">import "runtime/pprof"</div>
+                <br/>
+                <div>func captureAndSendProfile() {'{'}</div>
+                <div className="pl-4">var buf bytes.Buffer</div>
+                <div className="pl-4">pprof.StartCPUProfile(&amp;buf)</div>
+                <div className="pl-4">time.Sleep(10 * time.Second)</div>
+                <div className="pl-4">pprof.StopCPUProfile()</div>
+                <br/>
+                <div className="pl-4">req, _ := http.NewRequest("POST", "https://deployraai-ingestor.yourdomain.com/v1/profiles", &amp;buf)</div>
+                <div className="pl-4">req.Header.Set("x-project-id", "{projectId}")</div>
+                <div className="pl-4">req.Header.Set("x-service-name", "my-go-service")</div>
+                <div className="pl-4">req.Header.Set("x-profile-type", "cpu")</div>
+                <div className="pl-4">req.Header.Set("Content-Type", "application/octet-stream")</div>
+                <div className="pl-4">http.DefaultClient.Do(req)</div>
+                <div>{'}'}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
@@ -248,14 +320,14 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
               className="flex items-center justify-between w-full h-9 px-3 bg-zinc-950/80 border border-zinc-800/50 rounded-md text-sm text-zinc-100 hover:bg-zinc-900 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 shadow-inner transition-colors"
             >
               <span className="truncate">
-                {serviceName === 'go-profiler-test' ? 'go-profiler-test (Demo)' : serviceName}
+                {serviceName}
               </span>
               <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
             
             {isDropdownOpen && (
               <div className="absolute top-full left-0 mt-1 w-full bg-zinc-900 border border-zinc-700/80 rounded-md shadow-xl overflow-hidden z-50 backdrop-blur-2xl">
-                {(availableServices.length > 0 ? availableServices : ['go-profiler-test']).map((svc) => (
+                {availableServices.map((svc) => (
                   <button
                     key={svc}
                     onClick={() => {
@@ -268,7 +340,7 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
                         : 'text-zinc-300 hover:bg-zinc-800/80 hover:text-white'
                     }`}
                   >
-                    {svc === 'go-profiler-test' ? 'go-profiler-test (Demo)' : svc}
+                    {svc}
                   </button>
                 ))}
               </div>

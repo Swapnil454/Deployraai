@@ -125,18 +125,8 @@ export const profilesRouter: FastifyPluginAsync = async (app) => {
       let query = '';
       let queryParams: Record<string, unknown> = {};
       
-      if (serviceName === 'go-profiler-test') {
-        // Global Demo Mode: return demo data regardless of project or timestamp
-        query = `
-          SELECT stack_trace, sum(value) AS total_value
-          FROM profiles
-          WHERE service_name = {serviceName: String}
-            AND profile_type = {profileType: String}
-          GROUP BY stack_trace
-          ORDER BY total_value DESC
-          LIMIT 5000
-        `;
-        queryParams = { serviceName, profileType };
+      if (false) {
+        // Removed demo code
       } else {
         query = `
           SELECT stack_trace, sum(value) AS total_value
@@ -219,10 +209,7 @@ export const profilesRouter: FastifyPluginAsync = async (app) => {
       
       const services = rows.map(r => r.service_name);
       
-      // Always include the global demo
-      if (!services.includes('go-profiler-test')) {
-        services.push('go-profiler-test');
-      }
+      // Removed demo injection
       
       return reply.status(200).send({ services });
     } catch (err: any) {
