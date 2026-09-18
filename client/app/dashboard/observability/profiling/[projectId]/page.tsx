@@ -134,26 +134,46 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
     };
   }, [dropdownRef]);
 
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
+
   // Fetch available services for this project
-  useEffect(() => {
-    async function fetchServices() {
-      if (!projectId) return;
-      try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/profiles/services?projectId=${projectId}`, {
-          credentials: "include"
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setAvailableServices(data.services || []);
-          if (data.services && data.services.length > 0) {
-            setServiceName(data.services[0]);
-          }
-        }
-      } catch (err) {
-        console.error("Failed to fetch profiling services", err);
-      }
+  const checkServices = async (isManualVerify = false) => {
+    if (!projectId) return false;
+    
+    if (isManualVerify) {
+      setIsVerifying(true);
+      setVerifyError('');
     }
-    fetchServices();
+    
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/observability/profiles/services?projectId=${projectId}`, {
+        credentials: "include"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const services = data.services || [];
+        setAvailableServices(services);
+        
+        if (services.length > 0) {
+          setServiceName(services[0]);
+          if (isManualVerify) setIsVerifying(false);
+          return true;
+        } else if (isManualVerify) {
+          setVerifyError('No profiling data received yet. Did you deploy your changes?');
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch profiling services", err);
+      if (isManualVerify) setVerifyError('Failed to check connection. Try again.');
+    }
+    
+    if (isManualVerify) setIsVerifying(false);
+    return false;
+  };
+
+  useEffect(() => {
+    checkServices();
   }, [projectId]);
 
   const handleAutoInject = async () => {
@@ -248,24 +268,41 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
                 <h3 className="text-xl font-semibold text-white mb-2">Connect Your Profiler</h3>
                 <p className="text-zinc-400 text-sm">Send standard pprof profiles to the ingestor to automatically generate Flamegraphs.</p>
               </div>
-              <button 
-                onClick={handleAutoInject}
-                disabled={aiState !== 'idle'}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-md font-medium text-sm flex items-center gap-2 transition-colors disabled:opacity-50"
-              >
-                {aiState === 'idle' ? (
-                  <>
-                    <Wand2 className="w-4 h-4" />
-                    Auto Inject (AI)
-                  </>
-                ) : (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    {aiState === 'analyzing' ? 'Analyzing Backend...' : 'Generating PR...'}
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => checkServices(true)}
+                  disabled={isVerifying}
+                  className="bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-md font-medium text-sm flex items-center gap-2 transition-colors disabled:opacity-50"
+                >
+                  {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  Verify Connection
+                </button>
+                <button 
+                  onClick={handleAutoInject}
+                  disabled={aiState !== 'idle'}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-md font-medium text-sm flex items-center gap-2 transition-colors disabled:opacity-50"
+                >
+                  {aiState === 'idle' ? (
+                    <>
+                      <Wand2 className="w-4 h-4" />
+                      Auto Inject (AI)
+                    </>
+                  ) : (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      {aiState === 'analyzing' ? 'Analyzing Backend...' : 'Generating PR...'}
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
+            
+            {verifyError && (
+              <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-md text-sm flex items-center gap-2">
+                <AlertCircle className="w-4 h-4" />
+                {verifyError}
+              </div>
+            )}
             
             {aiError && (
               <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-md text-sm flex items-center gap-2">

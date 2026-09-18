@@ -116,8 +116,13 @@ router.post(['/rum/v1/rum', '/traces/v1/rum'], async (req, res) => {
     res.status(error.response?.status || 502).json(error.response?.data || { error: 'RUM Ingestion failed' });
   }
 });
+import cors from 'cors';
 
 // Apply auth middleware to all OTHER routes (dashboard fetch)
+router.use(cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    credentials: true
+}));
 router.use(requireAuth);
 
 // Catch-all proxy route

@@ -45,7 +45,14 @@ app.use("/api/analytics", (req, res, next) => {
 });
 
 // Observability trace ingest endpoints also need open CORS
-app.use("/api/observability", (req, res, next) => {
+app.use("/api/observability/traces", (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-tracepilot-project-id");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+});
+app.use("/api/observability/rum", (req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
     res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-tracepilot-project-id");
