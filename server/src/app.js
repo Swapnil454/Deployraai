@@ -59,6 +59,13 @@ app.use("/api/observability/rum", (req, res, next) => {
     if (req.method === "OPTIONS") return res.sendStatus(204);
     next();
 });
+app.use("/api/observability/profiles/v1", (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-project-id, x-service-name, x-profile-type");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+});
 
 app.use("/api/analytics", async (req, res, next) => {
     try {

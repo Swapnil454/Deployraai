@@ -116,6 +116,30 @@ router.post(['/rum/v1/rum', '/traces/v1/rum'], async (req, res) => {
     res.status(error.response?.status || 502).json(error.response?.data || { error: 'RUM Ingestion failed' });
   }
 });
+// Unauthenticated Profiles Ingestion Endpoint
+router.post('/profiles/v1/profiles', express.raw({ type: 'application/octet-stream', limit: '20mb' }), async (req, res) => {
+  try {
+    const targetUrl = `${INGESTOR_URL}/v1/profiles`;
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      data: req.body,
+      headers: {
+        'x-project-id': req.headers['x-project-id'] || '',
+        'x-service-name': req.headers['x-service-name'] || '',
+        'x-profile-type': req.headers['x-profile-type'] || 'cpu',
+        'Content-Type': req.headers['content-type'] || 'application/octet-stream',
+      },
+      timeout: 15000,
+      responseType: 'arraybuffer' // handle raw buffer data correctly if response returns any
+    });
+    res.status(response.status).send(response.data);
+  } catch (error) {
+    console.error('Profiles Ingestion API Error:', error.message);
+    res.status(error.response?.status || 502).json(error.response?.data ? JSON.parse(Buffer.from(error.response.data).toString()) : { error: 'Profiles Ingestion failed' });
+  }
+});
+
 import cors from 'cors';
 
 // Apply auth middleware to all OTHER routes (dashboard fetch)
