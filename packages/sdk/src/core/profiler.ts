@@ -11,7 +11,6 @@ export interface ProfilerOptions {
 export class ContinuousProfiler {
   private timer: ReturnType<typeof setInterval> | null = null;
   private options: Required<ProfilerOptions>;
-  private stopCpuProfile: (() => any) | null = null;
 
   constructor(options: ProfilerOptions) {
     this.options = {
@@ -26,8 +25,8 @@ export class ContinuousProfiler {
   public start() {
     if (!this.options.enabled) return;
     
-    // Start the first profiling session (interval: 1000us / 1ms)
-    this.stopCpuProfile = pprof.time.start(1000, 'cpu');
+    // Start the first profiling session
+    pprof.time.start();
     pprof.heap.start(512 * 1024, 64); // start heap allocation profiling (intervalBytes: 512KB, stackDepth: 64)
 
     this.timer = setInterval(async () => {
@@ -46,12 +45,10 @@ export class ContinuousProfiler {
 
   private async flush() {
     try {
-      // Stop current CPU profile and start next one immediately
-      let cpuProfile;
-      if (this.stopCpuProfile) {
-        cpuProfile = this.stopCpuProfile();
-      }
-      this.stopCpuProfile = pprof.time.start(1000, 'cpu');
+      // Stop current CPU profile, which returns the profile
+      const cpuProfile = pprof.time.stop();
+      // Restart CPU profile immediately for the next window
+      pprof.time.start();
 
       // Capture current Heap memory profile (runs continuously)
       const memProfile = pprof.heap.profile();
