@@ -132,8 +132,8 @@ export function ProfilingTable({ data, profileType }: { data: FlamegraphNode, pr
         </Button>
       </div>
       
-      <div className="flex-1 overflow-y-auto">
-        <table className="w-full text-sm text-left">
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-sm text-left whitespace-nowrap">
           <thead className="text-xs uppercase bg-zinc-900/50 border-b border-zinc-800/60 text-zinc-400 sticky top-0 z-10 backdrop-blur-xl">
             <tr>
               <th className="px-6 py-4 font-semibold tracking-wider">Function Name</th>
@@ -163,7 +163,7 @@ export function ProfilingTable({ data, profileType }: { data: FlamegraphNode, pr
                 
                 return (
                   <tr key={idx} className="border-b border-zinc-800/40 hover:bg-zinc-800/30 transition-colors font-mono">
-                    <td className="px-6 py-4 break-all text-zinc-300">
+                    <td className="px-6 py-4 text-zinc-300">
                       {row.name}
                     </td>
                 <td className="px-6 py-4">
@@ -206,9 +206,9 @@ export function ProfilingTable({ data, profileType }: { data: FlamegraphNode, pr
                 
                 return (
                   <tr key={idx} className="border-b border-zinc-800/40 hover:bg-zinc-800/30 transition-colors font-mono">
-                    <td className="px-6 py-4 break-all text-zinc-300" style={{ paddingLeft: `${row.depth * 1.5 + 1.5}rem` }}>
+                    <td className="px-6 py-4 text-zinc-300" style={{ paddingLeft: `${row.depth * 1.5 + 1.5}rem` }}>
                       <div className="flex items-center gap-3">
-                        {row.depth > 0 && <div className="w-3 h-px bg-zinc-700"></div>}
+                        {row.depth > 0 && <div className="w-3 h-px bg-zinc-700 shrink-0"></div>}
                         <span className={row.depth === 0 ? "text-indigo-400 font-semibold" : ""}>{row.name}</span>
                       </div>
                     </td>

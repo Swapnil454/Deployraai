@@ -20,10 +20,12 @@ function D3Flamegraph({ data, profileType }: { data: any, profileType: string })
       ref.current.innerHTML = ''; // clear previous
       
       // dynamically get width of container to make it responsive
-      const containerWidth = ref.current.clientWidth || 1200;
+      const containerWidth = ref.current.getBoundingClientRect().width || 1200;
+      // Subtract padding to ensure it fits perfectly inside without horizontal scrolling
+      const chartWidth = Math.max(containerWidth - 32, 500); 
       
       const chart = flamegraph()
-        .width(containerWidth)
+        .width(chartWidth)
         .cellHeight(26)
         .transitionDuration(750)
         .minFrameSize(1)
@@ -37,13 +39,13 @@ function D3Flamegraph({ data, profileType }: { data: any, profileType: string })
           }
           
           if (profileType === 'memory') {
-            // Enterprise Cool colors (Blues/Teals/Indigos) for Memory
-            const h = Math.abs(hash % 60) + 200; // 200-260 range
-            const s = 65 + Math.abs(hash % 25);
-            const l = 45 + Math.abs(hash % 15);
+            // Lighter, vibrant cool colors (Cyan/Teal/Light Blue) for Memory
+            const h = Math.abs(hash % 50) + 175; // 175-225 range
+            const s = 75 + Math.abs(hash % 20);  // 75-95%
+            const l = 55 + Math.abs(hash % 15);  // 55-70% (Lighter but still readable with white text)
             return `hsl(${h}, ${s}%, ${l}%)`;
           } else {
-            // Enterprise Warm colors (Reds/Oranges/Yellows) for CPU (like reference)
+            // Enterprise Warm colors (Reds/Oranges/Yellows) for CPU
             const h = Math.abs(hash % 45); // 0-45 range
             const s = 75 + Math.abs(hash % 25);
             const l = 45 + Math.abs(hash % 15);
@@ -57,7 +59,7 @@ function D3Flamegraph({ data, profileType }: { data: any, profileType: string })
   }, [data, profileType]);
 
   return (
-    <div className="w-full h-full relative group">
+    <div className="w-full h-full relative group overflow-hidden">
       <style>{`
         .d3-flame-graph rect {
           stroke: #09090b !important;
@@ -94,7 +96,7 @@ function D3Flamegraph({ data, profileType }: { data: any, profileType: string })
           box-shadow: 0 10px 40px -10px rgba(0,0,0,0.5) !important;
         }
       `}</style>
-      <div ref={ref} className="w-full h-full overflow-y-auto px-2 py-4" />
+      <div ref={ref} className="w-full h-full overflow-y-auto overflow-x-hidden px-2 py-4" />
     </div>
   );
 }
