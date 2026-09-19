@@ -7,16 +7,20 @@ export function setupGlobalErrorCapture() {
   if (!isEnabled()) return;
 
   process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err);
     const span = trace.getActiveSpan();
     if (span) {
       span.recordException(err);
       span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
       span.setAttribute('error.type', 'uncaughtException');
     }
-    // Don't call process.exit() — let the framework handle it
+    // We must exit the process because the application state is undefined.
+    // Hanging the process causes deployment timeouts on platforms like Render.
+    process.exit(1);
   });
 
   process.on('unhandledRejection', (reason) => {
+    console.error('Unhandled Rejection:', reason);
     const err = reason instanceof Error ? reason : new Error(String(reason));
     const span = trace.getActiveSpan();
     if (span) {
