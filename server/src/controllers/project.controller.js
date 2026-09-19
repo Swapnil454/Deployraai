@@ -884,17 +884,15 @@ export const getProjectUsage = async (req, res) => {
 
         if (sumDataValues(cpuRes) === 0 || sumDataValues(requestsRes) === 0) {
           try {
-            let analyticsApiUrl = process.env.ANALYTICS_API_URL || 'http://localhost:4318';
-            if (analyticsApiUrl.includes(process.env.RENDER_EXTERNAL_URL || 'deployraai.onrender.com')) {
-              analyticsApiUrl = 'http://localhost:4318';
-            }
-            const sdkRes = await axios.get(`${analyticsApiUrl}/sdk-usage`, {
+            // Always hit the local embedded analytics API on port 4318 to guarantee no network issues
+            const localApiUrl = 'http://localhost:4318';
+            const sdkRes = await axios.get(`${localApiUrl}/sdk-usage`, {
               params: { projectId: project._id.toString(), range },
               headers: { 'x-internal-secret': process.env.INTERNAL_API_SECRET || 'deployra-internal' },
-              timeout: 8000
+              timeout: 10000 // 10s timeout
             });
 
-            if (sdkRes.data?.success) {
+            if (sdkRes.data && sdkRes.data.success) {
               sdkFallbackUsed = true;
               if (sumDataValues(cpuRes) === 0 && sdkRes.data.usage?.cpu) {
                 finalCpu = sdkRes.data.usage.cpu;
@@ -902,9 +900,11 @@ export const getProjectUsage = async (req, res) => {
               if (sumDataValues(requestsRes) === 0 && sdkRes.data.usage?.requests) {
                 finalRequests = sdkRes.data.usage.requests;
               }
+            } else {
+              console.warn('[Usage] SDK fallback query returned non-success:', sdkRes.data);
             }
           } catch (sdkErr) {
-            console.warn('[Usage] SDK fallback query failed (non-critical):', sdkErr.message);
+            console.error('[Usage] SDK fallback query HTTP failed:', sdkErr.message);
           }
         }
         // ─────────────────────────────────────────────────────────────────────────
