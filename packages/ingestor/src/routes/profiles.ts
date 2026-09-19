@@ -5,14 +5,6 @@ import { checkUsageCap } from '../middleware/usage-check.js';
 import { profileWriter, ProfileRecord } from '../writers/profiles.js';
 
 export async function profilesRouter(app: FastifyInstance) {
-  // Add a raw body parser for application/x-protobuf and application/octet-stream
-  app.addContentTypeParser('application/x-protobuf', { parseAs: 'buffer' }, (req, body, done) => {
-    done(null, body);
-  });
-  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (req, body, done) => {
-    done(null, body);
-  });
-
   const handler = async (req: any, reply: any) => {
     console.log('[Ingestor] Received profiles payload:', {
       projectId: req.auth?.projectId,
