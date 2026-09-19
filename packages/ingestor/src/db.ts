@@ -3,6 +3,7 @@ import { clickhouse } from './clickhouse.js';
 
 export const db = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://admin:secret@localhost:5432/observability',
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   // Connection pool sizing for production load
   max: 20,
   idleTimeoutMillis: 30000,
