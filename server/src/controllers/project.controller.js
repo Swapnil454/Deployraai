@@ -867,13 +867,53 @@ export const getProjectUsage = async (req, res) => {
           getRenderRequests(token, serviceId, startTime, endTime).catch((err) => ({ error: err.message, usage: [] }))
         ]);
 
+        // ── SDK Fallback ─────────────────────────────────────────────────────────
+        // Render free tier returns 0 for CPU Core-hrs and HTTP Requests.
+        // When this happens, fall back to ClickHouse data from the SDK:
+        //  • CPU  → infrastructure_metrics (from @opentelemetry/host-metrics)
+        //  • Reqs → spans table (from OTel HTTP auto-instrumentation)
+        const sumDataValues = (res) => {
+          const d = res?.data || res?.usage || [];
+          if (!Array.isArray(d)) return 0;
+          return d.reduce((s, item) => s + (item.values || []).reduce((vs, v) => vs + (v.value || 0), 0), 0);
+        };
+
+        let finalCpu = cpuRes;
+        let finalRequests = requestsRes;
+        let sdkFallbackUsed = false;
+
+        if (sumDataValues(cpuRes) === 0 || sumDataValues(requestsRes) === 0) {
+          try {
+            const analyticsApiUrl = process.env.ANALYTICS_API_URL || 'http://localhost:4318';
+            const sdkRes = await axios.get(`${analyticsApiUrl}/sdk-usage`, {
+              params: { projectId: project._id.toString(), range },
+              headers: { 'x-internal-secret': process.env.INTERNAL_API_SECRET || 'deployra-internal' },
+              timeout: 8000
+            });
+
+            if (sdkRes.data?.success) {
+              sdkFallbackUsed = true;
+              if (sumDataValues(cpuRes) === 0 && sdkRes.data.usage?.cpu) {
+                finalCpu = sdkRes.data.usage.cpu;
+              }
+              if (sumDataValues(requestsRes) === 0 && sdkRes.data.usage?.requests) {
+                finalRequests = sdkRes.data.usage.requests;
+              }
+            }
+          } catch (sdkErr) {
+            console.warn('[Usage] SDK fallback query failed (non-critical):', sdkErr.message);
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────────────
+
         return res.json({ 
           success: true, 
-          platform: 'render', 
+          platform: 'render',
+          sdkFallback: sdkFallbackUsed,
           usage: {
             bandwidth: bandwidthRes,
-            cpu: cpuRes,
-            requests: requestsRes
+            cpu: finalCpu,
+            requests: finalRequests
           }
         });
       } catch (err) {

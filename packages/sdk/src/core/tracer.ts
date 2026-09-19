@@ -3,6 +3,7 @@ import { Resource } from '@opentelemetry/resources';
 import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_DEPLOYMENT_ENVIRONMENT } from '@opentelemetry/semantic-conventions';
 import { BatchSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-trace-base';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
+import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { PeriodicExportingMetricReader, ConsoleMetricExporter } from '@opentelemetry/sdk-metrics';
 import { HostMetrics } from '@opentelemetry/host-metrics';
 import * as os from 'os';
@@ -50,12 +51,16 @@ export function initTracer() {
     }) as any),
     metricReader: metricReader as any,
     instrumentations: [
-      // Auto-instruments all Node.js http/https calls
+      // Auto-instruments all Node.js http/https calls, plus databases
       new HttpInstrumentation({
         // Don't trace calls to your own collector — would be recursive
         ignoreOutgoingRequestHook: (req) => {
           return req.hostname?.includes('deployai.in') || req.hostname?.includes('localhost') || false;
         },
+      }),
+      getNodeAutoInstrumentations({
+        '@opentelemetry/instrumentation-fs': { enabled: false }, // Disable FS to reduce noise
+        '@opentelemetry/instrumentation-http': { enabled: false }, // Already manually configured above
       }),
     ],
   });

@@ -87,6 +87,7 @@ const ProjectUsageDashboard = ({ project }: { project: any }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [usageData, setUsageData] = useState<any>(null);
+  const [sdkFallback, setSdkFallback] = useState(false);
   const [activeTab, setActiveTab] = useState<'bandwidth' | 'cpu' | 'requests'>('bandwidth');
   const [timeRange, setTimeRange] = useState("current");
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -99,6 +100,7 @@ const ProjectUsageDashboard = ({ project }: { project: any }) => {
       if (res.ok) {
         const json = await res.json();
         setUsageData(json);
+        setSdkFallback(json.sdkFallback === true);
       } else {
         setError("Failed to fetch usage data.");
       }
@@ -252,7 +254,10 @@ const ProjectUsageDashboard = ({ project }: { project: any }) => {
           onClick={() => setActiveTab('cpu')} 
           className={`flex-1 p-4 text-left border-t-2 transition-all duration-300 ${activeTab === 'cpu' ? 'border-white bg-zinc-900/20' : 'border-transparent hover:bg-zinc-900/10'}`}
         >
-          <div className="text-xs text-zinc-400 font-medium mb-1 uppercase tracking-wider">CPU Usage</div>
+          <div className="text-xs text-zinc-400 font-medium mb-1 uppercase tracking-wider flex items-center gap-2">
+            CPU Usage
+            {sdkFallback && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 normal-case tracking-normal">via SDK</span>}
+          </div>
           <div className={`text-2xl font-bold transition-colors ${activeTab === 'cpu' ? 'text-white' : 'text-zinc-300'}`}>{totalCpu.toFixed(4)} <span className="text-sm font-normal text-zinc-500">Core-hrs</span></div>
         </button>
         <div className="w-px bg-zinc-800/50" />
@@ -260,7 +265,10 @@ const ProjectUsageDashboard = ({ project }: { project: any }) => {
           onClick={() => setActiveTab('requests')} 
           className={`flex-1 p-4 text-left border-t-2 transition-all duration-300 ${activeTab === 'requests' ? 'border-white bg-zinc-900/20' : 'border-transparent hover:bg-zinc-900/10'}`}
         >
-          <div className="text-xs text-zinc-400 font-medium mb-1 uppercase tracking-wider">Requests</div>
+          <div className="text-xs text-zinc-400 font-medium mb-1 uppercase tracking-wider flex items-center gap-2">
+            Requests
+            {sdkFallback && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 normal-case tracking-normal">via SDK</span>}
+          </div>
           <div className={`text-2xl font-bold transition-colors ${activeTab === 'requests' ? 'text-white' : 'text-zinc-300'}`}>{totalRequests.toLocaleString()}</div>
         </button>
       </div>

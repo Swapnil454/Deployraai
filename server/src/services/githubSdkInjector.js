@@ -42,7 +42,7 @@ export async function injectSdkViaGithub(project) {
     }
 
     pkgJson.dependencies = pkgJson.dependencies || {};
-    pkgJson.dependencies['@swapnil454/tracepilot'] = '^0.1.2';
+    pkgJson.dependencies['@swapnil454/tracepilot'] = '^0.2.12';
 
     const newPkgContent = JSON.stringify(pkgJson, null, 2);
 

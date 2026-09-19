@@ -2,6 +2,9 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { WebTracerProvider } from '@opentelemetry/sdk-trace-web';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-web';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch';
+import { XMLHttpRequestInstrumentation } from '@opentelemetry/instrumentation-xml-http-request';
+import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { Resource } from '@opentelemetry/resources';
 import { trace, context, SpanStatusCode } from '@opentelemetry/api';
 import * as rrweb from 'rrweb';
@@ -20,6 +23,7 @@ interface TracePilotProviderProps {
   ingestorUrl?: string;
   rumUrl?: string;
   enableSessionReplay?: boolean;
+  allowedCorsUrls?: (string | RegExp)[];
 }
 
 let currentSessionId = crypto.randomUUID();
@@ -41,7 +45,8 @@ export function TracePilotProvider({
   serviceName = 'browser-app',
   ingestorUrl = 'https://ingest.tracepilot.ai/v1/traces',
   rumUrl = 'https://ingest.tracepilot.ai/v1/rum',
-  enableSessionReplay = false
+  enableSessionReplay = false,
+  allowedCorsUrls = [/.*/] // By default allow context propagation to any backend
 }: TracePilotProviderProps) {
   const [provider, setProvider] = useState<WebTracerProvider | null>(null);
   
@@ -69,6 +74,19 @@ export function TracePilotProvider({
     }) as any);
 
     webProvider.register();
+
+    registerInstrumentations({
+      tracerProvider: webProvider,
+      instrumentations: [
+        new FetchInstrumentation({
+          propagateTraceHeaderCorsUrls: allowedCorsUrls,
+        }),
+        new XMLHttpRequestInstrumentation({
+          propagateTraceHeaderCorsUrls: allowedCorsUrls,
+        }),
+      ],
+    });
+
     setProvider(webProvider);
 
     // --- 2. WEB VITALS ---
@@ -200,7 +218,7 @@ export function TracePilotProvider({
       }
       __flushRRWebEvents = null;
     };
-  }, [token, serviceName, ingestorUrl, rumUrl, enableSessionReplay]);
+  }, [token, serviceName, ingestorUrl, rumUrl, enableSessionReplay, allowedCorsUrls]);
 
   return (
     <TracePilotContext.Provider value={{ provider }}>
