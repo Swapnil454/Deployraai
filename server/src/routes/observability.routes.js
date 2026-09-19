@@ -126,14 +126,29 @@ router.post('/profiles/v1/profiles', express.raw({ type: 'application/octet-stre
     bodyLength: req.body?.length
   });
   try {
+    let authHeader = req.headers.authorization || '';
+    const rawProjectId = req.headers['x-project-id'];
+
+    if (!authHeader && rawProjectId) {
+      console.log(`[Proxy] Resolving project JWT for projectId: ${rawProjectId}`);
+      // Find the project by MongoDB ID to get its tracking JWT
+      const project = await Project.findById(rawProjectId);
+      if (project?.analytics?.trackingId) {
+        authHeader = `Bearer ${project.analytics.trackingId}`;
+        console.log(`[Proxy] Successfully resolved project JWT`);
+      } else {
+        console.warn(`[Proxy] Could not resolve project tracking ID for: ${rawProjectId}`);
+      }
+    }
+
     const targetUrl = `${INGESTOR_URL}/v1/profiles`;
-    console.log('[Proxy] Forwarding to:', targetUrl);
+    console.log('[Proxy] Forwarding to ingestor at:', targetUrl);
     const response = await axios({
       method: req.method,
       url: targetUrl,
       data: req.body,
       headers: {
-        'x-project-id': req.headers['x-project-id'] || '',
+        Authorization: authHeader,
         'x-service-name': req.headers['x-service-name'] || '',
         'x-profile-type': req.headers['x-profile-type'] || 'cpu',
         'Content-Type': req.headers['content-type'] || 'application/octet-stream',
