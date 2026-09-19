@@ -182,15 +182,17 @@ export const customDashboardsRouter: FastifyPluginAsync = async (app) => {
 
     const queryPromise = (async () => {
       let bucketInterval = 'hour';
-      let timeFilter = "created_at >= NOW() - INTERVAL '24 hours'";
+      let intervalString = '24 hours';
       
       if (window === '1h') {
-        timeFilter = "created_at >= NOW() - INTERVAL '1 hour'";
+        intervalString = '1 hour';
         bucketInterval = 'minute';
       } else if (window === '7d') {
-        timeFilter = "created_at >= NOW() - INTERVAL '7 days'";
+        intervalString = '7 days';
         bucketInterval = 'day';
       }
+
+      const timeFilter = `created_at >= NOW() - INTERVAL '${intervalString}'`;
 
       // Build the value expression safely.
       // For COUNT: no property needed. For others: use $4 parameter for the property key
@@ -204,18 +206,30 @@ export const customDashboardsRouter: FastifyPluginAsync = async (app) => {
       const queryParams: any[] = [bucketInterval, projectId, eventName];
       if (aggregation !== 'COUNT' && property) queryParams.push(property);
       
-      const propertyParamIdx = queryParams.length; // Either 3 (no prop) or 4 (with prop)
-      
       const sql = `
+        WITH buckets AS (
+          SELECT generate_series(
+            date_trunc($1, NOW() - INTERVAL '${intervalString}'),
+            date_trunc($1, NOW()),
+            '1 ${bucketInterval}'::interval
+          ) as bucket
+        ),
+        data AS (
+          SELECT 
+            date_trunc($1, created_at) as bucket,
+            ${valueExpr} as value
+          FROM custom_events
+          WHERE project_id = $2
+            AND event_name = $3
+            AND ${timeFilter}
+          GROUP BY 1
+        )
         SELECT 
-          date_trunc($1, created_at) as bucket,
-          ${valueExpr} as value
-        FROM custom_events
-        WHERE project_id = $2
-          AND event_name = $3
-          AND ${timeFilter}
-        GROUP BY 1
-        ORDER BY 1 ASC
+          b.bucket,
+          COALESCE(d.value, 0) as value
+        FROM buckets b
+        LEFT JOIN data d ON b.bucket = d.bucket
+        ORDER BY b.bucket ASC
       `;
 
       let client;
