@@ -45,6 +45,32 @@ export async function initDb() {
     await client.query(`ALTER TABLE rum_events ADD COLUMN IF NOT EXISTS duration_ms INTEGER DEFAULT 0`);
     await client.query(`ALTER TABLE rum_events ADD COLUMN IF NOT EXISTS error_count INTEGER DEFAULT 0`);
     
+    // Custom Dashboards & Events
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS custom_dashboards (
+        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+        project_id VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        layout_json JSONB DEFAULT '[]',
+        widgets_json JSONB DEFAULT '[]',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS custom_events (
+        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+        project_id VARCHAR(255) NOT NULL,
+        trace_id VARCHAR(255),
+        event_name VARCHAR(255) NOT NULL,
+        properties JSONB DEFAULT '{}',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_custom_events_project_event ON custom_events(project_id, event_name, created_at DESC)`);
+    
     // Create missing indexes for RUM events to prevent full table scans
     await client.query(`CREATE INDEX IF NOT EXISTS idx_rum_events_project_time ON rum_events (project_id, created_at DESC)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_rum_events_session ON rum_events (session_id)`);
