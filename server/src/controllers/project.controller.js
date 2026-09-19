@@ -884,7 +884,10 @@ export const getProjectUsage = async (req, res) => {
 
         if (sumDataValues(cpuRes) === 0 || sumDataValues(requestsRes) === 0) {
           try {
-            const analyticsApiUrl = process.env.ANALYTICS_API_URL || 'http://localhost:4318';
+            let analyticsApiUrl = process.env.ANALYTICS_API_URL || 'http://localhost:4318';
+            if (analyticsApiUrl.includes(process.env.RENDER_EXTERNAL_URL || 'deployraai.onrender.com')) {
+              analyticsApiUrl = 'http://localhost:4318';
+            }
             const sdkRes = await axios.get(`${analyticsApiUrl}/sdk-usage`, {
               params: { projectId: project._id.toString(), range },
               headers: { 'x-internal-secret': process.env.INTERNAL_API_SECRET || 'deployra-internal' },

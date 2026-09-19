@@ -25,9 +25,12 @@ const parseTimeSeries = (metrics: any, isBandwidth = false) => {
     let multiplier = 1;
     if (isBandwidth && item.unit === 'mb') multiplier = 1024 * 1024;
     
-    if (item.values && Array.isArray(item.values)) {
-      item.values.forEach((v: any, idx: number) => {
-        const date = v.date || v.timestamp || new Date(Date.now() - (item.values.length - idx) * 86400000).toISOString();
+    // Support our SDK fallback format (.values) OR Render native format (.data)
+    const pointsArray = item.values || item.data;
+    
+    if (pointsArray && Array.isArray(pointsArray)) {
+      pointsArray.forEach((v: any, idx: number) => {
+        const date = v.date || v.timestamp || new Date(Date.now() - (pointsArray.length - idx) * 86400000).toISOString();
         const val = (v.value || 0) * multiplier;
         map.set(date, (map.get(date) || 0) + val);
       });
