@@ -1,4 +1,4 @@
-import * as pprof from 'pprof';
+import * as pprof from '@datadog/pprof';
 
 export interface ProfilerOptions {
   enabled?: boolean;

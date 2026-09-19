@@ -1,6 +1,6 @@
 {
   "name": "@swapnil454/tracepilot",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "description": "Zero-config OpenTelemetry auto-instrumentation for Next.js and Express",
   "keywords": [
     "opentelemetry",
@@ -64,6 +64,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "@datadog/pprof": "^5.14.4",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/auto-instrumentations-node": "^0.49.1",
     "@opentelemetry/core": "^1.26.0",
@@ -87,7 +88,6 @@
     "@types/node": "^20.19.43",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "pprof": "^4.0.0",
     "rrweb": "^2.0.1",
     "typescript": "^5.4.0",
     "web-vitals": "^5.3.0"
