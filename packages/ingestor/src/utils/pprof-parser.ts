@@ -1,4 +1,5 @@
 import protobuf from 'protobufjs';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import zlib from 'zlib';
@@ -18,7 +19,11 @@ let profileTypeCache: protobuf.Type | null = null;
 
 async function loadProfileType(): Promise<protobuf.Type> {
   if (profileTypeCache) return profileTypeCache;
-  const root = await protobuf.load(path.resolve(__dirname, '../profile.proto'));
+  let protoPath = path.resolve(__dirname, '../profile.proto');
+  if (!fs.existsSync(protoPath)) {
+    protoPath = path.resolve(__dirname, '../../src/profile.proto');
+  }
+  const root = await protobuf.load(protoPath);
   profileTypeCache = root.lookupType('perftools.profiles.Profile');
   return profileTypeCache;
 }
