@@ -22,6 +22,14 @@ app.register(cors, {
   allowedHeaders: ['Content-Type', 'Authorization', 'x-rum-key'],
 });
 
+// Global content type parser for profiling binary data
+app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (req, body, done) => {
+  done(null, body);
+});
+app.addContentTypeParser('application/x-protobuf', { parseAs: 'buffer' }, (req, body, done) => {
+  done(null, body);
+});
+
 
 app.register(rateLimit, {
   // We use an in-memory LRU cache because Redis is disabled.

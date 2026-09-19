@@ -6,7 +6,10 @@ import { profileWriter, ProfileRecord } from '../writers/profiles.js';
 
 export async function profilesRouter(app: FastifyInstance) {
   // Add a raw body parser for application/x-protobuf and application/octet-stream
-  app.addContentTypeParser(['application/x-protobuf', 'application/octet-stream'], { parseAs: 'buffer' }, (req, body, done) => {
+  app.addContentTypeParser('application/x-protobuf', { parseAs: 'buffer' }, (req, body, done) => {
+    done(null, body);
+  });
+  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (req, body, done) => {
     done(null, body);
   });
 

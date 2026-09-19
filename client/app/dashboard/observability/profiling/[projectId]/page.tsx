@@ -390,19 +390,25 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
                   <div className="text-indigo-400">const pprof = require('@datadog/pprof');</div>
                   <div className="text-indigo-400">const axios = require('axios');</div>
                   <br/>
-                  <div>setInterval(async () =&gt; {'{'}</div>
-                  <div className="pl-4">const profile = await pprof.time.profile({'{'} durationMillis: 10000 {'}'});</div>
-                  <div className="pl-4">const buf = await pprof.encode(profile);</div>
-                  <div className="pl-4 mt-2 text-zinc-500">// Send to DeployRAAI Ingestor</div>
-                  <div className="pl-4">await axios.post('https://deployraai-ingestor.yourdomain.com/v1/profiles', buf, {'{'}</div>
-                  <div className="pl-8">headers: {'{'}</div>
-                  <div className="pl-12">'x-project-id': '{projectId}',</div>
-                  <div className="pl-12">'x-service-name': 'my-node-service',</div>
-                  <div className="pl-12">'x-profile-type': 'cpu',</div>
-                  <div className="pl-12">'Content-Type': 'application/octet-stream'</div>
-                  <div className="pl-8">{'}'}</div>
-                  <div className="pl-4">{'}'});</div>
-                  <div>{'}'}, 60000);</div>
+                  <div className="text-zinc-500 mb-2">// Wrap in an async IIFE to trigger immediately, then every 60s</div>
+                  <div>(async function startProfiling() {'{'}</div>
+                  <div className="pl-4">async function captureAndSend() {'{'}</div>
+                  <div className="pl-8">const profile = await pprof.time.profile({'{'} durationMillis: 10000 {'}'});</div>
+                  <div className="pl-8">const buf = await pprof.encode(profile);</div>
+                  <div className="pl-8 mt-2 text-zinc-500">// Send to DeployRAAI Ingestor</div>
+                  <div className="pl-8">await axios.post('https://deployraai-ingestor.yourdomain.com/v1/profiles', buf, {'{'}</div>
+                  <div className="pl-12">headers: {'{'}</div>
+                  <div className="pl-16">'x-project-id': '{projectId}',</div>
+                  <div className="pl-16">'x-service-name': 'my-node-service',</div>
+                  <div className="pl-16">'x-profile-type': 'cpu',</div>
+                  <div className="pl-16">'Content-Type': 'application/octet-stream'</div>
+                  <div className="pl-12">{'}'}</div>
+                  <div className="pl-8">{'}'});</div>
+                  <div className="pl-4">{'}'}</div>
+                  <br/>
+                  <div className="pl-4">await captureAndSend(); // Trigger first profile immediately</div>
+                  <div className="pl-4">setInterval(captureAndSend, 60000);</div>
+                  <div>{'}'})();</div>
                 </div>
               </div>
             )}
