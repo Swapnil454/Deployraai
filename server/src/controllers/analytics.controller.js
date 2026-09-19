@@ -729,7 +729,7 @@ export const autoInjectProfiling = async (req, res) => {
     }
 
     if (entryFile) {
-      let aiPrompt = `You are an expert developer AI. Add Continuous Profiling to this application. \nFile Path: ${entryPath}\n\nOriginal File Content:\n\`\`\`\n${entryFile.content}\n\`\`\`\n\nTask:\nSet up a recurring task (e.g., every 60 seconds) to capture BOTH a CPU profile (profile-type: cpu) and a Memory/Heap profile (profile-type: memory). HTTP POST the encoded pprof buffers to 'https://deployraai-56i8.onrender.com/v1/profiles' with headers: 'x-project-id': '${project._id}', 'x-service-name': '${project.repoName}', 'x-profile-type': '<type>', 'Content-Type': 'application/octet-stream'.\n`;
+      let aiPrompt = `You are an expert developer AI. Add Continuous Profiling to this application. \nFile Path: ${entryPath}\n\nOriginal File Content:\n\`\`\`\n${entryFile.content}\n\`\`\`\n\nTask:\nSet up a recurring task (e.g., every 60 seconds) to capture BOTH a CPU profile (profile-type: cpu) and a Memory/Heap profile (profile-type: memory). HTTP POST the encoded pprof buffers to 'https://deployraai.onrender.com/api/observability/profiles/v1/profiles' with headers: 'x-project-id': '${project._id}', 'x-service-name': '${project.repoName}', 'x-profile-type': '<type>', 'Content-Type': 'application/octet-stream'.\n`;
 
       if (language === "node") {
         aiPrompt += `Use @datadog/pprof for Node.js. Ensure you call \`pprof.heap.start(512 * 1024, 64)\` outside the interval to enable memory profiling. Capture both \`time\` and \`heap\` profiles in the interval. Inject the setup at the very top of the file.\nCRITICAL: Return ONLY the raw modified file content. Do NOT wrap in \`\`\`javascript blocks.`;

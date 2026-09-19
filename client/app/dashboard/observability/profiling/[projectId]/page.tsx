@@ -408,7 +408,7 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
                   <div className="pl-4">pprof.heap.start(512 * 1024, 64);</div>
                   <br/>
                   <div className="pl-4">async function sendToIngestor(buf, type) {'{'}</div>
-                  <div className="pl-8">await axios.post('https://deployraai-56i8.onrender.com/v1/profiles', buf, {'{'}</div>
+                  <div className="pl-8">await axios.post('https://deployraai.onrender.com/api/observability/profiles/v1/profiles', buf, {'{'}</div>
                   <div className="pl-12">headers: {'{'}</div>
                   <div className="pl-16">'x-project-id': '{projectId}',</div>
                   <div className="pl-16">'x-service-name': 'my-node-service',</div>
@@ -451,7 +451,7 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
                   <div>{'}'}</div>
                   <br/>
                   <div>func sendToIngestor(buf *bytes.Buffer, profileType string) {'{'}</div>
-                  <div className="pl-4">req, _ := http.NewRequest("POST", "https://deployraai-56i8.onrender.com/v1/profiles", buf)</div>
+                  <div className="pl-4">req, _ := http.NewRequest("POST", "https://deployraai.onrender.com/api/observability/profiles/v1/profiles", buf)</div>
                   <div className="pl-4">req.Header.Set("x-project-id", "{projectId}")</div>
                   <div className="pl-4">req.Header.Set("x-service-name", "my-go-service")</div>
                   <div className="pl-4">req.Header.Set("x-profile-type", profileType)</div>
@@ -495,7 +495,7 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
                   <div className="pl-8">raw_data = stats.as_string()</div>
                   <br/>
                   <div className="pl-8">requests.post(</div>
-                  <div className="pl-12">'https://deployraai-56i8.onrender.com/v1/profiles',</div>
+                  <div className="pl-12">'https://deployraai.onrender.com/api/observability/profiles/v1/profiles',</div>
                   <div className="pl-12">data=raw_data,</div>
                   <div className="pl-12">headers={'{'}</div>
                   <div className="pl-16">'x-project-id': '{projectId}',</div>
@@ -529,7 +529,7 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
                   <div>PID=$(jcmd | grep app.jar | awk '{'{'}print $1{'}'}')</div>
                   <div>jcmd $PID JFR.dump name=1 filename=current.jfr</div>
                   <br/>
-                  <div>curl -X POST https://deployraai-56i8.onrender.com/v1/profiles \</div>
+                  <div>curl -X POST https://deployraai.onrender.com/api/observability/profiles/v1/profiles \</div>
                   <div className="pl-4">-H "x-project-id: {projectId}" \</div>
                   <div className="pl-4">-H "x-service-name: my-java-service" \</div>
                   <div className="pl-4">-H "x-profile-type: cpu" \</div>
