@@ -45,13 +45,17 @@ export function ProfilingTable({ data, profileType }: { data: FlamegraphNode, pr
       // Calculate self value
       const selfValue = node.value - childrenSum;
       
-      if (!map.has(node.name)) {
-        map.set(node.name, { name: node.name, selfValue: 0, totalValue: 0 });
-      }
+      const isEmpty = !node.name || node.name.trim() === '';
       
-      const entry = map.get(node.name)!;
-      entry.selfValue += selfValue;
-      entry.totalValue += node.value;
+      if (!isEmpty) {
+        if (!map.has(node.name)) {
+          map.set(node.name, { name: node.name, selfValue: 0, totalValue: 0 });
+        }
+        
+        const entry = map.get(node.name)!;
+        entry.selfValue += selfValue;
+        entry.totalValue += node.value;
+      }
     }
 
     if (data) {
@@ -84,16 +88,19 @@ export function ProfilingTable({ data, profileType }: { data: FlamegraphNode, pr
       }
       const selfValue = node.value - childrenSum;
       
-      // Skip the artificial duplicate root if necessary, but we already fixed it in trie.ts
-      rows.push({
-        name: node.name,
-        selfValue,
-        totalValue: node.value,
-        depth
-      });
+      const isEmpty = !node.name || node.name.trim() === '';
+      
+      if (!isEmpty) {
+        rows.push({
+          name: node.name,
+          selfValue,
+          totalValue: node.value,
+          depth
+        });
+      }
 
       for (const child of children) {
-        traverse(child, depth + 1);
+        traverse(child, isEmpty ? depth : depth + 1);
       }
     }
     

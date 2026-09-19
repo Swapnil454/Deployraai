@@ -57,9 +57,9 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
           source, 
           target,
           any(target_type) as target_type,
-          sum(request_count) as request_count,
-          sum(error_count) / max2(sum(request_count), 1) as error_rate,
-          sum(total_duration_ms) / max2(sum(request_count), 1) as avg_latency_ms
+          sum(request_count) as req_count,
+          sum(error_count) / max2(req_count, 1) as error_rate,
+          sum(total_duration_ms) / max2(req_count, 1) as avg_latency_ms
         FROM topology_edges_1m
         WHERE project_id = {projectId: String}
           AND bucket >= now() - INTERVAL 1 HOUR
@@ -98,9 +98,9 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
         if (targetType === 'database') {
           const node = nodesMap.get(targetId)!;
           node.type = 'database';
-          node.reqCount += Number(row.request_count);
-          node.errCount += Number(row.request_count) * Number(row.error_rate);
-          node.totalLatency += Number(row.request_count) * Number(row.avg_latency_ms);
+          node.reqCount += Number(row.req_count);
+          node.errCount += Number(row.req_count) * Number(row.error_rate);
+          node.totalLatency += Number(row.req_count) * Number(row.avg_latency_ms);
         }
 
         // Add to source node if missing (fallback)
@@ -108,9 +108,9 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
           nodesMap.set(sourceId, {
             id: sourceId,
             type: 'service',
-            reqCount: Number(row.request_count),
-            errCount: Number(row.request_count) * Number(row.error_rate),
-            totalLatency: Number(row.request_count) * Number(row.avg_latency_ms)
+            reqCount: Number(row.req_count),
+            errCount: Number(row.req_count) * Number(row.error_rate),
+            totalLatency: Number(row.req_count) * Number(row.avg_latency_ms)
           });
         }
         
@@ -119,7 +119,7 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
           source: sourceId,
           target: targetId,
           data: {
-            requestCount: Number(row.request_count),
+            requestCount: Number(row.req_count),
             errorRate: Number(row.error_rate),
             avgLatency: Number(row.avg_latency_ms)
           }
@@ -143,6 +143,7 @@ export const topologyRouter: FastifyPluginAsync = async (app) => {
 
       return { nodes, edges };
     } catch (err) {
+      console.error('TOPOLOGY ERROR', err);
       req.log.error({ err }, 'Failed to generate topology');
       return reply.status(500).send({ error: 'Failed to generate topology' });
     }
