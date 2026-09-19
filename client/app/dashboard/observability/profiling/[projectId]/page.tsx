@@ -390,23 +390,35 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
                   <div className="text-indigo-400">const pprof = require('@datadog/pprof');</div>
                   <div className="text-indigo-400">const axios = require('axios');</div>
                   <br/>
-                  <div className="text-zinc-500 mb-2">// Wrap in an async IIFE to trigger immediately, then every 60s</div>
+                  <div className="text-zinc-500 mb-2">// Wrap in an async IIFE to trigger periodically</div>
                   <div>(async function startProfiling() {'{'}</div>
                   <div className="pl-4">async function captureAndSend() {'{'}</div>
-                  <div className="pl-8">const profile = await pprof.time.profile({'{'} durationMillis: 10000 {'}'});</div>
-                  <div className="pl-8">const buf = await pprof.encode(profile);</div>
-                  <div className="pl-8 mt-2 text-zinc-500">// Send to DeployRAAI Ingestor</div>
-                  <div className="pl-8">await axios.post('https://deployraai-ingestor.yourdomain.com/v1/profiles', buf, {'{'}</div>
+                  <div className="pl-8 text-zinc-500">// 1. Capture CPU Profile</div>
+                  <div className="pl-8">const cpuProfile = await pprof.time.profile({'{'} durationMillis: 10000 {'}'});</div>
+                  <div className="pl-8">const cpuBuf = await pprof.encode(cpuProfile);</div>
+                  <div className="pl-8">await sendToIngestor(cpuBuf, 'cpu');</div>
+                  <br/>
+                  <div className="pl-8 text-zinc-500">// 2. Capture Memory (Heap) Profile</div>
+                  <div className="pl-8">const heapProfile = await pprof.heap.profile();</div>
+                  <div className="pl-8">const heapBuf = await pprof.encode(heapProfile);</div>
+                  <div className="pl-8">await sendToIngestor(heapBuf, 'memory');</div>
+                  <div className="pl-4">{'}'}</div>
+                  <br/>
+                  <div className="pl-4 text-zinc-500">// Start heap profiler before capturing</div>
+                  <div className="pl-4">pprof.heap.start(512 * 1024, 64);</div>
+                  <br/>
+                  <div className="pl-4">async function sendToIngestor(buf, type) {'{'}</div>
+                  <div className="pl-8">await axios.post('https://deployraai-56i8.onrender.com/v1/profiles', buf, {'{'}</div>
                   <div className="pl-12">headers: {'{'}</div>
                   <div className="pl-16">'x-project-id': '{projectId}',</div>
                   <div className="pl-16">'x-service-name': 'my-node-service',</div>
-                  <div className="pl-16">'x-profile-type': 'cpu',</div>
+                  <div className="pl-16">'x-profile-type': type,</div>
                   <div className="pl-16">'Content-Type': 'application/octet-stream'</div>
                   <div className="pl-12">{'}'}</div>
                   <div className="pl-8">{'}'});</div>
                   <div className="pl-4">{'}'}</div>
                   <br/>
-                  <div className="pl-4">await captureAndSend(); // Trigger first profile immediately</div>
+                  <div className="pl-4">await captureAndSend(); // Trigger first profiles immediately</div>
                   <div className="pl-4">setInterval(captureAndSend, 60000);</div>
                   <div>{'}'})();</div>
                 </div>
@@ -416,7 +428,7 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
             {activeSetupTab === 'go' && (
               <div className="space-y-4">
                 <div className="bg-black border border-zinc-800/80 rounded-lg p-4 font-mono text-sm overflow-x-auto text-zinc-300">
-                  <div className="text-zinc-500 mb-2">// Send a local pprof buffer to the ingestor periodically</div>
+                  <div className="text-zinc-500 mb-2">// Send local pprof buffers to the ingestor periodically</div>
                   <div className="text-indigo-400">import (</div>
                   <div className="text-indigo-400 pl-4">"bytes"</div>
                   <div className="text-indigo-400 pl-4">"net/http"</div>
@@ -424,16 +436,25 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
                   <div className="text-indigo-400 pl-4">"time"</div>
                   <div className="text-indigo-400">)</div>
                   <br/>
-                  <div>func captureAndSendProfile() {'{'}</div>
-                  <div className="pl-4">var buf bytes.Buffer</div>
-                  <div className="pl-4">pprof.StartCPUProfile(&amp;buf)</div>
+                  <div>func captureAndSendProfiles() {'{'}</div>
+                  <div className="pl-4 text-zinc-500">// 1. Capture CPU</div>
+                  <div className="pl-4">var cpuBuf bytes.Buffer</div>
+                  <div className="pl-4">pprof.StartCPUProfile(&amp;cpuBuf)</div>
                   <div className="pl-4">time.Sleep(10 * time.Second)</div>
                   <div className="pl-4">pprof.StopCPUProfile()</div>
+                  <div className="pl-4">sendToIngestor(&amp;cpuBuf, "cpu")</div>
                   <br/>
-                  <div className="pl-4">req, _ := http.NewRequest("POST", "https://deployraai-ingestor.yourdomain.com/v1/profiles", &amp;buf)</div>
+                  <div className="pl-4 text-zinc-500">// 2. Capture Memory (Heap)</div>
+                  <div className="pl-4">var heapBuf bytes.Buffer</div>
+                  <div className="pl-4">pprof.WriteHeapProfile(&amp;heapBuf)</div>
+                  <div className="pl-4">sendToIngestor(&amp;heapBuf, "memory")</div>
+                  <div>{'}'}</div>
+                  <br/>
+                  <div>func sendToIngestor(buf *bytes.Buffer, profileType string) {'{'}</div>
+                  <div className="pl-4">req, _ := http.NewRequest("POST", "https://deployraai-56i8.onrender.com/v1/profiles", buf)</div>
                   <div className="pl-4">req.Header.Set("x-project-id", "{projectId}")</div>
                   <div className="pl-4">req.Header.Set("x-service-name", "my-go-service")</div>
-                  <div className="pl-4">req.Header.Set("x-profile-type", "cpu")</div>
+                  <div className="pl-4">req.Header.Set("x-profile-type", profileType)</div>
                   <div className="pl-4">req.Header.Set("Content-Type", "application/octet-stream")</div>
                   <div className="pl-4">http.DefaultClient.Do(req)</div>
                   <div>{'}'}</div>
@@ -442,7 +463,7 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
                   <div>func main() {'{'}</div>
                   <div className="pl-4 text-indigo-400">go func() {'{'}</div>
                   <div className="pl-8 text-indigo-400">for {'{'}</div>
-                  <div className="pl-12 text-indigo-400">captureAndSendProfile()</div>
+                  <div className="pl-12 text-indigo-400">captureAndSendProfiles()</div>
                   <div className="pl-12 text-indigo-400">time.Sleep(50 * time.Second)</div>
                   <div className="pl-8 text-indigo-400">{'}'}</div>
                   <div className="pl-4 text-indigo-400">{'}'}()</div>
@@ -474,7 +495,7 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
                   <div className="pl-8">raw_data = stats.as_string()</div>
                   <br/>
                   <div className="pl-8">requests.post(</div>
-                  <div className="pl-12">'https://deployraai-ingestor.yourdomain.com/v1/profiles',</div>
+                  <div className="pl-12">'https://deployraai-56i8.onrender.com/v1/profiles',</div>
                   <div className="pl-12">data=raw_data,</div>
                   <div className="pl-12">headers={'{'}</div>
                   <div className="pl-16">'x-project-id': '{projectId}',</div>
@@ -508,7 +529,7 @@ export default function ProfilingPage({ params }: { params: Promise<{ projectId:
                   <div>PID=$(jcmd | grep app.jar | awk '{'{'}print $1{'}'}')</div>
                   <div>jcmd $PID JFR.dump name=1 filename=current.jfr</div>
                   <br/>
-                  <div>curl -X POST https://deployraai-ingestor.yourdomain.com/v1/profiles \</div>
+                  <div>curl -X POST https://deployraai-56i8.onrender.com/v1/profiles \</div>
                   <div className="pl-4">-H "x-project-id: {projectId}" \</div>
                   <div className="pl-4">-H "x-service-name: my-java-service" \</div>
                   <div className="pl-4">-H "x-profile-type: cpu" \</div>
