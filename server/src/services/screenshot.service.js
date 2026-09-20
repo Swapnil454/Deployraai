@@ -1,46 +1,63 @@
-import puppeteer from 'puppeteer';
 import { v2 as cloudinary } from 'cloudinary';
 import Deployment from '../models/Deployment.js';
-import dns from 'dns/promises';
 
-// Private / reserved IP ranges — block them in Puppeteer request interception
-const SCREENSHOT_BLOCKED_IP_PATTERNS = [
-  /^127\./,
-  /^10\./,
-  /^192\.168\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^169\.254\./,   // AWS/GCP/Azure metadata
-  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
-  /^0\./,
-  /^::1$/,
-  /^fc00:/i,
-  /^fe80:/i,
-];
-
-const isBlockedAddr = (addr) => SCREENSHOT_BLOCKED_IP_PATTERNS.some(p => p.test(addr));
+// Sentinel value written to DB when all screenshot providers fail.
+// The UI checks for this string to stop polling and show a graceful fallback.
+const SCREENSHOT_UNAVAILABLE = 'unavailable';
 
 /**
- * Returns true if the given URL should be blocked inside the screenshot browser.
- * Resolves the hostname's DNS records and rejects if any address is private/reserved.
+ * Fetch a screenshot image buffer using ScreenshotOne API (primary provider).
+ * Docs: https://screenshotone.com/docs/
+ * Free tier: 100 screenshots/month with SCREENSHOTONE_KEY set.
  */
-const isInternalUrl = async (url) => {
-  let hostname;
-  try {
-    hostname = new URL(url).hostname;
-  } catch {
-    return false; // Malformed URL — let Puppeteer handle it
-  }
+const fetchViaScreenshotOne = async (url) => {
+    const key = process.env.SCREENSHOTONE_KEY;
+    if (!key) throw new Error('SCREENSHOTONE_KEY not set');
 
-  // Reject bare private IPs immediately
-  if (isBlockedAddr(hostname)) return true;
+    const params = new URLSearchParams({
+        access_key: key,
+        url,
+        viewport_width: '1280',
+        viewport_height: '800',
+        format: 'png',
+        block_ads: 'true',
+        block_cookie_banners: 'true',
+        delay: '2',
+        timeout: '40',
+    });
 
-  try {
-    const v4 = await dns.resolve4(hostname).catch(() => []);
-    const v6 = await dns.resolve6(hostname).catch(() => []);
-    return [...v4, ...v6].some(isBlockedAddr);
-  } catch {
-    return false; // Cannot resolve — not our concern here
-  }
+    const apiUrl = `https://api.screenshotone.com/take?${params.toString()}`;
+    const res = await fetch(apiUrl, { signal: AbortSignal.timeout(50000) });
+    if (!res.ok) throw new Error(`ScreenshotOne error ${res.status}: ${await res.text()}`);
+    return Buffer.from(await res.arrayBuffer());
+};
+
+/**
+ * Fetch a screenshot image buffer using Microlink API (free fallback, no key needed).
+ * Docs: https://microlink.io/docs/api/parameters/screenshot
+ * Rate-limited to ~50 req/day on free tier.
+ */
+const fetchViaMicrolink = async (url) => {
+    const params = new URLSearchParams({
+        url,
+        screenshot: 'true',
+        meta: 'false',
+        embed: 'screenshot.url',
+    });
+
+    const apiUrl = `https://api.microlink.io/?${params.toString()}`;
+    const res = await fetch(apiUrl, { signal: AbortSignal.timeout(50000) });
+    if (!res.ok) throw new Error(`Microlink API error ${res.status}`);
+
+    // Microlink returns JSON with data.screenshot.url
+    const json = await res.json();
+    const screenshotImageUrl = json?.data?.screenshot?.url;
+    if (!screenshotImageUrl) throw new Error('Microlink returned no screenshot URL');
+
+    // Fetch the actual image
+    const imgRes = await fetch(screenshotImageUrl, { signal: AbortSignal.timeout(20000) });
+    if (!imgRes.ok) throw new Error(`Failed to download Microlink image: ${imgRes.status}`);
+    return Buffer.from(await imgRes.arrayBuffer());
 };
 
 export const captureDeploymentScreenshot = async (deploymentId, url) => {
@@ -48,73 +65,64 @@ export const captureDeploymentScreenshot = async (deploymentId, url) => {
         cloudinary.config({
             cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
             api_key: process.env.CLOUDINARY_API_KEY,
-            api_secret: process.env.CLOUDINARY_API_SECRET
+            api_secret: process.env.CLOUDINARY_API_SECRET,
         });
 
         if (!url || !url.startsWith('http')) {
             console.error(`[ScreenshotService] Invalid URL provided: ${url}`);
+            await Deployment.findByIdAndUpdate(deploymentId, {
+                'finalSummary.screenshotUrl': SCREENSHOT_UNAVAILABLE,
+            });
             return null;
         }
 
         console.log(`[ScreenshotService] Capturing screenshot for ${deploymentId} at ${url}`);
-        
+
         const deployment = await Deployment.findById(deploymentId);
         if (!deployment) {
             console.error(`[ScreenshotService] Deployment not found: ${deploymentId}`);
             return null;
         }
-        
+
         const userId = deployment.userId.toString();
 
-        // Vercel apps sometimes take a few extra seconds to boot on first request
-        // We'll give it a slight artificial delay before even attempting, or just rely on networkidle0
-        const browser = await puppeteer.launch({
-            headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-        
-        const page = await browser.newPage();
-        await page.setViewport({ width: 1280, height: 800 });
+        // --- Try providers in order: ScreenshotOne → Microlink ---
+        let screenshotBuffer = null;
+        let providerUsed = null;
 
-        // --- SSRF Guard: Block any sub-request targeting private/internal IPs ---
-        // This prevents malicious JS on a deployed app from using our headless
-        // browser as an SSRF proxy to reach cloud metadata (169.254.169.254) etc.
-        await page.setRequestInterception(true);
-        page.on('request', async (interceptedReq) => {
+        // Give the newly deployed site 5 seconds to fully boot before screenshotting
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        try {
+            screenshotBuffer = await fetchViaScreenshotOne(url);
+            providerUsed = 'screenshotone';
+        } catch (err1) {
+            console.warn(`[ScreenshotService] ScreenshotOne failed: ${err1.message}. Trying Microlink...`);
             try {
-                const reqUrl = interceptedReq.url();
-                // Always allow data: URIs and the initial navigation itself
-                if (reqUrl.startsWith('data:') || reqUrl === url) {
-                    return interceptedReq.continue();
-                }
-                if (await isInternalUrl(reqUrl)) {
-                    console.warn(`[ScreenshotService] Blocked internal request to: ${reqUrl}`);
-                    return interceptedReq.abort('accessdenied');
-                }
-                interceptedReq.continue();
-            } catch {
-                interceptedReq.continue();
+                screenshotBuffer = await fetchViaMicrolink(url);
+                providerUsed = 'microlink';
+            } catch (err2) {
+                console.error(`[ScreenshotService] Microlink also failed: ${err2.message}`);
             }
-        });
-        // -----------------------------------------------------------------------
+        }
 
-        // Go to URL, wait for 0 active network connections for at least 500ms
-        await page.goto(url, { waitUntil: 'networkidle0', timeout: 45000 });
+        if (!screenshotBuffer) {
+            console.warn(`[ScreenshotService] All providers failed for ${deploymentId}. Marking as unavailable.`);
+            // Write sentinel so the UI knows to stop polling
+            await Deployment.findByIdAndUpdate(deploymentId, {
+                'finalSummary.screenshotUrl': SCREENSHOT_UNAVAILABLE,
+            });
+            return null;
+        }
 
-        // Additional 2 seconds wait for any final JS animations or hydration
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        const screenshotBuffer = await page.screenshot({ encoding: 'binary' });
-        await browser.close();
-
-        // Upload directly to Cloudinary via stream
+        // Upload to Cloudinary
         const uploadResult = await new Promise((resolve, reject) => {
             const uploadStream = cloudinary.uploader.upload_stream(
                 {
                     folder: `AI_Agents/screenshots/users/${userId}`,
                     public_id: deploymentId.toString(),
                     format: 'png',
-                    overwrite: true
+                    overwrite: true,
                 },
                 (error, result) => {
                     if (error) return reject(error);
@@ -126,13 +134,17 @@ export const captureDeploymentScreenshot = async (deploymentId, url) => {
 
         const screenshotUrl = uploadResult.secure_url;
         await Deployment.findByIdAndUpdate(deploymentId, {
-            'finalSummary.screenshotUrl': screenshotUrl
+            'finalSummary.screenshotUrl': screenshotUrl,
         });
 
-        console.log(`[ScreenshotService] Successfully captured and saved screenshot: ${screenshotUrl}`);
+        console.log(`[ScreenshotService] Successfully captured via ${providerUsed}: ${screenshotUrl}`);
         return screenshotUrl;
     } catch (error) {
         console.error(`[ScreenshotService] Failed to capture screenshot for ${deploymentId}:`, error);
+        // Mark as unavailable so the UI stops polling
+        await Deployment.findByIdAndUpdate(deploymentId, {
+            'finalSummary.screenshotUrl': SCREENSHOT_UNAVAILABLE,
+        }).catch(() => {});
         return null;
     }
 };
