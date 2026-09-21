@@ -24,6 +24,7 @@ import statusComponentRoutes from "./routes/statusComponent.routes.js";
 import logPipelinesRoutes from "./routes/logPipelines.routes.js";
 import incidentRoutes from "./routes/incident.routes.js";
 import internalRoutes from "./routes/internal.routes.js";
+import uptimeCronRoutes from "./routes/uptimeCron.routes.js";
 import "./workflows/index.js"; // Register workflows
 
 const app = express();
@@ -127,6 +128,7 @@ app.use("/api/observability/projects", logPipelinesRoutes);
 app.use("/api/projects", incidentRoutes);
 app.use("/api/public/status", statusRoutes);
 app.use("/api/internal", internalRoutes);
+app.use("/api/uptime-cron", uptimeCronRoutes);
 
 
 app.get("/", (req, res) => {

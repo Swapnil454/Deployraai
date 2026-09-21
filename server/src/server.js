@@ -6,6 +6,9 @@ import http from "http";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import HumanSupportCase from "./models/HumanSupportCase.js";
+import { ensureMonitorCheckRetention } from "./models/MonitorCheck.js";
+import { initializeUptimeCronSchema } from "./uptime-cron/schema.js";
+import { startUptimeCronScheduler } from "./uptime-cron/service.js";
 import { fork } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -32,7 +35,7 @@ try {
 }
 
 // ── Startup environment guard ────────────────────────────────────────────────
-const REQUIRED_ENV = ["JWT_SECRET", "MONGO_URI", "DATABASE_URL", "CLICKHOUSE_URL", "INGESTOR_JWT_SECRET"];
+const REQUIRED_ENV = ["JWT_SECRET", "MONGO_URI", "DATABASE_URL", "UPTIMER_DB", "CLICKHOUSE_URL", "INGESTOR_JWT_SECRET"];
 const missingEnv = REQUIRED_ENV.filter((k) => !process.env[k]);
 if (missingEnv.length > 0) {
   console.error(`[FATAL] Missing required environment variables: ${missingEnv.join(", ")}`);
@@ -49,6 +52,17 @@ const HOST = "0.0.0.0";
 connect(process.env.MONGO_URI)
     .then(() => {
         console.log(` MongoDB Connected`);
+
+        ensureMonitorCheckRetention()
+          .then(() => console.log('[Monitoring] Check retention configured'))
+          .catch((error) => console.error('[Monitoring] Failed to configure check retention:', error.message));
+
+        initializeUptimeCronSchema()
+          .then(() => {
+            console.log("[Uptime Cron] Dedicated UPTIMER_DB schema initialized");
+            startUptimeCronScheduler();
+          })
+          .catch((error) => console.error("[Uptime Cron] Failed to initialize dedicated database:", error.message));
 
         const server = http.createServer(app);
         

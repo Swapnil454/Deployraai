@@ -3,6 +3,44 @@ import MonitorCheck from '../models/MonitorCheck.js';
 import Project from '../models/Project.js';
 import { createDefaultMonitors, runMonitorCheck } from '../services/monitoring.service.js';
 
+const MONITOR_TIME_RANGES = {
+  '1h': { hours: 1, label: 'Last 1 Hour' },
+  '6h': { hours: 6, label: 'Last 6 Hours' },
+  '12h': { hours: 12, label: 'Last 12 Hours' },
+  '24h': { hours: 24, label: 'Last 24 Hours' },
+  '7d': { hours: 7 * 24, label: 'Last 7 Days' },
+  '15d': { hours: 15 * 24, label: 'Last 15 Days' },
+  '30d': { hours: 30 * 24, label: 'Last 30 Days' }
+};
+
+const getMonitorRange = (timeRange) => {
+  const range = MONITOR_TIME_RANGES[timeRange] || MONITOR_TIME_RANGES['24h'];
+  const endDate = new Date();
+  const startDate = new Date(endDate);
+  startDate.setHours(startDate.getHours() - range.hours);
+  return { ...range, startDate, endDate };
+};
+
+const toServiceSummary = (stats = {}) => {
+  const totalChecks = stats.totalChecks || 0;
+  const onlineChecks = stats.onlineChecks || 0;
+  const degradedChecks = stats.degradedChecks || 0;
+  const offlineChecks = stats.offlineChecks || 0;
+  const availableChecks = onlineChecks + degradedChecks;
+
+  return {
+    totalChecks,
+    onlineChecks,
+    degradedChecks,
+    offlineChecks,
+    // Availability treats degraded responses as available. Healthy is strictly 2xx/3xx and fast.
+    uptimePercentage: totalChecks ? (availableChecks / totalChecks) * 100 : 0,
+    healthyPercentage: totalChecks ? (onlineChecks / totalChecks) * 100 : 0,
+    averageResponseTimeMs: stats.averageResponseTimeMs ? Math.round(stats.averageResponseTimeMs) : null,
+    lastCheckedAt: stats.lastCheckedAt || null
+  };
+};
+
 export const createMonitors = async (req, res) => {
   try {
     const { projectId } = req.params;
@@ -94,6 +132,12 @@ export const resumeMonitor = async (req, res) => {
 export const getProjectMonitorSummary = async (req, res) => {
   try {
     const { projectId } = req.params;
+    const { timeRange = '24h' } = req.query;
+    // Keep this bounded: this endpoint powers the monitoring table as well as
+    // the overview cards, and must not return a whole retention window at once.
+    const requestedPage = Number.parseInt(req.query.page, 10);
+    const limit = 20;
+    const page = Math.max(Number.isFinite(requestedPage) ? requestedPage : 1, 1);
     const project = await Project.findOne({ _id: projectId, userId: req.user.userId });
     if (!project) return res.status(404).json({ error: "Project not found" });
 
@@ -110,23 +154,78 @@ export const getProjectMonitorSummary = async (req, res) => {
       }
     }
 
-    const summary = {
-      frontendUptime: 0,
-      backendUptime: 0,
-      recentChecks: [],
+    const monitorIds = monitors.map(m => m._id);
+    const { startDate, endDate, label } = getMonitorRange(timeRange);
+    const rangeMatch = { monitorId: { $in: monitorIds }, checkedAt: { $gte: startDate, $lte: endDate } };
+
+    const statsByMonitor = await MonitorCheck.aggregate([
+      { $match: rangeMatch },
+      {
+        $group: {
+          _id: '$monitorId',
+          totalChecks: { $sum: 1 },
+          onlineChecks: { $sum: { $cond: [{ $eq: ['$status', 'online'] }, 1, 0] } },
+          degradedChecks: { $sum: { $cond: [{ $eq: ['$status', 'degraded'] }, 1, 0] } },
+          offlineChecks: { $sum: { $cond: [{ $eq: ['$status', 'offline'] }, 1, 0] } },
+          averageResponseTimeMs: { $avg: '$responseTimeMs' },
+          responseTimeSamples: { $sum: { $cond: [{ $ne: ['$responseTimeMs', null] }, 1, 0] } },
+          lastCheckedAt: { $max: '$checkedAt' }
+        }
+      }
+    ]);
+
+    const statsForType = (type) => {
+      const typeMonitorIds = new Set(monitors.filter(m => m.type === type).map(m => m._id.toString()));
+      const aggregate = statsByMonitor
+        .filter(stat => typeMonitorIds.has(stat._id.toString()))
+        .reduce((total, stat) => ({
+          totalChecks: total.totalChecks + stat.totalChecks,
+          onlineChecks: total.onlineChecks + stat.onlineChecks,
+          degradedChecks: total.degradedChecks + stat.degradedChecks,
+          offlineChecks: total.offlineChecks + stat.offlineChecks,
+          responseTimeTotal: total.responseTimeTotal + ((stat.averageResponseTimeMs || 0) * (stat.responseTimeSamples || 0)),
+          responseTimeSamples: total.responseTimeSamples + (stat.responseTimeSamples || 0),
+          lastCheckedAt: !total.lastCheckedAt || stat.lastCheckedAt > total.lastCheckedAt ? stat.lastCheckedAt : total.lastCheckedAt
+        }), { totalChecks: 0, onlineChecks: 0, degradedChecks: 0, offlineChecks: 0, responseTimeTotal: 0, responseTimeSamples: 0, lastCheckedAt: null });
+
+      return toServiceSummary({
+        ...aggregate,
+        averageResponseTimeMs: aggregate.responseTimeSamples ? aggregate.responseTimeTotal / aggregate.responseTimeSamples : null
+      });
     };
 
-    const frontend = monitors.find(m => m.type === 'frontend');
-    const backend = monitors.find(m => m.type === 'backend');
-
-    if (frontend) summary.frontendUptime = frontend.uptimePercentage;
-    if (backend) summary.backendUptime = backend.uptimePercentage;
-
-    const monitorIds = monitors.map(m => m._id);
-    summary.recentChecks = await MonitorCheck.find({ monitorId: { $in: monitorIds } })
+    const totalChecks = await MonitorCheck.countDocuments(rangeMatch);
+    const totalPages = Math.max(Math.ceil(totalChecks / limit), 1);
+    const currentPage = Math.min(page, totalPages);
+    const recentChecks = await MonitorCheck.find(rangeMatch)
       .sort({ checkedAt: -1 })
-      .limit(20)
-      .populate('monitorId', 'name type');
+      .skip((currentPage - 1) * limit)
+      .limit(limit)
+      .populate('monitorId', 'name type')
+      .lean();
+
+    const frontend = statsForType('frontend');
+    const backend = statsForType('backend');
+    const summary = {
+      timeRange,
+      rangeLabel: label,
+      startDate,
+      endDate,
+      frontend,
+      backend,
+      // Kept for compatibility with existing dashboard consumers.
+      frontendUptime: frontend.uptimePercentage,
+      backendUptime: backend.uptimePercentage,
+      recentChecks,
+      pagination: {
+        page: currentPage,
+        limit,
+        totalChecks,
+        totalPages,
+        hasPreviousPage: currentPage > 1,
+        hasNextPage: currentPage < totalPages
+      }
+    };
 
     res.json({ success: true, summary });
   } catch (error) {
@@ -138,7 +237,7 @@ export const getProjectMonitorSummary = async (req, res) => {
 export const getMonitorHistory = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { timeRange = '1d' } = req.query;
+    const { timeRange = '24h' } = req.query;
     
     const project = await Project.findOne({ _id: projectId, userId: req.user.userId });
     if (!project) return res.status(404).json({ error: "Project not found" });
@@ -146,20 +245,13 @@ export const getMonitorHistory = async (req, res) => {
     const monitors = await Monitor.find({ projectId });
     if (monitors.length === 0) return res.json({ success: true, history: { frontend: [], backend: [] } });
 
-    let days = 1;
-    if (timeRange === '7d') days = 7;
-    else if (timeRange === '15d') days = 15;
-    else if (timeRange === '1m') days = 30;
-    else if (timeRange === '1y') days = 365;
-
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
+    const { startDate, endDate, label } = getMonitorRange(timeRange);
 
     const monitorIds = monitors.map(m => m._id);
     
     const checks = await MonitorCheck.find({
       monitorId: { $in: monitorIds },
-      checkedAt: { $gte: startDate }
+      checkedAt: { $gte: startDate, $lte: endDate }
     })
     .sort({ checkedAt: 1 })
     .populate('monitorId', 'name type')
@@ -176,17 +268,19 @@ export const getMonitorHistory = async (req, res) => {
       else if (type === 'backend') history.backend.push(c);
     });
 
-    // Sample data to prevent massive payloads for 1y
-    const downsample = (arr, maxItems = 100) => {
+    // Keep chart payloads small while preserving the selected range's full timeline.
+    const downsample = (arr, maxItems = 45) => {
       if (arr.length <= maxItems) return arr;
-      const step = Math.ceil(arr.length / maxItems);
-      return arr.filter((_, i) => i % step === 0);
+      return Array.from({ length: maxItems }, (_, index) => {
+        const sourceIndex = Math.round(index * (arr.length - 1) / (maxItems - 1));
+        return arr[sourceIndex];
+      });
     };
 
     history.frontend = downsample(history.frontend);
     history.backend = downsample(history.backend);
 
-    res.json({ success: true, history });
+    res.json({ success: true, timeRange, rangeLabel: label, startDate, endDate, history });
   } catch (error) {
     console.error("Get monitor history error:", error);
     res.status(500).json({ error: "Failed to get monitor history" });

@@ -279,9 +279,12 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
       await step.run("capture_screenshot_v1", async () => {
         if (frontendUrl) {
           const screenshotUrl = await captureDeploymentScreenshot(existingFrontendDeploymentId, frontendUrl);
-          if (screenshotUrl && target === 'fullstack' && payload.existingFullDeploymentId) {
+          if (target === 'fullstack' && payload.existingFullDeploymentId) {
+            // Propagate the real URL on success, or the 'unavailable' sentinel on failure,
+            // so the fullstack deployment UI always stops polling (never spins forever).
+            const valueToPropagate = screenshotUrl || 'unavailable';
             await Deployment.findByIdAndUpdate(payload.existingFullDeploymentId, {
-              'finalSummary.screenshotUrl': screenshotUrl
+              'finalSummary.screenshotUrl': valueToPropagate
             });
           }
         }

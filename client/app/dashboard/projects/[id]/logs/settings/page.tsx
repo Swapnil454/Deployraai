@@ -114,9 +114,9 @@ export default function LogSettingsPage() {
   if (loading) return <div className="p-8 text-zinc-400">Loading settings...</div>;
 
   return (
-    <div className="min-h-screen bg-black p-6">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <div className="mb-6">
+    <div className="min-h-screen bg-black px-6 py-8 lg:px-10">
+      <div className="mx-auto w-full max-w-7xl space-y-6">
+        <div className="mb-8 border-b border-zinc-800 pb-8">
           <h1 className="mb-2 text-2xl font-bold text-white flex items-center gap-3">
             <Filter className="h-6 w-6 text-white" />
             Log Parsing Pipelines

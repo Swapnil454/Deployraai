@@ -9,6 +9,7 @@ import { ProjectAvatar } from "./ProjectAvatar";
 const TITLE_MAP: Record<string, string> = {
   "/dashboard/projects": "Overview",
   "/dashboard/logs": "Logs",
+  "/dashboard/monitoring": "Monitoring",
   "/dashboard/analytics": "Analytics",
   "/dashboard/domains": "Domains",
   "/dashboard/usages": "Usages",
@@ -44,17 +45,20 @@ export const Header = ({ projects }: { projects: any[] }) => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isProjectDropdownOpen]);
 
-  let currentTitle = TITLE_MAP[pathname] || "Overview";
+  const isUptimeCron = pathname.startsWith("/dashboard/uptime-cron");
+  let currentTitle = isUptimeCron ? "Uptime Cron Job" : TITLE_MAP[pathname] || "Overview";
   
   // Dynamic titles for dynamic routes
   if (pathname.startsWith("/dashboard/logs/")) {
     currentTitle = "Deployment Logs";
+  } else if (pathname.endsWith("/monitoring")) {
+    currentTitle = "Monitoring";
   } else if (pathname.startsWith("/dashboard/analytics/")) {
     currentTitle = "Analytics";
   }
 
   return (
-    <div className="w-full border-b border-zinc-800 bg-black px-8 h-[48px] shrink-0 sticky top-0 z-40">
+    <div className={`w-full border-b border-zinc-800 bg-black shrink-0 sticky top-0 z-40 ${isUptimeCron ? "h-10 px-6" : "h-[48px] px-8"}`}>
       <div className="max-w-[1440px] w-full mx-auto flex items-center justify-between relative h-full">
         {/* Left: All Projects Dropdown */}
         <div className="flex-1 flex items-center h-full">
@@ -84,6 +88,8 @@ export const Header = ({ projects }: { projects: any[] }) => {
                       router.push('/dashboard/deployments/fullstack');
                     } else if (pathname.startsWith('/dashboard/logs')) {
                       router.push('/dashboard/logs');
+                    } else if (pathname.endsWith('/monitoring')) {
+                      router.push('/dashboard/monitoring');
                     } else if (pathname.startsWith('/dashboard/domains')) {
                       router.push('/dashboard/domains');
                     } else if (pathname.startsWith('/dashboard/usages')) {
@@ -144,6 +150,8 @@ export const Header = ({ projects }: { projects: any[] }) => {
                           router.push(`/dashboard/workflows?projectId=${p._id}`);
                         } else if (pathname.startsWith('/dashboard/logs')) {
                           router.push(`/dashboard/logs/${p._id}`);
+                        } else if (pathname.endsWith('/monitoring')) {
+                          router.push(`/dashboard/projects/${p._id}/monitoring`);
                         } else if (pathname.startsWith('/dashboard/domains')) {
                           router.push(`/dashboard/domains?projectId=${p._id}`);
                         } else {

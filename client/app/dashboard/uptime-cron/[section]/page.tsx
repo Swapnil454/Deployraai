@@ -1,0 +1,8 @@
+import { notFound } from "next/navigation";
+
+const pages: Record<string, { title: string; description: string }> = { incidents: { title: "Incidents", description: "Track uptime events and keep your team informed." }, "status-pages": { title: "Status pages", description: "Share service availability with your customers." }, maintenance: { title: "Maintenance", description: "Plan scheduled maintenance windows without surprises." }, "team-members": { title: "Team members", description: "Manage teammates and notification access." }, integrations: { title: "Integrations & API", description: "Connect alerting and incident-management tools." } };
+
+export default async function UptimeSectionPage({ params }: { params: Promise<{ section: string }> }) {
+  const { section } = await params; const page = pages[section]; if (!page) notFound();
+  return <main className="min-h-full bg-black px-6 py-8 text-zinc-100 lg:px-10"><div className="mx-auto w-full max-w-7xl"><header className="border-b border-zinc-800 pb-8"><p className="mb-2 text-xs font-bold tracking-[0.18em] text-emerald-400">UPTIME CRON JOB</p><h1 className="text-3xl font-bold tracking-tight text-white">{page.title}</h1><p className="mt-2 text-sm text-zinc-400">{page.description}</p></header><section className="mt-6 flex min-h-64 flex-col items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900/40 p-8 text-center"><h2 className="text-lg font-semibold text-white">{page.title} is ready when you are</h2><p className="mt-2 text-sm text-zinc-500">This area is part of your Uptime Cron Job workspace.</p></section></div></main>;
+}
