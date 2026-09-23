@@ -79,11 +79,18 @@ app.use("/api/analytics", async (req, res, next) => {
 
 app.use("/api/observability", observabilityRoutes);
 
-// Global CORS for the dashboard
-app.use(cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    credentials: true
-}));
+// CORS origin allowlist
+// Set ALLOWED_ORIGINS in Render env as comma-separated list, e.g.:
+//   ALLOWED_ORIGINS=https://deployraai.vercel.app,http://localhost:3000
+const _rawOrigins = process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:3000';
+const ALLOWED_ORIGINS = new Set(_rawOrigins.split(',').map(o => o.trim()).filter(Boolean));
+function corsOriginFn(origin, cb) {
+  if (!origin) return cb(null, true);
+  if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+  cb(new Error('CORS: origin ' + origin + ' is not allowed'));
+}
+app.use(cors({ origin: corsOriginFn, credentials: true, methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization','Cookie'] }));
+app.options('/*splat', cors({ origin: corsOriginFn, credentials: true }));
 
 const apiLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
@@ -115,8 +122,6 @@ app.use("/api/fix-prs", fixPrRoutes);
 
 
 
-app.use("/api", domainRoutes);
-app.use("/api", monitoringRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/projects/:projectId/workflows", workflowRoutes);
 app.use("/api/support", supportRoutes);
@@ -129,6 +134,10 @@ app.use("/api/projects", incidentRoutes);
 app.use("/api/public/status", statusRoutes);
 app.use("/api/internal", internalRoutes);
 app.use("/api/uptime-cron", uptimeCronRoutes);
+
+// Generic /api mounts MUST go last to prevent their global middleware from swallowing specific routes
+app.use("/api", domainRoutes);
+app.use("/api", monitoringRoutes);
 
 
 app.get("/", (req, res) => {

@@ -24,18 +24,35 @@ import {
 interface Monitor {
   id: string;
   url: string;
+  monitor_type: "http" | "keyword" | "ping" | "port" | "heartbeat" | "dns";
+  target_host: string | null;
+  target_port: number | null;
+  connect_timeout: number | null;
+  packet_count: number | null;
+  packet_timeout: number | null;
   status: "up" | "down" | "paused" | "pending";
   is_paused: boolean;
   interval_seconds: number;
   http_method: string;
   last_checked_at: string | null;
+  heartbeat_token: string | null;
+  grace_period_seconds: number | null;
+  last_ping_at: string | null;
+  next_expected_at: string | null;
   created_at: string;
   group_name: string | null;
+  dns_hostname: string | null;
+  dns_record_type: string | null;
+  dns_expected_values: string[] | null;
+  dns_match_mode: string | null;
+  dns_resolver_mode: string | null;
+  dns_custom_resolver_ip: string | null;
 }
 
 interface Check {
   checked_at: string;
   success: boolean;
+  is_slow: boolean;
   status_code: number | null;
   response_time_ms: number;
   error_message: string | null;
@@ -119,11 +136,16 @@ function mtbfDisplay(hours: number | null): string {
 
 function causeBadge(cause: string) {
   const map: Record<string, { label: string; cls: string }> = {
-    bad_status_code:  { label: "Bad Status",       cls: "bg-red-500/20 text-red-300" },
-    timeout:          { label: "Timeout",           cls: "bg-orange-500/20 text-orange-300" },
-    connection_error: { label: "Connection Error",  cls: "bg-rose-500/20 text-rose-300" },
+    bad_status_code:  { label: "Bad Status",       cls: "bg-red-500/20 text-red-300 border border-red-500/20" },
+    timeout:          { label: "Timeout",           cls: "bg-orange-500/20 text-orange-300 border border-orange-500/20" },
+    connection_error: { label: "Connection Error",  cls: "bg-rose-500/20 text-rose-300 border border-rose-500/20" },
+    slow_response:    { label: "⚠ Slow Response",   cls: "bg-amber-500/20 text-amber-300 border border-amber-500/20" },
+    VALUE_MISMATCH:   { label: "Value Mismatch",    cls: "bg-orange-500/20 text-orange-300 border border-orange-500/20" },
+    NXDOMAIN:         { label: "NXDOMAIN",          cls: "bg-rose-500/20 text-rose-300 border border-rose-500/20" },
+    ENODATA:          { label: "ENODATA",           cls: "bg-rose-500/20 text-rose-300 border border-rose-500/20" },
+    SERVFAIL:         { label: "SERVFAIL",          cls: "bg-red-500/20 text-red-300 border border-red-500/20" },
   };
-  const entry = map[cause] ?? { label: cause, cls: "bg-zinc-700 text-zinc-300" };
+  const entry = map[cause] ?? { label: cause, cls: "bg-zinc-700/50 text-zinc-300 border border-zinc-600" };
   return <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-semibold ${entry.cls}`}>{entry.label}</span>;
 }
 
@@ -539,7 +561,8 @@ export default function MonitorDetailPage() {
   }
 
   const { monitor, checks: chartChecks, incidents, summary, up_since, mtbf_hours } = data;
-  const host = (() => { try { return new URL(monitor.url).hostname; } catch { return monitor.url; } })();
+  const displayUrl = monitor.monitor_type === "ping" || monitor.monitor_type === "port" ? (monitor.target_host ?? "") : (monitor.monitor_type === "dns" ? (monitor.dns_hostname ?? "") : monitor.url);
+  const host = (() => { try { return new URL(displayUrl).hostname; } catch { return displayUrl; } })();
 
   const statusConfig = {
     up:      { label: "Up",      dot: "bg-emerald-500",              badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20", icon: <TrendingUp  className="h-5 w-5 text-emerald-400" /> },
@@ -585,17 +608,29 @@ export default function MonitorDetailPage() {
                     {statusConfig.label}
                   </span>
                   <span className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-0.5 font-mono text-xs text-zinc-400">
-                    {monitor.http_method} / HTTP
+                    {monitor.monitor_type === "ping" 
+                      ? "PING" 
+                      : monitor.monitor_type === "port"
+                        ? `PORT :${monitor.target_port}`
+                        : monitor.monitor_type === "heartbeat"
+                          ? "HEARTBEAT"
+                          : monitor.monitor_type === "dns"
+                            ? `DNS / ${monitor.dns_record_type}`
+                            : monitor.monitor_type === "keyword" 
+                            ? `${monitor.http_method} / KEYWORD` 
+                            : `${monitor.http_method} / HTTP`}
                   </span>
                   {monitor.group_name && (
                     <span className="text-xs text-zinc-500">in <span className="text-zinc-300">{monitor.group_name}</span></span>
                   )}
                 </div>
                 <h1 className="mt-2 text-xl font-bold text-white sm:text-2xl">{host}</h1>
-                <a href={monitor.url} target="_blank" rel="noopener noreferrer"
-                  className="mt-0.5 flex items-center gap-1 text-sm text-indigo-400 hover:text-indigo-300">
-                  {monitor.url} <ExternalLink className="h-3.5 w-3.5" />
-                </a>
+                {monitor.monitor_type !== "ping" && monitor.monitor_type !== "port" && monitor.monitor_type !== "heartbeat" && monitor.monitor_type !== "dns" && (
+                  <a href={monitor.url} target="_blank" rel="noopener noreferrer"
+                    className="mt-0.5 flex items-center gap-1 text-sm text-indigo-400 hover:text-indigo-300">
+                    {monitor.url} <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
               </div>
             </div>
 
@@ -619,6 +654,26 @@ export default function MonitorDetailPage() {
               {deleteError && <p className="text-xs text-red-400">{deleteError}</p>}
             </div>
           </header>
+
+          {/* ── Heartbeat URL Banner ── */}
+          {monitor.monitor_type === "heartbeat" && (
+            <section className="rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-5">
+              <h2 className="text-sm font-bold text-indigo-200">Ping URL</h2>
+              <p className="mt-1 text-xs text-indigo-300/70">
+                Send an HTTP GET or POST request to this URL to signal that your job has run successfully.
+              </p>
+              <div className="mt-3 flex items-center gap-2">
+                <code className="flex-1 rounded border border-indigo-500/20 bg-black/40 px-3 py-2 text-sm text-indigo-300 select-all">
+                  {process.env.NEXT_PUBLIC_API_URL || ""}/api/uptime-cron/ping/{monitor.heartbeat_token}
+                </code>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-4 text-xs text-zinc-400">
+                <span><strong className="text-zinc-200">Expected interval:</strong> {formatInterval(monitor.interval_seconds)}</span>
+                <span><strong className="text-zinc-200">Grace period:</strong> {monitor.grace_period_seconds ? formatInterval(monitor.grace_period_seconds) : 'None'}</span>
+                <span><strong className="text-zinc-200">Last ping:</strong> {timeAgo(monitor.last_ping_at)}</span>
+              </div>
+            </section>
+          )}
 
           {/* ── Status cards: 5-column grid ── */}
           {/*
@@ -646,7 +701,15 @@ export default function MonitorDetailPage() {
                     <p className="mt-1.5 text-xs text-zinc-500">Up for <span className="text-zinc-300">{uptimeSinceDuration(up_since)}</span></p>
                   )}
                   {monitor.status === "down" && (
-                    <p className="mt-1.5 text-xs text-red-400/70">Incident ongoing</p>
+                    <div className="mt-2.5 flex flex-col gap-1.5">
+                      <p className="text-xs text-red-400/70">Incident ongoing</p>
+                      {incidents.find((i) => !i.resolved_at) && (
+                        <Link href={`/dashboard/uptime-cron/incidents/${incidents.find((i) => !i.resolved_at)?.id}`}
+                          className="inline-flex max-w-max items-center gap-1.5 rounded-md bg-red-500/10 px-2.5 py-1 text-xs font-semibold text-red-400 border border-red-500/20 hover:bg-red-500/20 transition">
+                          View Incident <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      )}
+                    </div>
                   )}
                 </div>
                 {/* Divider */}
@@ -741,7 +804,9 @@ export default function MonitorDetailPage() {
                   <span>Status</span><span>Root cause</span><span>Started</span><span>Duration</span>
                 </div>
                 {incidents.slice(0, incidentPage).map((inc) => (
-                  <div key={inc.id} className="grid grid-cols-2 items-start gap-4 border-b border-zinc-800/40 px-6 py-3 last:border-b-0 md:grid-cols-4 md:items-center">
+                  <Link key={inc.id}
+                    href={`/dashboard/uptime-cron/incidents/${inc.id}`}
+                    className="grid grid-cols-2 items-start gap-4 border-b border-zinc-800/40 px-6 py-3 last:border-b-0 md:grid-cols-4 md:items-center hover:bg-zinc-800/30 transition cursor-pointer group">
                     <div className="flex items-center gap-2">
                       {inc.resolved_at
                         ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
@@ -759,8 +824,11 @@ export default function MonitorDetailPage() {
                       )}
                     </div>
                     <span className="text-xs text-zinc-400">{formatDateTime(inc.started_at)}</span>
-                    <span className="text-xs text-zinc-400">{incidentDuration(inc.started_at, inc.resolved_at)}</span>
-                  </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-zinc-400">{incidentDuration(inc.started_at, inc.resolved_at)}</span>
+                      <ChevronRight className="h-3.5 w-3.5 text-zinc-700 opacity-0 group-hover:opacity-100 transition" />
+                    </div>
+                  </Link>
                 ))}
                 {incidents.length > incidentPage && (
                   <div className="border-t border-zinc-800 px-6 py-3">
@@ -830,32 +898,66 @@ export default function MonitorDetailPage() {
               </div>
             ) : (
               <div className="divide-y divide-zinc-800/40">
-                {checks.map((c, i) => (
-                  <div key={i}
-                    className={`grid grid-cols-[1fr_auto_auto_auto_2fr] items-center gap-4 px-6 py-3 transition-colors
-                      ${c.success ? "hover:bg-emerald-500/5" : "hover:bg-red-500/5"}`}>
-                    <div className="flex items-center gap-2 text-xs text-zinc-400">
-                      <span className={`h-2 w-2 shrink-0 rounded-full ${c.success ? "bg-emerald-500" : "bg-red-500"}`} />
-                      {formatDateTime(c.checked_at)}
+                {checks.map((c, i) => {
+                  const rowState = !c.success ? "down" : c.is_slow ? "slow" : "up";
+                  return (
+                    <div key={i}
+                      className={`grid grid-cols-[1fr_auto_auto_auto_2fr] items-center gap-4 px-6 py-3 transition-colors
+                        ${
+                          rowState === "down" ? "hover:bg-red-500/5"
+                          : rowState === "slow" ? "hover:bg-amber-500/5"
+                          : "hover:bg-emerald-500/5"
+                        }`}>
+                      {/* Time + dot */}
+                      <div className="flex items-center gap-2 text-xs text-zinc-400">
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${
+                          rowState === "down" ? "bg-red-500"
+                          : rowState === "slow" ? "bg-amber-400"
+                          : "bg-emerald-500"
+                        }`} />
+                        {formatDateTime(c.checked_at)}
+                      </div>
+                      {/* Status badge */}
+                      <span className={`inline-block rounded-md px-2 py-0.5 text-center text-xs font-bold ${
+                        rowState === "down" ? "bg-red-500/15 text-red-300"
+                        : rowState === "slow" ? "bg-amber-500/15 text-amber-300"
+                        : "bg-emerald-500/15 text-emerald-300"
+                      }`}>
+                        {rowState === "down" ? "DOWN" : rowState === "slow" ? "SLOW" : "UP"}
+                      </span>
+                      {/* HTTP code */}
+                      <span className={`text-right text-xs font-mono font-semibold ${
+                        c.status_code != null
+                          ? rowState === "down" ? "text-red-400" : rowState === "slow" ? "text-amber-400" : "text-emerald-400"
+                          : "text-zinc-600"
+                      }`}>
+                        {c.status_code ?? "—"}
+                      </span>
+                      {/* Response time — amber when slow */}
+                      <span className={`text-right text-xs tabular-nums font-medium ${
+                        rowState === "slow" ? "text-amber-400 font-bold"
+                        : c.response_time_ms > 1000 ? "text-red-400"
+                        : c.response_time_ms > 500 ? "text-yellow-400"
+                        : "text-zinc-300"
+                      }`}>
+                        {c.response_time_ms} ms
+                        {rowState === "slow" && <span className="ml-1 text-[10px] text-amber-500/70">⚠</span>}
+                      </span>
+                      {/* Message */}
+                      <span className={`truncate text-xs ${
+                        rowState === "down" ? "text-red-400/80"
+                        : rowState === "slow" ? "text-amber-400/70"
+                        : "text-zinc-600"
+                      }`} title={c.error_message ?? undefined}>
+                        {rowState === "down"
+                          ? (c.error_message ?? "Check failed")
+                          : rowState === "slow"
+                          ? (c.error_message ?? "Response exceeded threshold")
+                          : "—"}
+                      </span>
                     </div>
-                    <span className={`inline-block rounded-md px-2 py-0.5 text-center text-xs font-bold
-                      ${c.success ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300"}`}>
-                      {c.success ? "UP" : "DOWN"}
-                    </span>
-                    <span className={`text-right text-xs font-mono font-semibold
-                      ${c.status_code != null ? (c.success ? "text-emerald-400" : "text-red-400") : "text-zinc-600"}`}>
-                      {c.status_code ?? "—"}
-                    </span>
-                    <span className={`text-right text-xs tabular-nums font-medium
-                      ${c.response_time_ms > 1000 ? "text-red-400" : c.response_time_ms > 500 ? "text-yellow-400" : "text-zinc-300"}`}>
-                      {c.response_time_ms} ms
-                    </span>
-                    <span className={`truncate text-xs ${c.success ? "text-zinc-600" : "text-red-400/80"}`}
-                      title={c.error_message ?? undefined}>
-                      {c.success ? "—" : (c.error_message ?? "Check failed")}
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 

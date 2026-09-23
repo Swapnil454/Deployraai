@@ -68,7 +68,11 @@ connect(process.env.MONGO_URI)
         
         const io = new Server(server, {
           cors: {
-            origin: process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:3000",
+            origin: (() => {
+              const _o = process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:3000';
+              const _set = new Set(_o.split(',').map(x => x.trim()).filter(Boolean));
+              return (origin, cb) => { if (!origin || _set.has(origin)) return cb(null, true); cb(new Error('Socket CORS: not allowed')); };
+            })(),
             credentials: true
           }
         });

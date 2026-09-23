@@ -14,14 +14,16 @@ const { Pool } = pg;
 const db = new Pool({ connectionString: process.env.DATABASE_URL });
 import { triggerWorkflow } from './services/workflow.service.js';
 import { clickhouse } from './config/clickhouse.js';
+import { startHeartbeatDetector } from './uptime-cron/heartbeatDetector.js';
 
 let monitorCronJob    = null;
 let domainHealthCronJob = null;
 let workflowAwakenerJob = null;
 let dataRetentionCronJob = null;
+let heartbeatDetectorStarted = false;
 
 export const initCron = () => {
-  if (monitorCronJob && domainHealthCronJob && workflowAwakenerJob && dataRetentionCronJob) return;
+  if (monitorCronJob && domainHealthCronJob && workflowAwakenerJob && dataRetentionCronJob && heartbeatDetectorStarted) return;
 
   // ── 0. Data Retention Cleanup — every day at 00:00 ─────────────────────────
   if (!dataRetentionCronJob) {
@@ -311,4 +313,9 @@ export const initCron = () => {
   });
 
   console.log('[Cron] Initialized schedulers: monitors (*/5 min), domain-health (*/5 min), workflows (* * * * *), slo (0 0 * * *), billing (0 1 * * *)');
+  
+  if (!heartbeatDetectorStarted) {
+    startHeartbeatDetector();
+    heartbeatDetectorStarted = true;
+  }
 };
