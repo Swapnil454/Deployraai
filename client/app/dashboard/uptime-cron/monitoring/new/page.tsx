@@ -372,6 +372,23 @@ export default function NewUptimeMonitorPage() {
   const [dnsCustomResolverIp, setDnsCustomResolverIp] = useState("");
   const [dnsExpectedValues, setDnsExpectedValues] = useState<string[]>([]);
 
+  // ── API fields ──
+  const [apiAssertions, setApiAssertions] = useState<{ id: number; path: string; operator: string; expected: string; path_mode: string }[]>([
+    { id: 1, path: "", operator: "equals", expected: "", path_mode: "dot" }
+  ]);
+  const [apiAssertionLogic, setApiAssertionLogic] = useState<"all_must_pass" | "any_must_pass">("all_must_pass");
+  const [apiResponseSizeLimit, setApiResponseSizeLimit] = useState("512");
+
+  // ── UDP fields ──
+  const [udpProbeType, setUdpProbeType] = useState<"dns" | "snmp" | "raw">("raw");
+  const [udpDnsQueryName, setUdpDnsQueryName] = useState("");
+  const [udpSnmpOid, setUdpSnmpOid] = useState("");
+  const [udpSnmpCommunity, setUdpSnmpCommunity] = useState("public");
+  const [udpRawPayload, setUdpRawPayload] = useState("");
+  const [udpExpectAnyResponse, setUdpExpectAnyResponse] = useState(true);
+  const [udpRawExpectedResponse, setUdpRawExpectedResponse] = useState("");
+  const [udpResponseTimeoutMs, setUdpResponseTimeoutMs] = useState("2000");
+
   // ── Groups / tags ──
   const [groups, setGroups] = useState<UptimeGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState("");
@@ -496,14 +513,14 @@ export default function NewUptimeMonitorPage() {
     const urlValue = (event.currentTarget.elements.namedItem("url") as HTMLInputElement)?.value;
     const portValue = (event.currentTarget.elements.namedItem("target_port") as HTMLInputElement)?.value;
     
-    if ((monitorType === "Ping monitoring" || monitorType === "Port monitoring") && urlValue) {
+    if ((monitorType === "Ping monitoring" || monitorType === "Port monitoring" || monitorType === "UDP monitoring") && urlValue) {
       if (urlValue.includes("://") || urlValue.includes("/")) {
         setFormError(`${monitorType.split(' ')[0]} monitors require a bare IP or hostname (e.g. 8.8.8.8), not a full URL.`);
         return;
       }
     }
 
-    if (monitorType === "Port monitoring") {
+    if (monitorType === "Port monitoring" || monitorType === "UDP monitoring") {
       const port = Number(portValue);
       if (!port || port < 1 || port > 65535 || !Number.isInteger(port)) {
         setFormError("Port must be a valid integer between 1 and 65535.");
@@ -511,9 +528,14 @@ export default function NewUptimeMonitorPage() {
       }
     }
 
-    if (monitorType !== "Ping monitoring" && monitorType !== "DNS monitoring" && upStatusCodes.length === 0) { 
+    if (monitorType !== "Ping monitoring" && monitorType !== "DNS monitoring" && monitorType !== "UDP monitoring" && upStatusCodes.length === 0) { 
       setFormError("Add at least one Up HTTP status code."); 
       return; 
+    }
+
+    if (monitorType === "API monitoring" && method === "HEAD") {
+      setFormError("API monitoring requires a JSON response body, which HEAD requests do not return. Please select GET or POST in Advanced Settings.");
+      return;
     }
 
     if (monitorType === "DNS monitoring" && dnsExpectedValues.length === 0) {
@@ -552,9 +574,9 @@ export default function NewUptimeMonitorPage() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          url: (monitorType === "Ping monitoring" || monitorType === "Port monitoring") ? null : urlValue,
-          target_host: (monitorType === "Ping monitoring" || monitorType === "Port monitoring") ? urlValue : null,
-          target_port: monitorType === "Port monitoring" ? Number(portValue) : null,
+          url: (monitorType === "Ping monitoring" || monitorType === "Port monitoring" || monitorType === "UDP monitoring") ? null : urlValue,
+          target_host: (monitorType === "Ping monitoring" || monitorType === "Port monitoring" || monitorType === "UDP monitoring") ? urlValue : null,
+          target_port: (monitorType === "Port monitoring" || monitorType === "UDP monitoring") ? Number(portValue) : null,
           grace_period_seconds: monitorType === "Cron job / Heartbeat monitoring" ? gracePeriodSecondsValue : null,
           connect_timeout: monitorType === "Port monitoring" ? Number(timeout) * 1000 : null,
           packet_count: monitorType === "Ping monitoring" ? 4 : null,
@@ -578,7 +600,7 @@ export default function NewUptimeMonitorPage() {
           domain_expiry_reminder_enabled: sslChecks.domainExpiry,
           slow_response_alert_enabled: slowResponseAlert,
           slow_response_threshold_ms: slowResponseAlert ? Number(slowResponseMs) : null,
-          monitor_type: monitorType === "Keyword monitoring" ? "keyword" : (monitorType === "Ping monitoring" ? "ping" : (monitorType === "Port monitoring" ? "port" : (monitorType === "Cron job / Heartbeat monitoring" ? "heartbeat" : (monitorType === "DNS monitoring" ? "dns" : "http")))),
+          monitor_type: monitorType === "Keyword monitoring" ? "keyword" : (monitorType === "Ping monitoring" ? "ping" : (monitorType === "Port monitoring" ? "port" : (monitorType === "Cron job / Heartbeat monitoring" ? "heartbeat" : (monitorType === "DNS monitoring" ? "dns" : (monitorType === "API monitoring" ? "api" : (monitorType === "UDP monitoring" ? "udp" : "http")))))),
           keyword: monitorType === "Keyword monitoring" ? keyword : null,
           keyword_condition: monitorType === "Keyword monitoring" ? keywordCondition : null,
           case_sensitive: monitorType === "Keyword monitoring" ? caseSensitive : false,
@@ -588,6 +610,17 @@ export default function NewUptimeMonitorPage() {
           dns_match_mode: monitorType === "DNS monitoring" ? dnsMatchMode : null,
           dns_resolver_mode: monitorType === "DNS monitoring" ? dnsResolverMode : null,
           dns_custom_resolver_ip: (monitorType === "DNS monitoring" && dnsResolverMode === "public_resolver") ? dnsCustomResolverIp : null,
+          api_assertions: monitorType === "API monitoring" ? apiAssertions.map(({ id, ...rest }) => rest) : [],
+          api_assertion_logic: monitorType === "API monitoring" ? apiAssertionLogic : "all_must_pass",
+          api_response_size_limit_kb: monitorType === "API monitoring" ? Number(apiResponseSizeLimit) : 512,
+          udp_probe_type: monitorType === "UDP monitoring" ? udpProbeType : null,
+          udp_dns_query_name: monitorType === "UDP monitoring" ? udpDnsQueryName : null,
+          udp_snmp_oid: monitorType === "UDP monitoring" ? udpSnmpOid : null,
+          udp_snmp_community: monitorType === "UDP monitoring" ? udpSnmpCommunity : null,
+          udp_raw_payload: monitorType === "UDP monitoring" ? udpRawPayload : null,
+          udp_expect_any_response: monitorType === "UDP monitoring" ? udpExpectAnyResponse : null,
+          udp_raw_expected_response: monitorType === "UDP monitoring" ? udpRawExpectedResponse : null,
+          udp_response_timeout_ms: monitorType === "UDP monitoring" ? Number(udpResponseTimeoutMs) : null,
         }),
       });
 
@@ -655,7 +688,13 @@ export default function NewUptimeMonitorPage() {
                         <button
                           key={type.name}
                           type="button"
-                          onClick={() => { setMonitorType(type.name); setTypeMenuOpen(false); }}
+                          onClick={() => { 
+                            setMonitorType(type.name); 
+                            setTypeMenuOpen(false); 
+                            if (type.name === "API monitoring" && method === "HEAD") {
+                              setMethod("GET");
+                            }
+                          }}
                           className="flex w-full items-center gap-3 border-b border-slate-700/80 px-4 py-3 text-left last:border-b-0 hover:bg-slate-800"
                         >
                           <Icon className="h-6 w-6 shrink-0 text-emerald-400" />
@@ -673,27 +712,27 @@ export default function NewUptimeMonitorPage() {
               {monitorType !== "Cron job / Heartbeat monitoring" && (
                 <div className="mt-6 flex flex-col gap-4 sm:flex-row">
                   <label className="flex-1 block text-sm font-semibold">
-                    {monitorType === "Ping monitoring" ? "IP or host to monitor" : monitorType === "Port monitoring" ? "URL, IP or host to monitor" : monitorType === "DNS monitoring" ? "Domain to monitor" : "URL to monitor"}
+                    {monitorType === "Ping monitoring" || monitorType === "UDP monitoring" ? "IP or host to monitor" : monitorType === "Port monitoring" ? "URL, IP or host to monitor" : monitorType === "DNS monitoring" ? "Domain to monitor" : "URL to monitor"}
                     <input 
                       key={monitorType}
                       required 
                       name="url" 
-                      type={monitorType === "Ping monitoring" || monitorType === "Port monitoring" || monitorType === "DNS monitoring" ? "text" : "url"} 
-                      defaultValue={monitorType === "Ping monitoring" || monitorType === "Port monitoring" || monitorType === "DNS monitoring" ? "" : "https://"}
-                      placeholder={monitorType === "Ping monitoring" || monitorType === "Port monitoring" ? "e.g. 98.22.45.23 or example.com" : monitorType === "DNS monitoring" ? "e.g. example.com" : "https://"} 
+                      type={monitorType === "Ping monitoring" || monitorType === "Port monitoring" || monitorType === "DNS monitoring" || monitorType === "UDP monitoring" ? "text" : "url"} 
+                      defaultValue={monitorType === "Ping monitoring" || monitorType === "Port monitoring" || monitorType === "DNS monitoring" || monitorType === "UDP monitoring" ? "" : "https://"}
+                      placeholder={monitorType === "Ping monitoring" || monitorType === "Port monitoring" || monitorType === "UDP monitoring" ? "e.g. 98.22.45.23 or example.com" : monitorType === "DNS monitoring" ? "e.g. example.com" : "https://"} 
                       className={inputClass} 
                     />
                   </label>
-                  {monitorType === "Port monitoring" && (
+                  {(monitorType === "Port monitoring" || monitorType === "UDP monitoring") && (
                     <label className="w-full sm:w-32 block text-sm font-semibold">
-                      TCP port
+                      UDP/TCP port
                       <input 
                         required 
                         name="target_port" 
                         type="number"
                         min={1}
                         max={65535}
-                        placeholder="e.g. 22" 
+                        placeholder="e.g. 53" 
                         className={inputClass} 
                       />
                     </label>
@@ -840,6 +879,135 @@ export default function NewUptimeMonitorPage() {
                       hint={<p className="mt-1.5 text-xs text-slate-500">Type a value and press <kbd className="rounded border border-zinc-700 bg-zinc-800 px-1 py-0.5 text-[10px]">Enter</kbd>.</p>}
                     />
                   </div>
+                </div>
+              )}
+
+              {monitorType === "API monitoring" && (
+                <div className="mt-6 space-y-5 rounded-lg border border-zinc-700 bg-zinc-900/50 p-5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-white">API Assertions</h3>
+                    <button type="button" onClick={() => setApiAssertions([...apiAssertions, { id: Date.now(), path: "", operator: "equals", expected: "", path_mode: "dot" }])} className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1">
+                      <Plus className="w-3 h-3"/> Add Assertion
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    {apiAssertions.map((a, i) => (
+                      <div key={a.id} className="flex gap-2 items-start">
+                        <input value={a.path} onChange={e => { const n = [...apiAssertions]; n[i].path = e.target.value; setApiAssertions(n); }} placeholder="e.g. data.items[0].id" className={inputClass + " mt-0"} />
+                        <select value={a.operator} onChange={e => { const n = [...apiAssertions]; n[i].operator = e.target.value; setApiAssertions(n); }} className={inputClass + " mt-0 max-w-[150px]"}>
+                          <option value="equals">Equals</option>
+                          <option value="not_equals">Not equals</option>
+                          <option value="exists">Exists</option>
+                          <option value="not_exists">Does not exist</option>
+                          <option value="contains">Contains</option>
+                          <option value="greater_than">Greater than</option>
+                          <option value="less_than">Less than</option>
+                          <option value="type_is">Is type</option>
+                          <option value="matches_regex">Matches regex</option>
+                        </select>
+                        {!["exists", "not_exists"].includes(a.operator) && (
+                          <input value={a.expected} onChange={e => { const n = [...apiAssertions]; n[i].expected = e.target.value; setApiAssertions(n); }} placeholder="Expected value" className={inputClass + " mt-0"} />
+                        )}
+                        <select value={a.path_mode} onChange={e => { const n = [...apiAssertions]; n[i].path_mode = e.target.value; setApiAssertions(n); }} className={inputClass + " mt-0 max-w-[100px] text-xs"} title="Path Mode">
+                          <option value="dot">Dot Path</option>
+                          <option value="jmespath">JMESPath</option>
+                        </select>
+                        <button type="button" onClick={() => { if (apiAssertions.length > 1) setApiAssertions(apiAssertions.filter((_, idx) => idx !== i)); }} className="h-11 w-11 shrink-0 grid place-items-center text-rose-400 hover:bg-rose-500/10 rounded-lg">
+                          <Trash2 className="w-4 h-4"/>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="grid gap-5 sm:grid-cols-2 pt-4 border-t border-zinc-700/50">
+                    <label className="block text-sm font-semibold">
+                      Assertion Logic
+                      <select value={apiAssertionLogic} onChange={e => setApiAssertionLogic(e.target.value as any)} className={inputClass}>
+                        <option value="all_must_pass">All assertions must pass (AND)</option>
+                        <option value="any_must_pass">At least one must pass (OR)</option>
+                      </select>
+                    </label>
+                    <label className="block text-sm font-semibold">
+                      Max Response Size (KB)
+                      <input type="number" min="1" value={apiResponseSizeLimit} onChange={e => setApiResponseSizeLimit(e.target.value)} className={inputClass} />
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {monitorType === "UDP monitoring" && (
+                <div className="mt-6 space-y-5 rounded-lg border border-zinc-700 bg-zinc-900/50 p-5">
+                  <h3 className="text-sm font-bold text-white">UDP Probe Settings</h3>
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <label className="block text-sm font-semibold">
+                      Probe Type
+                      <select value={udpProbeType} onChange={(e) => setUdpProbeType(e.target.value as any)} className={inputClass}>
+                        <option value="raw">Raw payload / Generic</option>
+                        <option value="dns">DNS query</option>
+                        <option value="snmp">SNMP lookup</option>
+                      </select>
+                    </label>
+                    <label className="block text-sm font-semibold">
+                      Response Timeout (ms)
+                      <input type="number" min="100" max="10000" value={udpResponseTimeoutMs} onChange={(e) => setUdpResponseTimeoutMs(e.target.value)} className={inputClass} />
+                    </label>
+                  </div>
+                  
+                  {udpProbeType === "dns" && (
+                    <div>
+                      <label className="block text-sm font-semibold">
+                        DNS Query Name
+                        <span className="block mt-1 text-xs text-zinc-400 font-normal">The hostname to query for an A record.</span>
+                        <input value={udpDnsQueryName} onChange={(e) => setUdpDnsQueryName(e.target.value)} placeholder="e.g. google.com" className={inputClass} />
+                      </label>
+                    </div>
+                  )}
+
+                  {udpProbeType === "snmp" && (
+                    <div className="grid gap-5 sm:grid-cols-2">
+                      <label className="block text-sm font-semibold">
+                        SNMP Object Identifier (OID)
+                        <span className="block mt-1 text-xs text-zinc-400 font-normal">e.g. 1.3.6.1.2.1.1.3.0 for sysUpTime.</span>
+                        <input value={udpSnmpOid} onChange={(e) => setUdpSnmpOid(e.target.value)} placeholder="e.g. 1.3.6.1.2.1.1.3.0" className={inputClass} />
+                      </label>
+                      <label className="block text-sm font-semibold">
+                        SNMP Community
+                        <span className="block mt-1 text-xs text-zinc-400 font-normal">Default is usually public.</span>
+                        <input value={udpSnmpCommunity} onChange={(e) => setUdpSnmpCommunity(e.target.value)} placeholder="public" className={inputClass} />
+                      </label>
+                    </div>
+                  )}
+
+                  {udpProbeType === "raw" && (
+                    <div className="space-y-5">
+                      <label className="block text-sm font-semibold">
+                        Raw UDP Payload (Hex or plain text)
+                        <span className="block mt-1 text-xs text-zinc-400 font-normal">Data sent in the UDP packet.</span>
+                        <input value={udpRawPayload} onChange={(e) => setUdpRawPayload(e.target.value)} placeholder="Optional payload to send" className={inputClass} />
+                      </label>
+                      
+                      <div className="flex items-center gap-2 mt-2">
+                        <input 
+                          type="checkbox" 
+                          id="udp-expect-any" 
+                          checked={udpExpectAnyResponse} 
+                          onChange={(e) => setUdpExpectAnyResponse(e.target.checked)} 
+                          className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-indigo-500 focus:ring-indigo-500/20 focus:ring-offset-0" 
+                        />
+                        <label htmlFor="udp-expect-any" className="text-sm font-medium text-white">
+                          Expect any response back
+                        </label>
+                      </div>
+
+                      {!udpExpectAnyResponse && (
+                        <label className="block text-sm font-semibold">
+                          Expected Response Substring (Optional)
+                          <input value={udpRawExpectedResponse} onChange={(e) => setUdpRawExpectedResponse(e.target.value)} placeholder="Expected text or hex substring" className={inputClass} />
+                        </label>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

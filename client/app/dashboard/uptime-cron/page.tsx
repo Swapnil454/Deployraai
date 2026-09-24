@@ -58,6 +58,15 @@ interface Monitor {
   meta_fields: Array<{ key: string; value: string }>;
   ip_version: string;
   follow_redirects: boolean;
+  dns_hostname: string | null;
+  dns_record_type: string | null;
+  dns_expected_values: string[] | null;
+  dns_match_mode: string | null;
+  dns_resolver_mode: string | null;
+  dns_custom_resolver_ip: string | null;
+  api_assertions: any[] | null;
+  api_assertion_logic: string | null;
+  api_response_size_limit_kb: number | null;
   up_status_codes: string[];
   ssl_check_enabled: boolean;
   ssl_error_check_enabled: boolean;
@@ -75,6 +84,7 @@ interface Monitor {
   connect_timeout: number | null;
   packet_count: number | null;
   packet_timeout: number | null;
+  under_maintenance?: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -106,14 +116,17 @@ function formatUptime(val: string | null): string {
 
 // ─── Status dot ───────────────────────────────────────────────────────────────
 
-function StatusDot({ status }: { status: MonitorStatus }) {
+function StatusDot({ status, under_maintenance }: { status: MonitorStatus, under_maintenance?: boolean }) {
+  if (under_maintenance) {
+    return <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-zinc-500 animate-pulse" title="Maintenance" />;
+  }
   const cls: Record<MonitorStatus, string> = {
     up: "bg-emerald-500",
     down: "bg-red-500 animate-pulse",
     paused: "bg-zinc-500",
     pending: "bg-yellow-500 animate-pulse",
   };
-  return <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${cls[status]}`} />;
+  return <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${cls[status]}`} title={status} />;
 }
 
 // ─── 90-tick Sparkbar ─────────────────────────────────────────────────────────
@@ -169,9 +182,26 @@ function EditPanel({ monitor, groups, onClose, onSaved }: {
     keyword:                       monitor.keyword ?? "",
     keyword_condition:             monitor.keyword_condition ?? "exists",
     case_sensitive:                monitor.case_sensitive ?? false,
+    dns_record_type:               monitor.dns_record_type || "A",
+    dns_match_mode:                monitor.dns_match_mode || "exact_set",
+    dns_resolver_mode:             monitor.dns_resolver_mode || "authoritative",
+    dns_custom_resolver_ip:        monitor.dns_custom_resolver_ip || "",
+    dns_expected_values:           (monitor.dns_expected_values || []).join(", "),
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [apiAssertions, setApiAssertions] = useState<{ id: number; path: string; operator: string; expected: string; path_mode: string }[]>(
+    monitor.api_assertions && monitor.api_assertions.length > 0 
+      ? monitor.api_assertions.map((a, i) => ({ ...a, id: i })) 
+      : [{ id: 1, path: "", operator: "equals", expected: "", path_mode: "dot" }]
+  );
+  const [apiAssertionLogic, setApiAssertionLogic] = useState<"all_must_pass" | "any_must_pass">(
+    (monitor.api_assertion_logic as "all_must_pass" | "any_must_pass") || "all_must_pass"
+  );
+  const [apiResponseSizeLimit, setApiResponseSizeLimit] = useState(
+    monitor.api_response_size_limit_kb ? String(monitor.api_response_size_limit_kb) : "512"
+  );
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const val = e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : e.target.value;
@@ -207,6 +237,15 @@ function EditPanel({ monitor, groups, onClose, onSaved }: {
         keyword:                   form.keyword,
         keyword_condition:         form.keyword_condition,
         case_sensitive:            form.case_sensitive,
+        dns_hostname:              form.monitor_type === "dns" ? form.url : null,
+        dns_record_type:           form.monitor_type === "dns" ? form.dns_record_type : null,
+        dns_match_mode:            form.monitor_type === "dns" ? form.dns_match_mode : null,
+        dns_resolver_mode:         form.monitor_type === "dns" ? form.dns_resolver_mode : null,
+        dns_custom_resolver_ip:    form.monitor_type === "dns" ? form.dns_custom_resolver_ip : null,
+        dns_expected_values:       form.monitor_type === "dns" ? form.dns_expected_values.split(",").map(s => s.trim()).filter(Boolean) : null,
+        api_assertions:            form.monitor_type === "api" ? apiAssertions.map(({ id, ...rest }) => rest) : null,
+        api_assertion_logic:       form.monitor_type === "api" ? apiAssertionLogic : null,
+        api_response_size_limit_kb:form.monitor_type === "api" ? Number(apiResponseSizeLimit) : null,
       };
 
       if ((form.monitor_type === "ping" || form.monitor_type === "port") && form.url) {
@@ -290,7 +329,7 @@ function EditPanel({ monitor, groups, onClose, onSaved }: {
 
           {/* Method + Interval row */}
           <div className="grid grid-cols-2 gap-4">
-            {form.monitor_type !== "ping" && form.monitor_type !== "port" && form.monitor_type !== "heartbeat" ? (
+            {form.monitor_type !== "ping" && form.monitor_type !== "port" && form.monitor_type !== "heartbeat" && form.monitor_type !== "dns" ? (
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-zinc-400">HTTP Method</label>
                 <select value={form.http_method} onChange={set("http_method")}
@@ -347,7 +386,7 @@ function EditPanel({ monitor, groups, onClose, onSaved }: {
           </div>
 
           {/* Up Status Codes */}
-          {form.monitor_type !== "ping" && form.monitor_type !== "port" && form.monitor_type !== "heartbeat" && (
+          {form.monitor_type !== "ping" && form.monitor_type !== "port" && form.monitor_type !== "heartbeat" && form.monitor_type !== "dns" && (
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Up Status Codes</label>
               <input value={form.up_status_codes} onChange={set("up_status_codes")}
@@ -388,8 +427,116 @@ function EditPanel({ monitor, groups, onClose, onSaved }: {
             </div>
           )}
 
+          {/* DNS Monitoring */}
+          {form.monitor_type === "dns" && (
+            <div className="rounded-lg border border-zinc-700/60 bg-zinc-900/40 p-5">
+              <h3 className="mb-3 text-sm font-bold text-white">DNS Monitoring</h3>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Record Type</label>
+                    <select value={form.dns_record_type} onChange={set("dns_record_type")}
+                      className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500">
+                      {["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "SRV", "CAA", "PTR"].map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Match Mode</label>
+                    <select value={form.dns_match_mode} onChange={set("dns_match_mode")}
+                      className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500">
+                      <option value="any_match">Contains (Subset match)</option>
+                      <option value="exact_set">Must match exactly (Order independent)</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Expected Values (Comma-separated)</label>
+                  <input value={form.dns_expected_values} onChange={set("dns_expected_values")}
+                    placeholder="1.1.1.1, 1.0.0.1"
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Resolver Mode</label>
+                    <select value={form.dns_resolver_mode} onChange={set("dns_resolver_mode")}
+                      className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500">
+                      <option value="authoritative">Authoritative NS (Bypass Cache)</option>
+                      <option value="public_resolver">Specific Public Resolver</option>
+                      <option value="system">System Default Resolver</option>
+                    </select>
+                  </div>
+                  {form.dns_resolver_mode === "public_resolver" && (
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Resolver IP</label>
+                      <input value={form.dns_custom_resolver_ip} onChange={set("dns_custom_resolver_ip")}
+                        placeholder="e.g. 1.1.1.1"
+                        className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* API Monitoring */}
+          {form.monitor_type === "api" && (
+            <div className="rounded-lg border border-zinc-700/60 bg-zinc-900/40 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-white">API Assertions</h3>
+                <button type="button" onClick={() => setApiAssertions([...apiAssertions, { id: Date.now(), path: "", operator: "equals", expected: "", path_mode: "dot" }])} className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1">
+                  <Plus className="w-3 h-3"/> Add Assertion
+                </button>
+              </div>
+              
+              <div className="space-y-3">
+                {apiAssertions.map((a, i) => (
+                  <div key={a.id} className="flex gap-2 items-start">
+                    <input value={a.path} onChange={e => { const n = [...apiAssertions]; n[i].path = e.target.value; setApiAssertions(n); }} placeholder="e.g. data.items[0].id" className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500" />
+                    <select value={a.operator} onChange={e => { const n = [...apiAssertions]; n[i].operator = e.target.value; setApiAssertions(n); }} className="w-full max-w-[150px] rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500">
+                      <option value="equals">Equals</option>
+                      <option value="not_equals">Not equals</option>
+                      <option value="exists">Exists</option>
+                      <option value="not_exists">Does not exist</option>
+                      <option value="contains">Contains</option>
+                      <option value="greater_than">Greater than</option>
+                      <option value="less_than">Less than</option>
+                      <option value="type_is">Is type</option>
+                      <option value="matches_regex">Matches regex</option>
+                    </select>
+                    {!["exists", "not_exists"].includes(a.operator) && (
+                      <input value={a.expected} onChange={e => { const n = [...apiAssertions]; n[i].expected = e.target.value; setApiAssertions(n); }} placeholder="Expected value" className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500" />
+                    )}
+                    <select value={a.path_mode} onChange={e => { const n = [...apiAssertions]; n[i].path_mode = e.target.value; setApiAssertions(n); }} className="w-full max-w-[100px] rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] text-white outline-none focus:border-indigo-500" title="Path Mode">
+                      <option value="dot">Dot Path</option>
+                      <option value="jmespath">JMESPath</option>
+                    </select>
+                    <button type="button" onClick={() => { if (apiAssertions.length > 1) setApiAssertions(apiAssertions.filter((_, idx) => idx !== i)); }} className="h-[38px] w-[38px] shrink-0 grid place-items-center text-rose-400 hover:bg-rose-500/10 rounded-lg">
+                      <Trash2 className="w-4 h-4"/>
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid gap-5 sm:grid-cols-2 pt-5 mt-5 border-t border-zinc-700/50">
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Assertion Logic</label>
+                  <select value={apiAssertionLogic} onChange={e => setApiAssertionLogic(e.target.value as any)} className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500">
+                    <option value="all_must_pass">All assertions must pass (AND)</option>
+                    <option value="any_must_pass">At least one must pass (OR)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Max Response Size (KB)</label>
+                  <input type="number" min="1" value={apiResponseSizeLimit} onChange={e => setApiResponseSizeLimit(e.target.value)} className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500" />
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Request Body */}
-          {form.monitor_type !== "ping" && form.monitor_type !== "port" && form.monitor_type !== "heartbeat" && needsBody && (
+          {form.monitor_type !== "ping" && form.monitor_type !== "port" && form.monitor_type !== "heartbeat" && form.monitor_type !== "dns" && needsBody && (
             <div>
               <div className="mb-1.5 flex items-center justify-between">
                 <label className="text-xs font-semibold text-zinc-400">Request Body</label>
@@ -406,7 +553,7 @@ function EditPanel({ monitor, groups, onClose, onSaved }: {
           )}
 
           {/* Auth */}
-          {form.monitor_type !== "ping" && form.monitor_type !== "port" && form.monitor_type !== "heartbeat" && (
+          {form.monitor_type !== "ping" && form.monitor_type !== "port" && form.monitor_type !== "heartbeat" && form.monitor_type !== "dns" && (
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Authentication</label>
               <select value={form.auth_type} onChange={set("auth_type")}
@@ -432,7 +579,7 @@ function EditPanel({ monitor, groups, onClose, onSaved }: {
           )}
 
           {/* Advanced toggles */}
-          {form.monitor_type !== "heartbeat" && (
+          {form.monitor_type !== "heartbeat" && form.monitor_type !== "dns" && (
             <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4 space-y-3">
               <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Advanced</p>
 
@@ -689,13 +836,13 @@ function MonitorRow({
       onClick={() => router.push(`/dashboard/uptime-cron/monitoring/${monitor.id}`)}
       className="group flex cursor-pointer items-center gap-3 px-4 py-3.5 transition hover:bg-zinc-900/60"
     >
-      <StatusDot status={monitor.status} />
+      <StatusDot status={monitor.status} under_maintenance={monitor.under_maintenance} />
 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-white group-hover:text-indigo-300 transition-colors">{host}</p>
         <p className="mt-0.5 flex items-center gap-2 truncate text-xs text-zinc-500">
           <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
-            {monitor.status.toUpperCase()}
+            {monitor.under_maintenance ? "MAINTENANCE" : monitor.status.toUpperCase()}
           </span>
           {monitor.last_response_ms !== null && <span>{monitor.last_response_ms} ms</span>}
           {monitor.open_incidents > 0 && (

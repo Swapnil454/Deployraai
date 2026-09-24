@@ -97,6 +97,7 @@ export async function initializeUptimeCronSchema() {
   await uptimeDb.query(`
     ALTER TABLE uptime_checks_log
       ADD COLUMN IF NOT EXISTS is_slow BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS suppressed_by_window_id UUID REFERENCES uptime_maintenance_windows(id) ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS response_headers_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb;
 
     ALTER TABLE uptime_incidents
@@ -114,7 +115,18 @@ export async function initializeUptimeCronSchema() {
       ADD COLUMN IF NOT EXISTS dns_expected_values JSONB NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS dns_match_mode TEXT,
       ADD COLUMN IF NOT EXISTS dns_resolver_mode TEXT NOT NULL DEFAULT 'authoritative',
-      ADD COLUMN IF NOT EXISTS dns_custom_resolver_ip TEXT;
+      ADD COLUMN IF NOT EXISTS dns_custom_resolver_ip TEXT,
+      ADD COLUMN IF NOT EXISTS api_assertions JSONB NOT NULL DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS api_assertion_logic TEXT NOT NULL DEFAULT 'all_must_pass',
+      ADD COLUMN IF NOT EXISTS api_response_size_limit_kb INTEGER NOT NULL DEFAULT 512,
+      ADD COLUMN IF NOT EXISTS udp_probe_type TEXT,
+      ADD COLUMN IF NOT EXISTS udp_dns_query_name TEXT,
+      ADD COLUMN IF NOT EXISTS udp_snmp_oid TEXT,
+      ADD COLUMN IF NOT EXISTS udp_snmp_community TEXT,
+      ADD COLUMN IF NOT EXISTS udp_raw_payload TEXT,
+      ADD COLUMN IF NOT EXISTS udp_expect_any_response BOOLEAN,
+      ADD COLUMN IF NOT EXISTS udp_raw_expected_response TEXT,
+      ADD COLUMN IF NOT EXISTS udp_response_timeout_ms INTEGER;
 
     DO $$
     BEGIN
@@ -123,7 +135,7 @@ export async function initializeUptimeCronSchema() {
       WHEN undefined_object THEN null;
     END $$;
 
-    ALTER TABLE uptime_monitors ADD CONSTRAINT uptime_monitors_monitor_type_check CHECK (monitor_type IN ('http', 'keyword', 'ping', 'port', 'heartbeat', 'dns'));
+    ALTER TABLE uptime_monitors ADD CONSTRAINT uptime_monitors_monitor_type_check CHECK (monitor_type IN ('http', 'keyword', 'ping', 'port', 'heartbeat', 'dns', 'api', 'udp'));
 
     CREATE INDEX IF NOT EXISTS uptime_checks_slow_idx
       ON uptime_checks_log (monitor_id, checked_at DESC)
@@ -143,5 +155,50 @@ export async function initializeUptimeCronSchema() {
 
     CREATE INDEX IF NOT EXISTS uptime_incident_activity_incident_idx
       ON uptime_incident_activity (incident_id, occurred_at DESC);
+    CREATE TABLE IF NOT EXISTS uptime_status_pages (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      slug TEXT NOT NULL UNIQUE,
+      logo_url TEXT,
+      brand_color TEXT DEFAULT '#10B981',
+      is_public BOOLEAN NOT NULL DEFAULT TRUE,
+      password_hash TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS uptime_status_page_monitors (
+      status_page_id UUID REFERENCES uptime_status_pages(id) ON DELETE CASCADE,
+      monitor_id UUID REFERENCES uptime_monitors(id) ON DELETE CASCADE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (status_page_id, monitor_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_uptime_status_pages_user_id ON uptime_status_pages(user_id);
+    CREATE INDEX IF NOT EXISTS idx_uptime_status_pages_slug ON uptime_status_pages(slug);
+
+    CREATE TABLE IF NOT EXISTS uptime_maintenance_windows (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      timezone TEXT NOT NULL,
+      recurrence_type TEXT NOT NULL CHECK (recurrence_type IN ('one_time', 'weekly')),
+      start_time TEXT,
+      duration_minutes INTEGER NOT NULL,
+      days_of_week TEXT[],
+      one_time_start_at TIMESTAMPTZ,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS uptime_maintenance_window_monitors (
+      window_id UUID REFERENCES uptime_maintenance_windows(id) ON DELETE CASCADE,
+      monitor_id UUID REFERENCES uptime_monitors(id) ON DELETE CASCADE,
+      PRIMARY KEY (window_id, monitor_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_uptime_maintenance_window_monitors ON uptime_maintenance_window_monitors(monitor_id);
   `);
 }

@@ -42,7 +42,7 @@ function validatePairs(value, fieldName) {
 }
 
 export function validateMonitorPayload(payload) {
-  const monitor_type = payload.monitor_type === "dns" ? "dns" : payload.monitor_type === "heartbeat" ? "heartbeat" : payload.monitor_type === "keyword" ? "keyword" : payload.monitor_type === "ping" ? "ping" : payload.monitor_type === "port" ? "port" : "http";
+  const monitor_type = payload.monitor_type === "api" ? "api" : payload.monitor_type === "dns" ? "dns" : payload.monitor_type === "heartbeat" ? "heartbeat" : payload.monitor_type === "keyword" ? "keyword" : payload.monitor_type === "ping" ? "ping" : payload.monitor_type === "port" ? "port" : payload.monitor_type === "udp" ? "udp" : "http";
 
   let parsedUrl = null;
   let target_host = null;
@@ -51,14 +51,11 @@ export function validateMonitorPayload(payload) {
   let packet_count = null;
   let packet_timeout = null;
 
-  if (monitor_type === "ping" || monitor_type === "port") {
+  if (monitor_type === "ping" || monitor_type === "port" || monitor_type === "udp") {
     target_host = String(payload.target_host || "").trim();
     if (!target_host) throw new Error(`A target host or IP is required for ${monitor_type} monitoring.`);
     if (target_host.includes("://") || target_host.includes("/")) {
       throw new Error("Target host must be a bare IP or hostname, not a URL.");
-    }
-    if (!isValidTargetHost(target_host)) {
-      throw new Error("Target host points to a forbidden internal or private network address.");
     }
     
     if (monitor_type === "ping") {
@@ -71,18 +68,20 @@ export function validateMonitorPayload(payload) {
       if (!Number.isInteger(packet_timeout) || packet_timeout < 100 || packet_timeout > 5000) {
         throw new Error("Packet timeout must be between 100ms and 5000ms.");
       }
-    } else if (monitor_type === "port") {
+    } else if (monitor_type === "port" || monitor_type === "udp") {
       target_port = Number(payload.target_port);
       if (!Number.isInteger(target_port) || target_port < 1 || target_port > 65535) {
         throw new Error("Target port must be a valid integer between 1 and 65535.");
       }
       
-      connect_timeout = Number(payload.connect_timeout);
-      if (!Number.isInteger(connect_timeout) || connect_timeout < 1000 || connect_timeout > 60000) {
-        throw new Error("Connect timeout must be between 1000ms and 60000ms.");
+      if (monitor_type === "port") {
+        connect_timeout = Number(payload.connect_timeout);
+        if (!Number.isInteger(connect_timeout) || connect_timeout < 1000 || connect_timeout > 60000) {
+          throw new Error("Connect timeout must be between 1000ms and 60000ms.");
+        }
       }
     }
-  } else if (monitor_type !== "heartbeat" && monitor_type !== "dns") {
+  } else if (monitor_type !== "heartbeat" && monitor_type !== "dns" && monitor_type !== "udp") {
     try {
       parsedUrl = new URL(payload.url);
     } catch {
@@ -105,6 +104,9 @@ export function validateMonitorPayload(payload) {
     }
     if (authType === "bearer" && !payload.auth_bearer_token) throw new Error("Bearer authentication needs a token.");
     if (!allowedMethods.has(payload.http_method || "HEAD")) throw new Error("Unsupported HTTP method.");
+    if (monitor_type === "api" && (payload.http_method || "HEAD") === "HEAD") {
+      throw new Error("API monitoring requires a JSON response body, which HEAD requests do not return.");
+    }
   }
   if (!allowedIpVersions.has(payload.ip_version || "auto_ipv4_priority")) throw new Error("Unsupported IP version.");
 
@@ -151,8 +153,8 @@ export function validateMonitorPayload(payload) {
   let dns_hostname = null;
   let dns_record_type = null;
   let dns_expected_values = [];
-  let dns_match_mode = null;
-  let dns_resolver_mode = null;
+  let dns_match_mode = "exact_set";
+  let dns_resolver_mode = "system_default";
   let dns_custom_resolver_ip = null;
 
   if (monitor_type === "dns") {
@@ -187,6 +189,93 @@ export function validateMonitorPayload(payload) {
       if (dns_expected_values.length > 20) throw new Error("Maximum of 20 expected values allowed.");
     } else {
       throw new Error("Expected values must be an array.");
+    }
+  }
+
+  let api_assertions = [];
+  let api_assertion_logic = "all_must_pass";
+  let api_response_size_limit_kb = 512;
+
+  if (monitor_type === "api") {
+    if (Array.isArray(payload.api_assertions)) {
+      if (payload.api_assertions.length > 20) {
+        throw new Error("Maximum of 20 API assertions allowed per monitor.");
+      }
+      api_assertions = payload.api_assertions.map(a => {
+        const path = String(a.path || "").trim();
+        if (path.length > 500) throw new Error("API assertion path exceeds 500 characters limit.");
+        
+        const expected = a.expected !== undefined && a.expected !== null ? String(a.expected) : "";
+        if (expected.length > 2000) throw new Error("API assertion expected value exceeds 2000 characters limit.");
+        
+        return {
+          path,
+          operator: String(a.operator || "equals").trim(),
+          expected,
+          path_mode: String(a.path_mode || "dot").trim() === "jmespath" ? "jmespath" : "dot"
+        };
+      });
+    }
+
+    api_assertion_logic = String(payload.api_assertion_logic || "all_must_pass") === "any_must_pass" ? "any_must_pass" : "all_must_pass";
+    
+    if (payload.api_response_size_limit_kb !== undefined && payload.api_response_size_limit_kb !== null) {
+      api_response_size_limit_kb = Number(payload.api_response_size_limit_kb);
+      if (!Number.isInteger(api_response_size_limit_kb) || api_response_size_limit_kb < 1 || api_response_size_limit_kb > 10240) {
+        throw new Error("API response size limit must be between 1 KB and 10240 KB (10 MB).");
+      }
+    }
+  }
+
+  let udp_probe_type = null;
+  let udp_dns_query_name = null;
+  let udp_snmp_oid = null;
+  let udp_snmp_community = null;
+  let udp_raw_payload = null;
+  let udp_expect_any_response = null;
+  let udp_raw_expected_response = null;
+  let udp_response_timeout_ms = null;
+
+  if (monitor_type === "udp") {
+    udp_probe_type = String(payload.udp_probe_type || "raw").trim();
+    if (!["dns", "snmp", "raw"].includes(udp_probe_type)) {
+      throw new Error("Invalid UDP probe type. Must be dns, snmp, or raw.");
+    }
+
+    if (udp_probe_type === "dns") {
+      udp_dns_query_name = String(payload.udp_dns_query_name || "").trim();
+      if (!udp_dns_query_name) throw new Error("DNS query name is required for DNS UDP probes.");
+    } else if (udp_probe_type === "snmp") {
+      udp_snmp_oid = String(payload.udp_snmp_oid || "").trim();
+      if (!udp_snmp_oid) throw new Error("SNMP OID is required for SNMP UDP probes.");
+      udp_snmp_community = String(payload.udp_snmp_community || "").trim();
+      if (!udp_snmp_community) throw new Error("SNMP community is required for SNMP UDP probes.");
+    } else if (udp_probe_type === "raw") {
+      udp_raw_payload = String(payload.udp_raw_payload || "").trim();
+      if (udp_raw_payload.length > 512) throw new Error("UDP raw payload cannot exceed 512 bytes.");
+      udp_expect_any_response = Boolean(payload.udp_expect_any_response);
+      udp_raw_expected_response = String(payload.udp_raw_expected_response || "").trim();
+      if (udp_raw_expected_response.length > 512) throw new Error("UDP raw expected response cannot exceed 512 bytes.");
+    }
+
+    udp_response_timeout_ms = Number(payload.udp_response_timeout_ms);
+    if (!Number.isInteger(udp_response_timeout_ms) || udp_response_timeout_ms < 100 || udp_response_timeout_ms > 10000) {
+      throw new Error("UDP response timeout must be between 100ms and 10000ms.");
+    }
+  }
+
+  // ─── UNIFIED SSRF STRUCTURAL FUNNEL ─────────────────────────────────────────
+  // Every monitor type must pass its final destination(s) through this single choke point.
+  // This structurally prevents branch-specific oversights (e.g. forgetting to validate HTTP URLs)
+  const targetCandidates = [
+    target_host,
+    parsedUrl?.hostname,
+    dns_custom_resolver_ip,
+  ].filter(Boolean);
+
+  for (const candidate of targetCandidates) {
+    if (!isValidTargetHost(candidate)) {
+      throw new Error("Target host points to a forbidden internal or private network address.");
     }
   }
 
@@ -231,6 +320,17 @@ export function validateMonitorPayload(payload) {
     dns_match_mode,
     dns_resolver_mode,
     dns_custom_resolver_ip,
+    api_assertions,
+    api_assertion_logic,
+    api_response_size_limit_kb,
+    udp_probe_type,
+    udp_dns_query_name,
+    udp_snmp_oid,
+    udp_snmp_community,
+    udp_raw_payload,
+    udp_expect_any_response,
+    udp_raw_expected_response,
+    udp_response_timeout_ms,
   };
 }
 

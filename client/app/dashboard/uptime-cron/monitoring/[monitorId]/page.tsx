@@ -12,11 +12,12 @@ import {
   Loader2,
   Pause,
   Play,
-  RefreshCw,
   Trash2,
   TrendingDown,
   TrendingUp,
   XCircle,
+  Settings,
+  RefreshCw,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -24,7 +25,7 @@ import {
 interface Monitor {
   id: string;
   url: string;
-  monitor_type: "http" | "keyword" | "ping" | "port" | "heartbeat" | "dns";
+  monitor_type: "http" | "keyword" | "ping" | "port" | "heartbeat" | "dns" | "api" | "udp";
   target_host: string | null;
   target_port: number | null;
   connect_timeout: number | null;
@@ -47,6 +48,8 @@ interface Monitor {
   dns_match_mode: string | null;
   dns_resolver_mode: string | null;
   dns_custom_resolver_ip: string | null;
+  udp_probe_type?: string | null;
+  under_maintenance?: boolean;
 }
 
 interface Check {
@@ -56,6 +59,7 @@ interface Check {
   status_code: number | null;
   response_time_ms: number;
   error_message: string | null;
+  suppressed_by_window_id?: string | null;
 }
 
 interface Pagination { total: number; page: number; per_page: number; total_pages: number; }
@@ -293,7 +297,7 @@ function ResponseTimeChart({ checks, windowH }: { checks: Check[]; windowH: Char
         <polygon points={areaPts} fill="url(#chartGrad)" />
 
         {/* Down incident vertical lines */}
-        {pts.map((c, i) => !c.success ? (
+        {pts.map((c, i) => (!c.success && !c.suppressed_by_window_id) ? (
           <line key={`vl${i}`} x1={tx(times[i])} y1={PADY} x2={tx(times[i])} y2={H - PADY}
             stroke="#ef4444" strokeWidth="2" strokeOpacity="0.45" />
         ) : null)}
@@ -302,16 +306,24 @@ function ResponseTimeChart({ checks, windowH }: { checks: Check[]; windowH: Char
         <polyline points={linePts} fill="none" stroke="#818cf8" strokeWidth="2.5"
           strokeLinejoin="round" strokeLinecap="round" filter="url(#glow)" />
 
-        {/* Dots — green for success, red for failure */}
-        {pts.map((c, i) => (
-          <circle key={`dot${i}`}
-            cx={tx(times[i])} cy={ty(rtms[i])}
-            r={pts.length < 50 ? 4 : 3}
-            fill={c.success ? "#22c55e" : "#ef4444"}
-            stroke={c.success ? "#16a34a" : "#dc2626"}
-            strokeWidth="1.5"
-          />
-        ))}
+        {/* Dots — green for success, red for failure, gray for maintenance */}
+        {pts.map((c, i) => {
+          let fill = c.success ? "#22c55e" : "#ef4444";
+          let stroke = c.success ? "#16a34a" : "#dc2626";
+          if (c.suppressed_by_window_id) {
+            fill = "#6b7280";
+            stroke = "#4b5563";
+          }
+          return (
+            <circle key={`dot${i}`}
+              cx={tx(times[i])} cy={ty(rtms[i])}
+              r={pts.length < 50 ? 4 : 3}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth="1.5"
+            />
+          );
+        })}
       </svg>
 
       {/* Stats row */}
@@ -564,12 +576,21 @@ export default function MonitorDetailPage() {
   const displayUrl = monitor.monitor_type === "ping" || monitor.monitor_type === "port" ? (monitor.target_host ?? "") : (monitor.monitor_type === "dns" ? (monitor.dns_hostname ?? "") : monitor.url);
   const host = (() => { try { return new URL(displayUrl).hostname; } catch { return displayUrl; } })();
 
-  const statusConfig = {
+  let statusConfig = {
     up:      { label: "Up",      dot: "bg-emerald-500",              badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20", icon: <TrendingUp  className="h-5 w-5 text-emerald-400" /> },
     down:    { label: "Down",    dot: "bg-red-500 animate-pulse",    badge: "bg-red-500/15 text-red-400 border-red-500/20",             icon: <TrendingDown className="h-5 w-5 text-red-400" /> },
     paused:  { label: "Paused",  dot: "bg-zinc-500",                 badge: "bg-zinc-700/30 text-zinc-400 border-zinc-600/30",          icon: <Pause       className="h-5 w-5 text-zinc-400" /> },
     pending: { label: "Pending", dot: "bg-yellow-500 animate-pulse", badge: "bg-yellow-500/15 text-yellow-400 border-yellow-500/20",    icon: <Loader2     className="h-5 w-5 animate-spin text-yellow-400" /> },
   }[monitor.status];
+
+  if (monitor.under_maintenance) {
+    statusConfig = {
+      label: "Maintenance",
+      dot: "bg-zinc-500 animate-pulse",
+      badge: "bg-zinc-500/15 text-zinc-300 border-zinc-500/20",
+      icon: <Settings className="h-5 w-5 text-zinc-400" />
+    };
+  }
 
   const s24  = summary["24h"];
   const s7d  = summary["7d"];
@@ -618,6 +639,10 @@ export default function MonitorDetailPage() {
                             ? `DNS / ${monitor.dns_record_type}`
                             : monitor.monitor_type === "keyword" 
                             ? `${monitor.http_method} / KEYWORD` 
+                            : monitor.monitor_type === "api"
+                            ? `${monitor.http_method} / API`
+                            : monitor.monitor_type === "udp"
+                            ? `UDP / ${monitor.udp_probe_type?.toUpperCase() || 'RAW'}`
                             : `${monitor.http_method} / HTTP`}
                   </span>
                   {monitor.group_name && (
@@ -899,13 +924,16 @@ export default function MonitorDetailPage() {
             ) : (
               <div className="divide-y divide-zinc-800/40">
                 {checks.map((c, i) => {
-                  const rowState = !c.success ? "down" : c.is_slow ? "slow" : "up";
+                  let rowState = !c.success ? "down" : c.is_slow ? "slow" : "up";
+                  if (c.suppressed_by_window_id) rowState = "maintenance";
+
                   return (
                     <div key={i}
                       className={`grid grid-cols-[1fr_auto_auto_auto_2fr] items-center gap-4 px-6 py-3 transition-colors
                         ${
                           rowState === "down" ? "hover:bg-red-500/5"
                           : rowState === "slow" ? "hover:bg-amber-500/5"
+                          : rowState === "maintenance" ? "hover:bg-zinc-500/5"
                           : "hover:bg-emerald-500/5"
                         }`}>
                       {/* Time + dot */}
@@ -913,6 +941,7 @@ export default function MonitorDetailPage() {
                         <span className={`h-2 w-2 shrink-0 rounded-full ${
                           rowState === "down" ? "bg-red-500"
                           : rowState === "slow" ? "bg-amber-400"
+                          : rowState === "maintenance" ? "bg-zinc-500"
                           : "bg-emerald-500"
                         }`} />
                         {formatDateTime(c.checked_at)}
@@ -921,9 +950,10 @@ export default function MonitorDetailPage() {
                       <span className={`inline-block rounded-md px-2 py-0.5 text-center text-xs font-bold ${
                         rowState === "down" ? "bg-red-500/15 text-red-300"
                         : rowState === "slow" ? "bg-amber-500/15 text-amber-300"
+                        : rowState === "maintenance" ? "bg-zinc-500/20 text-zinc-400"
                         : "bg-emerald-500/15 text-emerald-300"
                       }`}>
-                        {rowState === "down" ? "DOWN" : rowState === "slow" ? "SLOW" : "UP"}
+                        {rowState === "down" ? "DOWN" : rowState === "slow" ? "SLOW" : rowState === "maintenance" ? "MAINTENANCE" : "UP"}
                       </span>
                       {/* HTTP code */}
                       <span className={`text-right text-xs font-mono font-semibold ${

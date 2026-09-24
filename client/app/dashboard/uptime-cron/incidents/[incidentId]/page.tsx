@@ -114,9 +114,10 @@ function LiveDuration({ startedAt, resolvedAt }: { startedAt: string; resolvedAt
 
 type PanelTab = "headers";
 
-function ResponsePanel({ url, method, headers }: {
+function ResponsePanel({ url, method, monitorType, headers }: {
   url: string;
   method: string;
+  monitorType?: string;
   headers: Record<string, string>;
 }) {
   const [copied, setCopied] = useState(false);
@@ -134,7 +135,7 @@ function ResponsePanel({ url, method, headers }: {
         <h3 className="mb-3 text-sm font-bold text-zinc-200">Request.</h3>
         <div className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-mono">
           <span className="shrink-0 rounded bg-indigo-500/20 px-2 py-0.5 text-xs font-bold text-indigo-300">
-            {method}
+            {monitorType && !["http", "api", "keyword"].includes(monitorType) ? monitorType.toUpperCase() : method}
           </span>
           <span className="truncate text-zinc-300" title={url}>{url}</span>
           <button onClick={() => navigator.clipboard.writeText(url)}
@@ -246,7 +247,9 @@ export default function IncidentDetailPage() {
                 <span className="text-indigo-300 break-all">{incident.monitor_url}</span>
               </h1>
               <p className="mt-1 flex items-center gap-2 text-sm text-zinc-500">
-                <span className="font-mono text-xs bg-zinc-800 rounded px-1.5 py-0.5">{incident.http_method}</span>
+                <span className="font-mono text-xs bg-zinc-800 rounded px-1.5 py-0.5">
+                  {["http", "api", "keyword"].includes(incident.monitor_type) ? incident.http_method : incident.monitor_type.toUpperCase()}
+                </span>
                 monitor for
                 <a href={incident.monitor_url} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1 text-zinc-400 hover:text-indigo-400 transition">
@@ -382,6 +385,7 @@ export default function IncidentDetailPage() {
             <ResponsePanel
               url={incident.monitor_url}
               method={incident.http_method}
+              monitorType={incident.monitor_type}
               headers={response_headers}
             />
 

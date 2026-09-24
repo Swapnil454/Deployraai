@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-const pages: Record<string, { title: string; description: string }> = { incidents: { title: "Incidents", description: "Track uptime events and keep your team informed." }, "status-pages": { title: "Status pages", description: "Share service availability with your customers." }, maintenance: { title: "Maintenance", description: "Plan scheduled maintenance windows without surprises." }, "team-members": { title: "Team members", description: "Manage teammates and notification access." }, integrations: { title: "Integrations & API", description: "Connect alerting and incident-management tools." } };
+const pages: Record<string, { title: string; description: string }> = { incidents: { title: "Incidents", description: "Track uptime events and keep your team informed." }, maintenance: { title: "Maintenance", description: "Plan scheduled maintenance windows without surprises." }, "team-members": { title: "Team members", description: "Manage teammates and notification access." }, integrations: { title: "Integrations & API", description: "Connect alerting and incident-management tools." } };
 
 export default async function UptimeSectionPage({ params }: { params: Promise<{ section: string }> }) {
   const { section } = await params; const page = pages[section]; if (!page) notFound();

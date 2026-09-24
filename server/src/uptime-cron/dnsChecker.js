@@ -1,5 +1,6 @@
 import dns from "node:dns/promises";
 import pLimit from "p-limit";
+import { isForbiddenIP } from "./validation.js";
 
 // Global concurrency cap for authoritative queries to protect upstream infrastructure.
 // Note for future scaling: If DeployAI scales to multiple worker instances, this process-local
@@ -105,8 +106,14 @@ export async function runDnsCheck(monitor) {
             const nsIps = await publicResolver.resolve4(ns);
             if (!nsIps || nsIps.length === 0) continue;
             
+            const nsIp = nsIps[0];
+            if (isForbiddenIP(nsIp)) {
+              console.warn(`[DNS] SSRF attempt detected: NS ${ns} resolved to forbidden IP ${nsIp}. Skipping.`);
+              continue;
+            }
+
             const authResolver = new dns.Resolver();
-            authResolver.setServers([nsIps[0]]);
+            authResolver.setServers([nsIp]);
             
             // Execute the actual query against the authoritative server
             return await authResolver.resolve(hostname, type);

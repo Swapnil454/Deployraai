@@ -3,6 +3,8 @@ import { runHttpCheck } from "./checker.js";
 import { runPingCheck } from "./pingChecker.js";
 import { runPortCheck } from "./portChecker.js";
 import { runDnsCheck } from "./dnsChecker.js";
+import { runUdpCheck } from "./udpChecker.js";
+import { refreshMaintenanceCache, isMonitorUnderMaintenance } from "./maintenanceEvaluation.js";
 
 const TICK_MS = 15_000;
 let scheduler;
@@ -53,6 +55,9 @@ async function persistCheck(monitor, result) {
   try {
     await client.query("BEGIN");
 
+    const maintenanceWindowId = isMonitorUnderMaintenance(monitor.id);
+    const isSuppressed = !!maintenanceWindowId;
+
     // ── Slow-response flag ─────────────────────────────────────────────────────
     const isSlow = (
       result.success
@@ -64,8 +69,8 @@ async function persistCheck(monitor, result) {
     // ── 1. Log the check row ───────────────────────────────────────────────────
     const { rows: logRows } = await client.query(
       `INSERT INTO uptime_checks_log
-         (monitor_id, success, status_code, response_time_ms, error_message, location, is_slow)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (monitor_id, success, status_code, response_time_ms, error_message, location, is_slow, suppressed_by_window_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id`,
       [
         monitor.id,
@@ -75,14 +80,15 @@ async function persistCheck(monitor, result) {
         result.errorMessage,
         monitor.location ?? "default",
         isSlow,
+        maintenanceWindowId,
       ],
     );
     checkLogId = logRows[0].id;
 
     // ── 2. Core incident management (ONE incident per downtime span) ───────────
-    const nextStatus = result.success ? "up" : "down";
+    const nextStatus = result.success || isSuppressed ? "up" : "down"; // Status remains UP if suppressed
 
-    if (!result.success) {
+    if (!result.success && !isSuppressed) {
       // Look for any OPEN non-slow incident for this monitor
       const { rows: open } = await client.query(
         `SELECT id FROM uptime_incidents
@@ -116,8 +122,8 @@ async function persistCheck(monitor, result) {
       }
     }
 
-    if (result.success && monitor.status !== "up") {
-      // ── Recovery: resolve open downtime incident ───────────────────────────
+    if ((result.success || isSuppressed) && monitor.status !== "up") {
+      // ── Recovery or Maintenance start: resolve open downtime incident ───────────────────────────
       const { rows: resolved } = await client.query(
         `UPDATE uptime_incidents
          SET resolved_at = NOW()
@@ -131,7 +137,7 @@ async function persistCheck(monitor, result) {
     }
 
     // ── 3. Slow-response incident management ──────────────────────────────────
-    if (isSlow) {
+    if (isSlow && !isSuppressed) {
       const { rows: openSlow } = await client.query(
         `SELECT id FROM uptime_incidents
          WHERE monitor_id = $1 AND cause = 'slow_response' AND resolved_at IS NULL LIMIT 1`,
@@ -154,7 +160,7 @@ async function persistCheck(monitor, result) {
           [openSlow[0].id],
         );
       }
-    } else if (result.success && monitor.slow_response_alert_enabled) {
+    } else if ((result.success || isSuppressed) && monitor.slow_response_alert_enabled) {
       const { rows: resolvedSlow } = await client.query(
         `UPDATE uptime_incidents
          SET resolved_at = NOW()
@@ -213,6 +219,7 @@ export async function runUptimeCronTick() {
   if (running) return;
   running = true;
   try {
+    await refreshMaintenanceCache();
     const monitors = await claimDueMonitors();
     await Promise.allSettled(monitors.map(async (monitor) => {
       let result;
@@ -222,6 +229,8 @@ export async function runUptimeCronTick() {
         result = await runPortCheck(monitor);
       } else if (monitor.monitor_type === "dns") {
         result = await runDnsCheck(monitor);
+      } else if (monitor.monitor_type === "udp") {
+        result = await runUdpCheck(monitor);
       } else {
         result = await runHttpCheck(monitor);
       }

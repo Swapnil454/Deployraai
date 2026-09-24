@@ -1,5 +1,6 @@
 import { uptimeDb } from "./db.js";
 import { validateMonitorPayload } from "./validation.js";
+import { isMonitorUnderMaintenance } from "./maintenanceEvaluation.js";
 
 const owner = (req) => String(req.user.userId);
 
@@ -47,7 +48,7 @@ export async function listMonitors(req, res) {
       -- 24-hour uptime %
       COALESCE(
         ROUND(
-          100.0 * COUNT(c.id) FILTER (WHERE c.success AND c.checked_at >= NOW() - INTERVAL '24 hours')
+          100.0 * COUNT(c.id) FILTER (WHERE (c.success OR c.suppressed_by_window_id IS NOT NULL) AND c.checked_at >= NOW() - INTERVAL '24 hours')
           / NULLIF(COUNT(c.id) FILTER (WHERE c.checked_at >= NOW() - INTERVAL '24 hours'), 0),
           2
         ), NULL
@@ -96,7 +97,12 @@ export async function listMonitors(req, res) {
     [userId],
   );
 
-  res.json({ monitors: rows });
+  const monitorsWithMaintenance = rows.map(m => ({
+    ...m,
+    under_maintenance: isMonitorUnderMaintenance(m.id)
+  }));
+
+  res.json({ monitors: monitorsWithMaintenance });
 }
 
 /**
@@ -111,11 +117,13 @@ export async function getMonitorDashboard(req, res) {
   const monitor = monitorResult.rows[0];
   if (!monitor) return res.status(404).json({ error: "Monitor not found." });
 
+  monitor.under_maintenance = isMonitorUnderMaintenance(monitor.id);
+
   const [chartChecks, incidents, summary24h, summary7d, summary30d, upSince] = await Promise.all([
     // Last 30 days of checks ordered newest-first for charting (client reverses for display)
     // We fetch up to 2000 points — the chart will thin them client-side by time window
     uptimeDb.query(
-      "SELECT checked_at, success, status_code, response_time_ms, error_message FROM uptime_checks_log WHERE monitor_id = $1 AND checked_at >= NOW() - INTERVAL '30 days' ORDER BY checked_at DESC LIMIT 2000",
+      "SELECT checked_at, success, status_code, response_time_ms, error_message, suppressed_by_window_id FROM uptime_checks_log WHERE monitor_id = $1 AND checked_at >= NOW() - INTERVAL '30 days' ORDER BY checked_at DESC LIMIT 2000",
       [monitor.id],
     ),
 
@@ -130,11 +138,11 @@ export async function getMonitorDashboard(req, res) {
       `SELECT
         COUNT(*)::int AS total_checks,
         COUNT(*) FILTER (WHERE success)::int AS successful_checks,
-        ROUND(100.0 * COUNT(*) FILTER (WHERE success) / NULLIF(COUNT(*), 0), 3) AS uptime_pct,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE success OR suppressed_by_window_id IS NOT NULL) / NULLIF(COUNT(*), 0), 3) AS uptime_pct,
         ROUND(AVG(response_time_ms))::int AS avg_ms,
         MIN(response_time_ms)::int AS min_ms,
         MAX(response_time_ms)::int AS max_ms,
-        COUNT(*) FILTER (WHERE NOT success)::int AS incident_count
+        COUNT(*) FILTER (WHERE NOT success AND suppressed_by_window_id IS NULL)::int AS incident_count
        FROM uptime_checks_log WHERE monitor_id = $1 AND checked_at >= NOW() - INTERVAL '24 hours'`,
       [monitor.id],
     ),
@@ -142,8 +150,8 @@ export async function getMonitorDashboard(req, res) {
     // 7-day summary
     uptimeDb.query(
       `SELECT
-        ROUND(100.0 * COUNT(*) FILTER (WHERE success) / NULLIF(COUNT(*), 0), 3) AS uptime_pct,
-        COUNT(*) FILTER (WHERE NOT success)::int AS incident_count,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE success OR suppressed_by_window_id IS NOT NULL) / NULLIF(COUNT(*), 0), 3) AS uptime_pct,
+        COUNT(*) FILTER (WHERE NOT success AND suppressed_by_window_id IS NULL)::int AS incident_count,
         ROUND(AVG(response_time_ms))::int AS avg_ms
        FROM uptime_checks_log WHERE monitor_id = $1 AND checked_at >= NOW() - INTERVAL '7 days'`,
       [monitor.id],
@@ -152,8 +160,8 @@ export async function getMonitorDashboard(req, res) {
     // 30-day summary
     uptimeDb.query(
       `SELECT
-        ROUND(100.0 * COUNT(*) FILTER (WHERE success) / NULLIF(COUNT(*), 0), 3) AS uptime_pct,
-        COUNT(*) FILTER (WHERE NOT success)::int AS incident_count,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE success OR suppressed_by_window_id IS NOT NULL) / NULLIF(COUNT(*), 0), 3) AS uptime_pct,
+        COUNT(*) FILTER (WHERE NOT success AND suppressed_by_window_id IS NULL)::int AS incident_count,
         ROUND(AVG(response_time_ms))::int AS avg_ms
        FROM uptime_checks_log WHERE monitor_id = $1 AND checked_at >= NOW() - INTERVAL '30 days'`,
       [monitor.id],
@@ -231,7 +239,7 @@ export async function listChecks(req, res) {
 
   const [rows, countResult] = await Promise.all([
     uptimeDb.query(
-      `SELECT checked_at, success, status_code, response_time_ms, error_message
+      `SELECT checked_at, success, status_code, response_time_ms, error_message, suppressed_by_window_id
        FROM uptime_checks_log
        WHERE ${where}
        ORDER BY checked_at DESC
@@ -283,7 +291,10 @@ export async function createMonitor(req, res) {
         target_host, target_port, connect_timeout, packet_count, packet_timeout,
         grace_period_seconds, heartbeat_token,
         dns_hostname, dns_record_type, dns_expected_values,
-        dns_match_mode, dns_resolver_mode, dns_custom_resolver_ip
+        dns_match_mode, dns_resolver_mode, dns_custom_resolver_ip,
+        api_assertions, api_assertion_logic, api_response_size_limit_kb,
+        udp_probe_type, udp_dns_query_name, udp_snmp_oid, udp_snmp_community,
+        udp_raw_payload, udp_expect_any_response, udp_raw_expected_response, udp_response_timeout_ms
       ) VALUES (
         $1,  $2,  $3,  $4,
         $5,  $6,  $7,  $8,
@@ -296,7 +307,10 @@ export async function createMonitor(req, res) {
         $29, $30, $31, $32, $33,
         $34, $35,
         $36, $37, $38::jsonb,
-        $39, $40, $41
+        $39, $40, $41,
+        $42::jsonb, $43, $44,
+        $45, $46, $47, $48,
+        $49, $50, $51, $52
       ) RETURNING *`,
       [
         userId,
@@ -340,6 +354,17 @@ export async function createMonitor(req, res) {
         monitor.dns_match_mode,
         monitor.dns_resolver_mode,
         monitor.dns_custom_resolver_ip,
+        JSON.stringify(monitor.api_assertions),
+        monitor.api_assertion_logic,
+        monitor.api_response_size_limit_kb,
+        monitor.udp_probe_type,
+        monitor.udp_dns_query_name,
+        monitor.udp_snmp_oid,
+        monitor.udp_snmp_community,
+        monitor.udp_raw_payload,
+        monitor.udp_expect_any_response,
+        monitor.udp_raw_expected_response,
+        monitor.udp_response_timeout_ms,
       ],
     );
     res.status(201).json({ monitor: rows[0] });
@@ -411,6 +436,17 @@ export async function updateMonitor(req, res) {
          dns_match_mode               = $39,
          dns_resolver_mode            = $40,
          dns_custom_resolver_ip       = $41,
+         api_assertions               = $42::jsonb,
+         api_assertion_logic          = $43,
+         api_response_size_limit_kb   = $44,
+         udp_probe_type               = $45,
+         udp_dns_query_name           = $46,
+         udp_snmp_oid                 = $47,
+         udp_snmp_community           = $48,
+         udp_raw_payload              = $49,
+         udp_expect_any_response      = $50,
+         udp_raw_expected_response    = $51,
+         udp_response_timeout_ms      = $52,
          updated_at                   = NOW()
        WHERE id = $1 AND user_id = $2
        RETURNING *`,
@@ -456,6 +492,17 @@ export async function updateMonitor(req, res) {
         monitor.dns_match_mode,
         monitor.dns_resolver_mode,
         monitor.dns_custom_resolver_ip,
+        JSON.stringify(monitor.api_assertions),
+        monitor.api_assertion_logic,
+        monitor.api_response_size_limit_kb,
+        monitor.udp_probe_type,
+        monitor.udp_dns_query_name,
+        monitor.udp_snmp_oid,
+        monitor.udp_snmp_community,
+        monitor.udp_raw_payload,
+        monitor.udp_expect_any_response,
+        monitor.udp_raw_expected_response,
+        monitor.udp_response_timeout_ms,
       ],
     );
     if (!rows[0]) return res.status(404).json({ error: "Monitor not found." });
@@ -515,7 +562,7 @@ export async function listIncidents(req, res) {
          END AS status,
          EXTRACT(EPOCH FROM COALESCE(i.resolved_at, NOW()) - i.started_at)::int AS duration_seconds,
          m.id   AS monitor_id,
-         m.url  AS monitor_url,
+         COALESCE(m.url, m.target_host, m.dns_hostname) AS monitor_url,
          m.http_method,
          m.monitor_type
        FROM uptime_incidents i
@@ -574,7 +621,7 @@ export async function getIncident(req, res) {
        CASE WHEN i.resolved_at IS NULL THEN 'ongoing' ELSE 'resolved' END AS status,
        EXTRACT(EPOCH FROM COALESCE(i.resolved_at, NOW()) - i.started_at)::int AS duration_seconds,
        m.id          AS monitor_id,
-       m.url         AS monitor_url,
+       COALESCE(m.url, m.target_host, m.dns_hostname) AS monitor_url,
        m.http_method,
        m.monitor_type,
        m.auth_type,

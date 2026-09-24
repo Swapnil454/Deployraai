@@ -1,5 +1,6 @@
 import dns from "node:dns/promises";
 import crypto from "node:crypto";
+import { evaluateApiAssertions } from "./apiChecker.js";
 
 const privateAddress = (address) => (
   /^127\./.test(address)
@@ -219,6 +220,69 @@ export async function runHttpCheck(monitor) {
         success = false;
         errorMessage = "Failed to read response body for keyword check";
         cause = "keyword_match_failed";
+      }
+    }
+
+    if (success && monitor.monitor_type === "api") {
+      try {
+        const text = await response.text();
+        const limitBytes = (monitor.api_response_size_limit_kb || 512) * 1024;
+        if (text.length > limitBytes) {
+          success = false;
+          errorMessage = `Response size (${Math.round(text.length/1024)}KB) exceeds limit of ${monitor.api_response_size_limit_kb || 512}KB`;
+          cause = "response_too_large";
+        } else {
+          let jsonData;
+          
+          // JSON Depth Guard: Replace strings and count nesting depth
+          let currentDepth = 0;
+          let maxDepth = 0;
+          let inString = false;
+          let escaped = false;
+          
+          for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            if (inString) {
+              if (escaped) escaped = false; // Next char after backslash is just consumed
+              else if (char === '\\') escaped = true;
+              else if (char === '"') inString = false;
+            } else {
+              if (char === '"') inString = true;
+              else if (char === '{' || char === '[') {
+                currentDepth++;
+                if (currentDepth > maxDepth) maxDepth = currentDepth;
+              } else if (char === '}' || char === ']') {
+                currentDepth--;
+              }
+            }
+          }
+
+          if (maxDepth > 30) {
+            success = false;
+            errorMessage = `Response structure exceeded 30 levels of nesting — check may be misconfigured, or the API is returning malformed/recursive data`;
+            cause = "RESPONSE_TOO_DEEP";
+          } else {
+            try {
+              jsonData = JSON.parse(text);
+            } catch (e) {
+              success = false;
+              errorMessage = "Response was not valid JSON — check may be misconfigured, or the API is returning an error page instead of expected JSON";
+              cause = "INVALID_JSON";
+            }
+          }
+          if (success) {
+            const apiResult = await evaluateApiAssertions(jsonData, monitor.api_assertions || [], monitor.api_assertion_logic || 'all_must_pass');
+            if (!apiResult.success) {
+              success = false;
+              errorMessage = apiResult.details;
+              cause = apiResult.cause;
+            }
+          }
+        }
+      } catch (err) {
+        success = false;
+        errorMessage = "Failed to read response body for API check";
+        cause = "api_check_failed";
       }
     }
 
