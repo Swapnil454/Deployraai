@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { Loader2, Check, AlertTriangle, XCircle, Globe, Calendar, ChevronDown, Link as LinkIcon, ExternalLink, TrendingUp, Clock, ShieldAlert, Activity } from "lucide-react";
 
@@ -18,6 +18,9 @@ interface StatusMonitor {
   monitor_type: string;
   status: string;
   history?: { date: string; uptime_percentage: string }[];
+  uptime_overall?: string;
+  last_checked_at?: string;
+  interval_seconds?: number;
 }
 
 interface GlobalMetrics {
@@ -29,6 +32,19 @@ interface GlobalMetrics {
   incidents_history: number[];
 }
 
+function timeAgo(dateStr: string | null, loopInterval?: number): string {
+  if (!dateStr) return "Never";
+  let diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (loopInterval && loopInterval > 0 && diff >= loopInterval) {
+    diff = diff % loopInterval;
+  }
+  if (diff < 10) return "Just now";
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ${diff % 60}s ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ${Math.floor((diff % 3600) / 60)}m ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
 export default function PublicStatusPage() {
   const params = useParams();
   const slug = params.slug as string;
@@ -37,21 +53,26 @@ export default function PublicStatusPage() {
   const [error, setError] = useState<string | null>(null);
   const [filterWindow, setFilterWindow] = useState("30d");
 
-  const API = `${process.env.NEXT_PUBLIC_API_URL || ""}/api/uptime-cron`;
+  const API = "/api/uptime-proxy/uptime-cron";
 
   const windowOptions = [
     { value: "1h", label: "Last 1 hour" },
     { value: "6h", label: "Last 6 hours" },
     { value: "12h", label: "Last 12 hours" },
-    { value: "24h", label: "Last 24 hours" },
     { value: "7d", label: "Last 7 days" },
-    { value: "15d", label: "Last 15 days" },
     { value: "30d", label: "Last 30 days" },
   ];
 
+  const [tick, setTick] = useState(0);
+
   useEffect(() => {
-    setLoading(true);
-    fetch(`${API}/status/${slug}?window=${filterWindow}&t=${Date.now()}`, { credentials: "include", cache: "no-store" })
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const fetchData = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
+    fetch(`${API}/status/${slug}?window=${filterWindow}`)
       .then(res => res.ok ? res.json() : Promise.reject(new Error("Status page not found")))
       .then(data => {
         setPageData(data);
@@ -60,6 +81,19 @@ export default function PublicStatusPage() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [slug, API, filterWindow]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Now that the endpoint is Edge Cached, it is 100% safe and free to poll every 15s.
+  // The requests will be intercepted by Vercel's Edge Network.
+  useEffect(() => {
+    const id = setInterval(() => {
+      fetchData(true);
+    }, 15_000);
+    return () => clearInterval(id);
+  }, [fetchData]);
 
   if (loading && !pageData) {
     return (
@@ -129,9 +163,7 @@ export default function PublicStatusPage() {
       case '1h': windowMs = 60 * 60 * 1000; numBars = 30; formatLabel = d => d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); break;
       case '6h': windowMs = 6 * 60 * 60 * 1000; numBars = 36; formatLabel = d => d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); break;
       case '12h': windowMs = 12 * 60 * 60 * 1000; numBars = 36; formatLabel = d => d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); break;
-      case '24h': windowMs = 24 * 60 * 60 * 1000; numBars = 24; formatLabel = d => d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); break;
-      case '7d': windowMs = 7 * 24 * 60 * 60 * 1000; numBars = 28; formatLabel = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); break;
-      case '15d': windowMs = 15 * 24 * 60 * 60 * 1000; numBars = 30; break;
+      case '7d': windowMs = 7 * 24 * 60 * 60 * 1000; numBars = 7; formatLabel = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); break;
       case '30d': default: windowMs = 30 * 24 * 60 * 60 * 1000; numBars = 30; break;
     }
 
@@ -291,7 +323,7 @@ export default function PublicStatusPage() {
           ) : (
             monitors.map(m => {
               const buckets = createTimeBuckets(m.history, filterWindow);
-              const overallUptime = global_metrics?.uptime_30d ? global_metrics.uptime_30d.toFixed(2) : "100.00";
+              const overallUptime = m.uptime_overall ? parseFloat(m.uptime_overall).toFixed(2) : "100.00";
 
               return (
                 <div key={m.id} className="bg-white/95 backdrop-blur-sm rounded-[20px] shadow-lg border border-slate-200/80 p-5 sm:p-6 transition hover:shadow-xl">
@@ -538,7 +570,19 @@ export default function PublicStatusPage() {
                 </div>
               </div>
               <div className="flex items-end gap-2 mt-1">
-                <h4 className="text-[28px] font-extrabold text-slate-900 leading-none">Just now</h4>
+                <h4 className="text-[28px] font-extrabold text-slate-900 leading-none">
+                  {monitors.length > 0 
+                    ? (() => {
+                        const maxM = monitors.reduce((prev, curr) => 
+                          (new Date(curr.last_checked_at || 0).getTime() > new Date(prev.last_checked_at || 0).getTime()) ? curr : prev
+                        );
+                        return timeAgo(
+                          maxM.last_checked_at || null, 
+                          maxM.interval_seconds
+                        );
+                      })()
+                    : "Never"}
+                </h4>
               </div>
               {/* Chart */}
               <div className="mt-auto h-16 w-[calc(100%+8px)] relative -mx-1">

@@ -224,6 +224,7 @@ export async function getPublicStatusPage(req, res) {
          m.monitor_type, 
          m.status,
          m.interval_seconds,
+         m.last_checked_at,
          spm.sort_order
        FROM uptime_status_page_monitors spm
        JOIN uptime_monitors m ON m.id = spm.monitor_id
@@ -237,42 +238,61 @@ export async function getPublicStatusPage(req, res) {
     const windowStr = req.query.window || '30d';
     let intervalStr = '30 days';
     let groupFormat = 'YYYY-MM-DD';
+    let useDailyMetrics = false;
 
     switch (windowStr) {
       case '1h': intervalStr = '1 hour'; groupFormat = 'YYYY-MM-DD HH24:MI'; break;
       case '6h': intervalStr = '6 hours'; groupFormat = 'YYYY-MM-DD HH24:MI'; break;
       case '12h': intervalStr = '12 hours'; groupFormat = 'YYYY-MM-DD HH24:MI'; break;
-      case '24h': intervalStr = '24 hours'; groupFormat = 'YYYY-MM-DD HH24'; break;
-      case '7d': intervalStr = '7 days'; groupFormat = 'YYYY-MM-DD HH24'; break;
-      case '15d': intervalStr = '15 days'; groupFormat = 'YYYY-MM-DD'; break;
-      case '30d': default: intervalStr = '30 days'; groupFormat = 'YYYY-MM-DD'; break;
+      case '7d': intervalStr = '7 days'; useDailyMetrics = true; break;
+      case '30d': default: intervalStr = '30 days'; useDailyMetrics = true; break;
     }
 
     // 3. Get history for each monitor based on window
     const monitorIds = monitors.map(m => m.id);
     let historyRows = [];
     if (monitorIds.length > 0) {
-      const historyRes = await uptimeDb.query(
-        `SELECT 
-          monitor_id, 
-          TO_CHAR(checked_at AT TIME ZONE 'UTC', '${groupFormat}') as date,
-          COUNT(*) FILTER (WHERE success OR suppressed_by_window_id IS NOT NULL) * 100.0 / NULLIF(COUNT(*), 0) as uptime_percentage
-         FROM uptime_checks_log
-         WHERE monitor_id = ANY($1) 
-           AND checked_at >= NOW() - INTERVAL '${intervalStr}'
-         GROUP BY monitor_id, TO_CHAR(checked_at AT TIME ZONE 'UTC', '${groupFormat}')
-         ORDER BY date ASC`,
-        [monitorIds]
-      );
+      const historyQuery = useDailyMetrics
+        ? `SELECT monitor_id, TO_CHAR(date, 'YYYY-MM-DD') as date,
+             SUM(successful_checks) * 100.0 / NULLIF(SUM(total_checks), 0) as uptime_percentage
+           FROM uptime_daily_metrics
+           WHERE monitor_id = ANY($1) AND date >= (NOW() AT TIME ZONE 'UTC')::date - INTERVAL '${intervalStr}'
+           GROUP BY monitor_id, date ORDER BY date ASC`
+        : `SELECT monitor_id, TO_CHAR(checked_at AT TIME ZONE 'UTC', '${groupFormat}') as date,
+             COUNT(*) FILTER (WHERE success OR suppressed_by_window_id IS NOT NULL) * 100.0 / NULLIF(COUNT(*), 0) as uptime_percentage
+           FROM uptime_checks_log
+           WHERE monitor_id = ANY($1) AND checked_at >= NOW() - INTERVAL '${intervalStr}'
+           GROUP BY monitor_id, TO_CHAR(checked_at AT TIME ZONE 'UTC', '${groupFormat}') ORDER BY date ASC`;
+           
+      const historyRes = await uptimeDb.query(historyQuery, [monitorIds]);
       historyRows = historyRes.rows;
     }
 
-    // Attach history to each monitor
+    // 3.5. Get overall uptime per monitor
+    let monitorOverall = [];
+    if (monitorIds.length > 0) {
+      const overallQuery = useDailyMetrics
+        ? `SELECT monitor_id, SUM(successful_checks) * 100.0 / NULLIF(SUM(total_checks), 0) as uptime_pct
+           FROM uptime_daily_metrics
+           WHERE monitor_id = ANY($1) AND date >= (NOW() AT TIME ZONE 'UTC')::date - INTERVAL '${intervalStr}'
+           GROUP BY monitor_id`
+        : `SELECT monitor_id, COUNT(*) FILTER (WHERE success OR suppressed_by_window_id IS NOT NULL) * 100.0 / NULLIF(COUNT(*), 0) as uptime_pct
+           FROM uptime_checks_log
+           WHERE monitor_id = ANY($1) AND checked_at >= NOW() - INTERVAL '${intervalStr}'
+           GROUP BY monitor_id`;
+           
+      const monitorOverallRes = await uptimeDb.query(overallQuery, [monitorIds]);
+      monitorOverall = monitorOverallRes.rows;
+    }
+
+    // Attach history and overall uptime to each monitor
     monitors.forEach(m => {
       m.history = historyRows.filter(h => h.monitor_id === m.id).map(h => ({
         date: h.date,
         uptime_percentage: parseFloat(h.uptime_percentage).toFixed(3)
       }));
+      const overall = monitorOverall.find(o => o.monitor_id === m.id);
+      m.uptime_overall = overall ? parseFloat(overall.uptime_pct).toFixed(3) : "100.000";
     });
 
     // 4. Global Aggregate Stats for the 4 Bottom Cards
@@ -287,26 +307,46 @@ export async function getPublicStatusPage(req, res) {
 
     if (monitorIds.length > 0) {
       // 30-day overall uptime & response time (grouped by day)
-      const aggRes = await uptimeDb.query(
-        `SELECT 
-          TO_CHAR(checked_at AT TIME ZONE 'UTC', '${groupFormat}') as date,
-          COUNT(*) FILTER (WHERE success OR suppressed_by_window_id IS NOT NULL) * 100.0 / NULLIF(COUNT(*), 0) as uptime_pct,
-          AVG(response_time_ms) as avg_ms
-         FROM uptime_checks_log
-         WHERE monitor_id = ANY($1) 
-           AND checked_at >= NOW() - INTERVAL '${intervalStr}'
-         GROUP BY TO_CHAR(checked_at AT TIME ZONE 'UTC', '${groupFormat}')
-         ORDER BY date ASC`,
-        [monitorIds]
-      );
+      const aggQuery = useDailyMetrics
+        ? `SELECT TO_CHAR(date, 'YYYY-MM-DD') as date,
+             SUM(successful_checks) * 100.0 / NULLIF(SUM(total_checks), 0) as uptime_pct,
+             SUM(total_response_time_ms) / NULLIF(SUM(total_checks), 0) as avg_ms
+           FROM uptime_daily_metrics
+           WHERE monitor_id = ANY($1) AND date >= (NOW() AT TIME ZONE 'UTC')::date - INTERVAL '${intervalStr}'
+           GROUP BY date ORDER BY date ASC`
+        : `SELECT TO_CHAR(checked_at AT TIME ZONE 'UTC', '${groupFormat}') as date,
+             COUNT(*) FILTER (WHERE success OR suppressed_by_window_id IS NOT NULL) * 100.0 / NULLIF(COUNT(*), 0) as uptime_pct,
+             AVG(response_time_ms) as avg_ms
+           FROM uptime_checks_log
+           WHERE monitor_id = ANY($1) AND checked_at >= NOW() - INTERVAL '${intervalStr}'
+           GROUP BY TO_CHAR(checked_at AT TIME ZONE 'UTC', '${groupFormat}') ORDER BY date ASC`;
+           
+      const aggRes = await uptimeDb.query(aggQuery, [monitorIds]);
       
       const aggRows = aggRes.rows;
       if (aggRows.length > 0) {
         global_metrics.uptime_history = aggRows.map(r => parseFloat(r.uptime_pct));
         global_metrics.response_history = aggRows.map(r => parseFloat(r.avg_ms));
-        
-        global_metrics.uptime_30d = global_metrics.uptime_history.reduce((a, b) => a + b, 0) / aggRows.length;
-        global_metrics.avg_response_ms = global_metrics.response_history.reduce((a, b) => a + b, 0) / aggRows.length;
+      }
+
+      const overallAggQuery = useDailyMetrics
+        ? `SELECT SUM(successful_checks) * 100.0 / NULLIF(SUM(total_checks), 0) as uptime_pct,
+             SUM(total_response_time_ms) / NULLIF(SUM(total_checks), 0) as avg_ms
+           FROM uptime_daily_metrics
+           WHERE monitor_id = ANY($1) AND date >= (NOW() AT TIME ZONE 'UTC')::date - INTERVAL '${intervalStr}'`
+        : `SELECT COUNT(*) FILTER (WHERE success OR suppressed_by_window_id IS NOT NULL) * 100.0 / NULLIF(COUNT(*), 0) as uptime_pct,
+             AVG(response_time_ms) as avg_ms
+           FROM uptime_checks_log
+           WHERE monitor_id = ANY($1) AND checked_at >= NOW() - INTERVAL '${intervalStr}'`;
+           
+      const overallAggRes = await uptimeDb.query(overallAggQuery, [monitorIds]);
+
+      if (overallAggRes.rows.length > 0 && overallAggRes.rows[0].uptime_pct !== null) {
+        global_metrics.uptime_30d = parseFloat(overallAggRes.rows[0].uptime_pct);
+        global_metrics.avg_response_ms = parseFloat(overallAggRes.rows[0].avg_ms);
+      } else {
+        global_metrics.uptime_30d = 100;
+        global_metrics.avg_response_ms = 0;
       }
 
       // incidents in the window
@@ -326,6 +366,8 @@ export async function getPublicStatusPage(req, res) {
       global_metrics.incidents_history = incRes.rows.map(r => parseInt(r.count, 10));
     }
 
+    res.set('Cache-Control', 'public, max-age=0');
+    res.set('CDN-Cache-Control', 'public, s-maxage=30, stale-while-revalidate=59');
     res.json({
       status_page: page,
       monitors: monitors,

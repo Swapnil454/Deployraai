@@ -88,9 +88,9 @@ export async function initializeUptimeCronSchema() {
     CREATE INDEX IF NOT EXISTS uptime_monitors_heartbeat_token_prev_idx ON uptime_monitors (heartbeat_token_previous);
   `);
 
-  // TTL: delete check logs older than 32 days to keep the table lean
+  // TTL: delete check logs older than 12 hours to protect Supabase 500MB limit
   await uptimeDb.query(
-    `DELETE FROM uptime_checks_log WHERE checked_at < NOW() - INTERVAL '32 days'`
+    `DELETE FROM uptime_checks_log WHERE checked_at < NOW() - INTERVAL '12 hours'`
   );
 
   // Safe migrations — idempotent
@@ -200,5 +200,14 @@ export async function initializeUptimeCronSchema() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_uptime_maintenance_window_monitors ON uptime_maintenance_window_monitors(monitor_id);
+
+    CREATE TABLE IF NOT EXISTS uptime_daily_metrics (
+      monitor_id UUID REFERENCES uptime_monitors(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      total_checks INTEGER NOT NULL DEFAULT 0,
+      successful_checks INTEGER NOT NULL DEFAULT 0,
+      total_response_time_ms BIGINT NOT NULL DEFAULT 0,
+      PRIMARY KEY (monitor_id, date)
+    );
   `);
 }

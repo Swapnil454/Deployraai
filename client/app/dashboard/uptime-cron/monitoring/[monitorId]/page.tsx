@@ -87,7 +87,7 @@ interface DashboardData {
   mtbf_hours: number | null;
 }
 
-type ChartWindow = "1h" | "6h" | "24h" | "7d" | "30d";
+type ChartWindow = "1h" | "3h" | "6h" | "12h";
 type CheckFilter = "all" | "up" | "down";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -204,10 +204,10 @@ function DeleteModal({ url, onConfirm, onCancel, loading }: {
 
 function UptimeBar({ checks }: { checks: Check[] }) {
   const now = Date.now();
-  const cutoff = now - 24 * 3600 * 1000;
+  const cutoff = now - 12 * 3600 * 1000;
   const recent = checks.filter((c) => new Date(c.checked_at).getTime() >= cutoff);
-  const BUCKETS = 48;
-  const bucketMs = (24 * 3600 * 1000) / BUCKETS;
+  const BUCKETS = 24;
+  const bucketMs = (12 * 3600 * 1000) / BUCKETS;
   const buckets = Array.from({ length: BUCKETS }, (_, i) => {
     const start = cutoff + i * bucketMs;
     const end = start + bucketMs;
@@ -233,10 +233,9 @@ function UptimeBar({ checks }: { checks: Check[] }) {
 function ResponseTimeChart({ checks, windowH }: { checks: Check[]; windowH: ChartWindow }) {
   const windowMs: Record<ChartWindow, number> = {
     "1h":  1 * 3600_000,
+    "3h":  3 * 3600_000,
     "6h":  6 * 3600_000,
-    "24h": 24 * 3600_000,
-    "7d":  7 * 86400_000,
-    "30d": 30 * 86400_000,
+    "12h": 12 * 3600_000,
   };
   const cutoff = Date.now() - windowMs[windowH];
   const pts = [...checks].filter((c) => new Date(c.checked_at).getTime() >= cutoff).reverse();
@@ -599,10 +598,9 @@ export default function MonitorDetailPage() {
   const checkWindowOptions: { label: string; value: ChartWindow | "all" }[] = [
     { label: "All time", value: "all" },
     { label: "1h",       value: "1h" },
+    { label: "3h",       value: "3h" },
     { label: "6h",       value: "6h" },
-    { label: "24h",      value: "24h" },
-    { label: "7d",       value: "7d" },
-    { label: "30d",      value: "30d" },
+    { label: "12h",      value: "12h" },
   ];
 
   return (
@@ -754,9 +752,9 @@ export default function MonitorDetailPage() {
               <p className="mt-1 text-xs text-zinc-500">Mean time between failures</p>
             </StatCard>
 
-            {/* ③ Last 24 hours — wider (col-span-2) */}
+            {/* ③ Last 12 hours (Raw Checks) — wider (col-span-2) */}
             <div className="col-span-2 flex flex-col rounded-xl border border-zinc-800 bg-zinc-950 p-5">
-              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Last 24 hours</span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Last 12 hours</span>
               <div className="mt-3 flex items-baseline gap-3">
                 <p className={`text-3xl font-bold tabular-nums ${uptimePctColor(s24.uptime_pct)}`}>
                   {s24.uptime_pct !== null ? `${Number(s24.uptime_pct).toFixed(2)}%` : "—"}
@@ -767,7 +765,7 @@ export default function MonitorDetailPage() {
                 <UptimeBar checks={chartChecks} />
               </div>
               <div className="mt-2 flex justify-between text-[10px] text-zinc-700">
-                <span>24h ago</span><span>Now</span>
+                <span>12h ago</span><span>Now</span>
               </div>
             </div>
 
@@ -799,7 +797,7 @@ export default function MonitorDetailPage() {
               </div>
               {/* Window selector */}
               <div className="flex overflow-hidden rounded-lg border border-zinc-700">
-                {(["1h", "6h", "24h", "7d", "30d"] as ChartWindow[]).map((w) => (
+                {(["1h", "3h", "6h", "12h"] as ChartWindow[]).map((w) => (
                   <button key={w} onClick={() => setChartWindow(w)}
                     className={`px-3 py-1.5 text-xs font-semibold transition
                       ${chartWindow === w ? "bg-indigo-600 text-white" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}>

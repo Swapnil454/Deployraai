@@ -5,10 +5,99 @@ import { runPortCheck } from "./portChecker.js";
 import { runDnsCheck } from "./dnsChecker.js";
 import { runUdpCheck } from "./udpChecker.js";
 import { refreshMaintenanceCache, isMonitorUnderMaintenance } from "./maintenanceEvaluation.js";
+import crypto from "node:crypto";
 
 const TICK_MS = 15_000;
 let scheduler;
 let running = false;
+
+// --- HYPER-OPTIMIZED BATCHING BUFFERS ---
+const checksLogBuffer = [];
+const dailyMetricsBuffer = new Map();
+let isFlushing = false;
+
+function bufferDailyMetric(monitorId, success, responseTimeMs) {
+  const dateStr = new Date().toISOString().split('T')[0];
+  const key = `${monitorId}_${dateStr}`;
+  if (!dailyMetricsBuffer.has(key)) {
+    dailyMetricsBuffer.set(key, { monitorId, date: dateStr, total: 0, successful: 0, responseTime: 0 });
+  }
+  const entry = dailyMetricsBuffer.get(key);
+  entry.total++;
+  if (success) entry.successful++;
+  entry.responseTime += responseTimeMs;
+}
+
+async function flushBuffers() {
+  if (isFlushing) return;
+  if (checksLogBuffer.length === 0 && dailyMetricsBuffer.size === 0) return;
+  
+  isFlushing = true;
+  const client = await uptimeDb.connect();
+  try {
+    await client.query("BEGIN");
+    
+    if (checksLogBuffer.length > 0) {
+      const batch = checksLogBuffer.splice(0, checksLogBuffer.length);
+      const values = [];
+      const flatArgs = [];
+      let i = 1;
+      for (const log of batch) {
+        values.push(`($${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++})`);
+        flatArgs.push(log.id, log.monitorId, log.success, log.statusCode, log.responseTimeMs, log.errorMessage, log.location, log.isSlow, log.suppressedByWindowId);
+      }
+      const query = `
+        INSERT INTO uptime_checks_log 
+        (id, monitor_id, success, status_code, response_time_ms, error_message, location, is_slow, suppressed_by_window_id)
+        VALUES ${values.join(", ")}
+      `;
+      await client.query(query, flatArgs);
+    }
+    
+    if (dailyMetricsBuffer.size > 0) {
+      const batch = Array.from(dailyMetricsBuffer.values());
+      dailyMetricsBuffer.clear();
+      const values = [];
+      const flatArgs = [];
+      let i = 1;
+      for (const m of batch) {
+        values.push(`($${i++}, $${i++}::date, $${i++}, $${i++}, $${i++})`);
+        flatArgs.push(m.monitorId, m.date, m.total, m.successful, m.responseTime);
+      }
+      const query = `
+        INSERT INTO uptime_daily_metrics (monitor_id, date, total_checks, successful_checks, total_response_time_ms)
+        VALUES ${values.join(", ")}
+        ON CONFLICT (monitor_id, date) DO UPDATE SET
+          total_checks = uptime_daily_metrics.total_checks + EXCLUDED.total_checks,
+          successful_checks = uptime_daily_metrics.successful_checks + EXCLUDED.successful_checks,
+          total_response_time_ms = uptime_daily_metrics.total_response_time_ms + EXCLUDED.total_response_time_ms
+      `;
+      await client.query(query, flatArgs);
+    }
+    
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("[Uptime Cron] Batch flush error:", error.message);
+  } finally {
+    isFlushing = false;
+    client.release();
+  }
+}
+
+// Flush buffers every 5 seconds asynchronously
+setInterval(() => void flushBuffers(), 5000);
+
+// --- TTL PRUNING CRON ---
+async function pruneOldLogs() {
+  try {
+    await uptimeDb.query(`DELETE FROM uptime_checks_log WHERE checked_at < NOW() - INTERVAL '12 hours'`);
+  } catch (err) {
+    console.error("[Uptime Cron] Pruning error:", err.message);
+  }
+}
+// Run pruning every 1 hour to protect database size
+setInterval(() => void pruneOldLogs(), 60 * 60 * 1000);
 
 async function claimDueMonitors() {
   const { rows } = await uptimeDb.query(
@@ -18,7 +107,7 @@ async function claimDueMonitors() {
     + " AND monitor_type != 'heartbeat'"
     + " AND (checking_at IS NULL OR checking_at < NOW() - INTERVAL '2 minutes')"
     + " AND (last_checked_at IS NULL OR last_checked_at + (interval_seconds * INTERVAL '1 second') <= NOW())"
-    + " ORDER BY last_checked_at NULLS FIRST LIMIT 20 FOR UPDATE SKIP LOCKED"
+    + " ORDER BY last_checked_at NULLS FIRST LIMIT 100 FOR UPDATE SKIP LOCKED"
     + " ) UPDATE uptime_monitors monitor"
     + " SET checking_at = NOW(), last_checked_at = NOW(), updated_at = NOW()"
     + " FROM due WHERE monitor.id = due.id RETURNING monitor.*",
@@ -66,24 +155,21 @@ async function persistCheck(monitor, result) {
       && result.responseTimeMs > monitor.slow_response_threshold_ms
     );
 
-    // ── 1. Log the check row ───────────────────────────────────────────────────
-    const { rows: logRows } = await client.query(
-      `INSERT INTO uptime_checks_log
-         (monitor_id, success, status_code, response_time_ms, error_message, location, is_slow, suppressed_by_window_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id`,
-      [
-        monitor.id,
-        result.success,
-        result.statusCode,
-        result.responseTimeMs,
-        result.errorMessage,
-        monitor.location ?? "default",
-        isSlow,
-        maintenanceWindowId,
-      ],
-    );
-    checkLogId = logRows[0].id;
+    // ── 1. Buffer the check log and daily rollup in memory (Zero DB write latency) ───────────
+    checkLogId = crypto.randomUUID();
+    checksLogBuffer.push({
+      id: checkLogId,
+      monitorId: monitor.id,
+      success: result.success,
+      statusCode: result.statusCode,
+      responseTimeMs: result.responseTimeMs,
+      errorMessage: result.errorMessage,
+      location: monitor.location ?? "default",
+      isSlow,
+      suppressedByWindowId: maintenanceWindowId
+    });
+    
+    bufferDailyMetric(monitor.id, result.success || isSuppressed, result.responseTimeMs);
 
     // ── 2. Core incident management (ONE incident per downtime span) ───────────
     const nextStatus = result.success || isSuppressed ? "up" : "down"; // Status remains UP if suppressed
@@ -236,6 +322,8 @@ export async function runUptimeCronTick() {
       }
       return persistCheck(monitor, result);
     }));
+  } catch (error) {
+    console.error("[Uptime Cron] Error in runUptimeCronTick:", error);
   } finally {
     running = false;
   }

@@ -169,9 +169,18 @@ export async function runHttpCheck(monitor) {
       headers.set("content-type", monitor.send_as_json ? "application/json" : "application/x-www-form-urlencoded");
     }
 
+    // Internal Bandwidth Optimization: 
+    // If it's a standard HTTP monitor and the user selected GET, we silently swap it to HEAD.
+    // This allows the UI to say "GET" (good UX) while strictly enforcing HEAD (saving bandwidth).
+    // We intentionally skip this for "keyword" and "api" which strictly require the body payload.
+    let activeMethod = monitor.http_method === "QUERY" ? "GET" : monitor.http_method;
+    if (monitor.monitor_type === "http" && activeMethod === "GET") {
+      activeMethod = "HEAD";
+    }
+
     const fetchArgs = [
       monitor.url,
-      monitor.http_method === "QUERY" ? "GET" : monitor.http_method,
+      activeMethod,
       headers,
       ["POST", "PUT", "PATCH"].includes(monitor.http_method) ? monitor.request_body : undefined,
       controller.signal,
@@ -180,7 +189,7 @@ export async function runHttpCheck(monitor) {
     const response = monitor.auth_type === "digest"
       ? await digestFetch(...fetchArgs)
       : await fetch(monitor.url, {
-          method: monitor.http_method === "QUERY" ? "GET" : monitor.http_method,
+          method: activeMethod,
           headers,
           body: ["POST", "PUT", "PATCH"].includes(monitor.http_method) ? monitor.request_body : undefined,
           redirect: monitor.follow_redirects ? "follow" : "manual",

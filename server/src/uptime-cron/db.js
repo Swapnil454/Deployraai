@@ -33,3 +33,7 @@ export const uptimeDb = new Pool({
   max: 10,
   idleTimeoutMillis: 30_000,
 });
+
+uptimeDb.on("error", (err) => {
+  console.error("[Uptime Cron] Unexpected error on idle client:", err);
+});
