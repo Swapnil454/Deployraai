@@ -77,6 +77,32 @@ PARTITION BY toYYYYMMDD(start_time)
 ORDER BY (project_id, start_time, trace_id, span_id)
 TTL toDateTime(start_time) + INTERVAL 30 DAY;
 
+CREATE TABLE IF NOT EXISTS topology_edges_1m (
+  project_id LowCardinality(String),
+  bucket DateTime,
+  source String,
+  target String,
+  target_type String,
+  request_count SimpleAggregateFunction(sum, UInt64),
+  error_count SimpleAggregateFunction(sum, Float64),
+  total_duration_ms SimpleAggregateFunction(sum, Float64)
+) ENGINE = AggregatingMergeTree()
+PARTITION BY toYYYYMMDD(bucket)
+ORDER BY (project_id, bucket, source, target);
+
+CREATE TABLE IF NOT EXISTS profiles (
+  project_id LowCardinality(String),
+  service_name LowCardinality(String),
+  profile_type LowCardinality(String),
+  timestamp DateTime64(3),
+  stack_trace String,
+  value UInt64,
+  INDEX idx_project_id project_id TYPE minmax GRANULARITY 1
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (project_id, service_name, profile_type, timestamp)
+TTL timestamp + INTERVAL 7 DAY;
+
 CREATE TABLE IF NOT EXISTS metrics_minutely_mv (
   project_id LowCardinality(String),
   deploy_id LowCardinality(String),

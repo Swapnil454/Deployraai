@@ -1,10 +1,20 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, Activity, Clock, CheckCircle2, XCircle, AlertCircle, Sparkles, GitPullRequest, Calendar } from "lucide-react";
+import { ArrowLeft, Loader2, Activity, Clock, CheckCircle2, XCircle, AlertCircle, Sparkles, GitPullRequest, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import { Uptime3DLine } from "@/components/dashboard/Uptime3DLine";
+
+const TIME_RANGE_OPTIONS = [
+  { value: '1h', label: 'Last 1 Hour' },
+  { value: '6h', label: 'Last 6 Hours' },
+  { value: '12h', label: 'Last 12 Hours' },
+  { value: '24h', label: 'Last 24 Hours' },
+  { value: '7d', label: 'Last 7 Days' },
+  { value: '15d', label: 'Last 15 Days' },
+  { value: '30d', label: 'Last 30 Days' }
+] as const;
 
 export default function MonitoringPage() {
   const params = useParams();
@@ -14,30 +24,29 @@ export default function MonitoringPage() {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<any>(null);
   const [history, setHistory] = useState<any>({ frontend: [], backend: [] });
-  const [timeRange, setTimeRange] = useState('1d');
+  const [timeRange, setTimeRange] = useState('24h');
+  const [checksPage, setChecksPage] = useState(1);
+  const [checksPagination, setChecksPagination] = useState({ page: 1, limit: 20, totalChecks: 0, totalPages: 1, hasPreviousPage: false, hasNextPage: false });
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const hasLoadedRef = useRef(false);
 
   const [analyzingCheckId, setAnalyzingCheckId] = useState<string | null>(null);
   const [fixingCheckId, setFixingCheckId] = useState<string | null>(null);
   const [expandedCheckId, setExpandedCheckId] = useState<string | null>(null);
+  const selectedRangeLabel = TIME_RANGE_OPTIONS.find(option => option.value === timeRange)?.label || 'Last 24 Hours';
 
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 15000);
-    return () => clearInterval(interval);
-  }, [projectId, timeRange]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
-      if (!summary) setLoading(true);
+      if (!hasLoadedRef.current) setLoading(true);
       const [summaryRes, historyRes] = await Promise.all([
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/monitor-summary`, { credentials: "include" }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/monitor-summary?timeRange=${timeRange}&page=${checksPage}&limit=20`, { credentials: "include" }),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/monitor-checks/history?timeRange=${timeRange}`, { credentials: "include" })
       ]);
       
       if (summaryRes.ok) {
         const data = await summaryRes.json();
         setSummary(data.summary);
+        setChecksPagination(data.summary.pagination);
       }
       if (historyRes.ok) {
         const data = await historyRes.json();
@@ -47,8 +56,18 @@ export default function MonitoringPage() {
       console.error(err);
     } finally {
       setLoading(false);
+      hasLoadedRef.current = true;
     }
-  };
+  }, [projectId, timeRange, checksPage]);
+
+  useEffect(() => {
+    const initialLoad = setTimeout(() => void fetchData(), 0);
+    const interval = setInterval(() => void fetchData(), 15000);
+    return () => {
+      clearTimeout(initialLoad);
+      clearInterval(interval);
+    };
+  }, [fetchData]);
 
   const handleAnalyze = async (check: any) => {
     try {
@@ -99,9 +118,9 @@ export default function MonitoringPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black p-8">
-      <div className="mx-auto max-w-5xl">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+    <div className="min-h-screen bg-black px-6 py-8 lg:px-10">
+      <div className="mx-auto w-full max-w-7xl">
+        <div className="mb-8 flex flex-col justify-between gap-4 border-b border-zinc-800 pb-8 md:flex-row md:items-end">
           <div>
             <h1 className="mb-2 text-2xl font-bold text-white flex items-center gap-3">
               <Activity className="h-6 w-6 text-indigo-400" />
@@ -116,23 +135,17 @@ export default function MonitoringPage() {
               className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 shadow-xl text-sm text-zinc-300 font-medium hover:text-white hover:border-zinc-700 transition-colors"
             >
               <Calendar className="h-4 w-4 text-zinc-500" />
-              {timeRange === '1d' ? 'Last 24 Hours' : timeRange === '7d' ? 'Last 7 Days' : timeRange === '15d' ? 'Last 15 Days' : timeRange === '1m' ? 'Last 30 Days' : 'Last Year'}
+              {selectedRangeLabel}
             </button>
             
             {isDropdownOpen && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setIsDropdownOpen(false)}></div>
                 <div className="absolute right-0 mt-2 w-44 bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl overflow-hidden z-50 py-1">
-                  {[
-                    { value: '1d', label: 'Last 24 Hours' },
-                    { value: '7d', label: 'Last 7 Days' },
-                    { value: '15d', label: 'Last 15 Days' },
-                    { value: '1m', label: 'Last 30 Days' },
-                    { value: '1y', label: 'Last Year' },
-                  ].map(option => (
+                  {TIME_RANGE_OPTIONS.map(option => (
                     <button
                       key={option.value}
-                      onClick={() => { setTimeRange(option.value); setIsDropdownOpen(false); }}
+                      onClick={() => { setTimeRange(option.value); setChecksPage(1); setIsDropdownOpen(false); }}
                       className={`block w-full text-left px-4 py-2 text-sm transition-colors ${timeRange === option.value ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'}`}
                     >
                       {option.label}
@@ -149,11 +162,18 @@ export default function MonitoringPage() {
           <div className="rounded-xl border border-zinc-800/60 bg-gradient-to-b from-zinc-800/40 to-zinc-900/80 backdrop-blur-xl p-5 shadow-xl relative overflow-hidden group">
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-3xl -mr-10 -mt-10 transition-all duration-700 group-hover:bg-emerald-500/10"></div>
             <h3 className="text-zinc-400 text-xs font-semibold uppercase tracking-wider mb-3 flex justify-between items-center relative z-10">
-              Frontend Uptime
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">Active</span>
+              Frontend Availability
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${summary?.frontend?.totalChecks ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20'}`}>
+                {summary?.frontend?.totalChecks ? 'MONITORED' : 'NO DATA'}
+              </span>
             </h3>
             <div className="flex items-baseline gap-2 mb-6 relative z-10">
-              <span className="text-4xl font-black text-white tracking-tight">{summary?.frontendUptime ? summary.frontendUptime.toFixed(2) : '0.00'}%</span>
+              <span className="text-4xl font-black text-white tracking-tight">{(summary?.frontend?.uptimePercentage ?? summary?.frontendUptime ?? 0).toFixed(2)}%</span>
+            </div>
+            <div className="mb-5 grid grid-cols-3 gap-2 border-y border-zinc-800/80 py-3 text-[11px] relative z-10">
+              <div><p className="text-zinc-500">Checks</p><p className="mt-0.5 font-semibold text-zinc-200">{summary?.frontend?.totalChecks ?? 0}</p></div>
+              <div><p className="text-zinc-500">Healthy</p><p className="mt-0.5 font-semibold text-emerald-400">{(summary?.frontend?.healthyPercentage ?? 0).toFixed(1)}%</p></div>
+              <div><p className="text-zinc-500">Avg response</p><p className="mt-0.5 font-semibold text-zinc-200">{summary?.frontend?.averageResponseTimeMs ? `${summary.frontend.averageResponseTimeMs}ms` : '—'}</p></div>
             </div>
             <div className="relative z-10">
               <Uptime3DLine data={history.frontend} />
@@ -163,11 +183,18 @@ export default function MonitoringPage() {
           <div className="rounded-xl border border-zinc-800/60 bg-gradient-to-b from-zinc-800/40 to-zinc-900/80 backdrop-blur-xl p-5 shadow-xl relative overflow-hidden group">
             <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl -mr-10 -mt-10 transition-all duration-700 group-hover:bg-blue-500/10"></div>
             <h3 className="text-zinc-400 text-xs font-semibold uppercase tracking-wider mb-3 flex justify-between items-center relative z-10">
-              Backend Uptime
-              <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-bold border border-blue-500/20">Active</span>
+              Backend Availability
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${summary?.backend?.totalChecks ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20'}`}>
+                {summary?.backend?.totalChecks ? 'MONITORED' : 'NO DATA'}
+              </span>
             </h3>
             <div className="flex items-baseline gap-2 mb-6 relative z-10">
-              <span className="text-4xl font-black text-white tracking-tight">{summary?.backendUptime ? summary.backendUptime.toFixed(2) : '0.00'}%</span>
+              <span className="text-4xl font-black text-white tracking-tight">{(summary?.backend?.uptimePercentage ?? summary?.backendUptime ?? 0).toFixed(2)}%</span>
+            </div>
+            <div className="mb-5 grid grid-cols-3 gap-2 border-y border-zinc-800/80 py-3 text-[11px] relative z-10">
+              <div><p className="text-zinc-500">Checks</p><p className="mt-0.5 font-semibold text-zinc-200">{summary?.backend?.totalChecks ?? 0}</p></div>
+              <div><p className="text-zinc-500">Healthy</p><p className="mt-0.5 font-semibold text-emerald-400">{(summary?.backend?.healthyPercentage ?? 0).toFixed(1)}%</p></div>
+              <div><p className="text-zinc-500">Avg response</p><p className="mt-0.5 font-semibold text-zinc-200">{summary?.backend?.averageResponseTimeMs ? `${summary.backend.averageResponseTimeMs}ms` : '—'}</p></div>
             </div>
             <div className="relative z-10">
               <Uptime3DLine data={history.backend} />
@@ -179,8 +206,9 @@ export default function MonitoringPage() {
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
           <div className="border-b border-zinc-800 bg-black/40 px-6 py-4">
             <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Clock className="h-4 w-4" /> Recent Checks History
+              <Clock className="h-4 w-4" /> Checks in {summary?.rangeLabel || 'the selected period'}
             </h3>
+            <p className="mt-1 text-xs text-zinc-500">Showing 20 checks per page from {checksPagination.totalChecks} checks in this range.</p>
           </div>
           
           <div className="overflow-x-auto">
@@ -318,6 +346,27 @@ export default function MonitoringPage() {
               </tbody>
             </table>
           </div>
+          {checksPagination.totalChecks > 0 && (
+            <div className="flex flex-col gap-3 border-t border-zinc-800 bg-black/30 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-zinc-500">Page {checksPagination.page} of {checksPagination.totalPages}</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setChecksPage((current) => Math.max(current - 1, 1))}
+                  disabled={!checksPagination.hasPreviousPage}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-zinc-800 px-2.5 text-xs font-medium text-zinc-300 transition hover:border-zinc-700 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" /> Previous
+                </button>
+                <button
+                  onClick={() => setChecksPage((current) => current + 1)}
+                  disabled={!checksPagination.hasNextPage}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-zinc-800 px-2.5 text-xs font-medium text-zinc-300 transition hover:border-zinc-700 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Next <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
       </div>

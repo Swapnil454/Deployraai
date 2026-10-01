@@ -22,6 +22,14 @@ app.register(cors, {
   allowedHeaders: ['Content-Type', 'Authorization', 'x-rum-key'],
 });
 
+// Global content type parser for profiling binary data
+app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (req, body, done) => {
+  done(null, body);
+});
+app.addContentTypeParser('application/x-protobuf', { parseAs: 'buffer' }, (req, body, done) => {
+  done(null, body);
+});
+
 
 app.register(rateLimit, {
   // We use an in-memory LRU cache because Redis is disabled.
@@ -55,6 +63,9 @@ app.register(sourcemapsRouter, { prefix: '/v1/sourcemaps' });
 
 // Health check — used by load balancer
 app.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
+app.get('/health-1', async () => ({ status: 'ok', ts: Date.now() }));
+app.get('/health-2', async () => ({ status: 'ok', ts: Date.now() }));
+app.get('/health-3', async () => ({ status: 'ok', ts: Date.now() }));
 
 // Expose internal telemetry metrics (connection pools, queue depth)
 app.get('/metrics', async () => {
@@ -71,13 +82,14 @@ import { db, initDb } from './db.js';
 import { renderPollerRegistry } from './pollers/render-poller.js';
 
 import { usagePoller } from './pollers/usage-poller.js';
-
 import { runRetentionPoller } from './pollers/retention-poller.js';
+import { topologyPoller } from './pollers/topology-poller.js';
 
 async function restoreRenderPollers() {
   // ...
   
   usagePoller.start();
+  topologyPoller.start();
 
   // Run retention poller immediately, then every hour
   runRetentionPoller();
@@ -89,8 +101,9 @@ const start = async () => {
     console.log('Running database migrations...');
     await initDb();
     
-    await app.listen({ port: 4317, host: '0.0.0.0' });
-    console.log('Ingestor running on port 4317');
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 4317;
+    await app.listen({ port, host: '0.0.0.0' });
+    console.log(`Ingestor running on port ${port}`);
     await restoreRenderPollers();
   } catch (err) {
     app.log.error(err);

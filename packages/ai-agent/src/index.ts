@@ -18,11 +18,15 @@ app.register(aiRouter, { prefix: '/ai' });
 app.register(githubRouter, { prefix: '/github' });
 
 app.get('/health', async () => ({ status: 'ok', service: 'ai-agent' }));
+app.get('/health-1', async () => ({ status: 'ok', service: 'ai-agent' }));
+app.get('/health-2', async () => ({ status: 'ok', service: 'ai-agent' }));
+app.get('/health-3', async () => ({ status: 'ok', service: 'ai-agent' }));
 
 const start = async () => {
   try {
-    await app.listen({ port: 4319, host: '0.0.0.0' });
-    console.log('AI Agent running on port 4319');
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 4319;
+    await app.listen({ port, host: '0.0.0.0' });
+    console.log(`AI Agent running on port ${port}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

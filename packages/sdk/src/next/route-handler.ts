@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withSpan } from '../core/span';
+import { getConfig } from '../core/config';
 
 type Handler = (req: NextRequest, ctx?: any) => Promise<NextResponse>;
 
@@ -8,7 +9,7 @@ export function withRouteObservability(handler: Handler): Handler {
     const pathname = req.nextUrl?.pathname || new URL(req.url).pathname;
     const method = req.method;
 
-    if (!process.env.TRACEPILOT_TOKEN) {
+    if (!getConfig().token) {
       return handler(req, ctx);
     }
 

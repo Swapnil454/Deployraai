@@ -1,0 +1,26 @@
+{
+  "name": "@swapnil454/render-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Unified worker for Render Free Tier",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "nodemon -e ts --exec \"npx tsx --env-file=.env\" src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@swapnil454/alerting": "*",
+    "@swapnil454/synthetic-checker": "*",
+    "express": "^4.19.2",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.24",
+    "typescript": "^5.4.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0",
+    "ts-node-dev": "^2.0.0",
+    "tsx": "^4.19.0"
+  }
+}

@@ -11,9 +11,9 @@ export interface SDKConfig {
 export function loadConfig(): SDKConfig {
   // These env vars are injected by your platform at deploy time.
   // The user never sets these manually.
-  const projectId = process.env.TRACEPILOT_PROJECT_ID ?? '';
-  const token = process.env.TRACEPILOT_TOKEN;
-  const collectorUrl = process.env.TRACEPILOT_INGESTOR_URL || 'https://ingestor.deployai.in';
+  const projectId = process.env.TRACEPILOT_PROJECT_ID || process.env.OTEL_SERVICE_NAME || '';
+  const token = process.env.TRACEPILOT_TOKEN || process.env.OTEL_SERVICE_NAME;
+  const collectorUrl = process.env.TRACEPILOT_INGESTOR_URL || process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'https://ingestor.deployai.in';
 
   if (!token) {
     // SDK is silently disabled if not deployed via your platform.

@@ -1,26 +1,35 @@
-import React, { useState } from 'react';
-import { Check, Copy, Wand2, Loader2, ArrowRight } from 'lucide-react';
+"use client";
+
+import { useState } from 'react';
+import { Check, Copy, Terminal, ExternalLink, Loader2, ArrowRight, Play, Eye } from 'lucide-react';
 
 export function ObservabilitySetup({ 
   project, 
   onVerified 
-}: {
-  project: any;
-  onVerified: () => void;
+}: { 
+  project: any, 
+  onVerified: () => void 
 }) {
-  const [copied, setCopied] = useState(false);
   const [copiedBackend, setCopiedBackend] = useState(false);
-  const [activeTab, setActiveTab] = useState<'frontend' | 'backend'>('frontend');
   const [verifying, setVerifying] = useState(false);
-  const [injecting, setInjecting] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
+  
+  // Tabs for different framework instructions
+  const [activeTab, setActiveTab] = useState<'next' | 'express' | 'react' | 'python' | 'go'>('next');
+  
+  // AI Flow States: idle -> analyzing -> review -> injecting -> success
+  const [aiState, setAiState] = useState<'idle' | 'analyzing' | 'review' | 'injecting' | 'success'>('idle');
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [injectResult, setInjectResult] = useState<any>(null);
-  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [aiError, setAiError] = useState('');
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
 
   const handleVerify = async () => {
     setVerifying(true);
-    setVerifyError(null);
+    setVerifyError('');
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${project._id}/analytics/verify`, {
+      const res = await fetch(`${apiUrl}/api/projects/${project._id}/observability/verify`, {
         method: 'POST',
         credentials: "include"
       });
@@ -28,82 +37,133 @@ export function ObservabilitySetup({
       if (res.ok && data.verified) {
         onVerified();
       } else {
-        setVerifyError(data.message || "No data detected yet. Please ensure you have deployed your changes and visited the site.");
+        setVerifyError(data.message || "Verification failed. Please ensure your backend is deployed and receiving traffic.");
       }
     } catch (err: any) {
-      setVerifyError(err.message);
+      setVerifyError(err.message || "An error occurred during verification.");
     } finally {
       setVerifying(false);
     }
   };
 
-  const handleAutoInject = async () => {
-    setInjecting(true);
-    setInjectResult(null);
+  const handleAnalyze = async () => {
+    setAiState('analyzing');
+    setAiError('');
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${project._id}/analytics/auto-inject`, {
+      const res = await fetch(`${apiUrl}/api/projects/${project._id}/observability/analyze`, {
+        method: 'POST',
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAnalysisResult(data);
+        setAiState('review');
+      } else {
+        setAiError(data.error || "Failed to analyze project.");
+        setAiState('idle');
+      }
+    } catch (err: any) {
+      setAiError(err.message);
+      setAiState('idle');
+    }
+  };
+
+  const handleAutoInject = async () => {
+    setAiState('injecting');
+    setAiError('');
+    try {
+      const res = await fetch(`${apiUrl}/api/projects/${project._id}/observability/auto-inject`, {
         method: 'POST',
         credentials: "include"
       });
       const data = await res.json();
       if (res.ok) {
         setInjectResult({ success: true, ...data });
+        setAiState('success');
       } else {
-        setInjectResult({ success: false, error: data.error || "Failed to auto inject." });
+        setAiError(data.error || "Failed to auto inject.");
+        setAiState('review');
       }
     } catch (err: any) {
-      setInjectResult({ success: false, error: err.message });
-    } finally {
-      setInjecting(false);
+      setAiError(err.message);
+      setAiState('review');
     }
   };
 
   return (
-    <div className="flex flex-col gap-6 w-full mx-auto">
-      <div className="w-full">
-        <h3 className="text-xl font-semibold text-white mb-2">Get Started with Observability</h3>
-        <p className="text-zinc-400 text-[14px] mb-8">
-          Follow the manual instructions below, or use the AI Agent to configure both automatically.
-        </p>
+    <div className="bg-black border border-zinc-800 rounded-lg overflow-hidden">
+      <div className="border-b border-zinc-800 bg-[#111] p-6 lg:p-8">
+        <h3 className="text-xl font-semibold text-white mb-2">Setup Observability SDK</h3>
+        <p className="text-zinc-400 text-[14px]">Install the Tracepilot SDK to collect Traces, Logs, and Infrastructure metrics.</p>
+      </div>
 
-        <div className="flex border-b border-zinc-800 mb-6 gap-6">
-          <button 
-            onClick={() => setActiveTab('frontend')}
-            className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'frontend' ? 'border-white text-white' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
-          >
-            Frontend (Analytics & RUM)
-          </button>
-          <button 
-            onClick={() => setActiveTab('backend')}
-            className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'backend' ? 'border-white text-white' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
-          >
-            Backend (Traces & Logs)
-          </button>
+      <div className="p-6 lg:p-8">
+        
+        {/* Manual Instructions */}
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-zinc-500 text-[13px] font-medium">
+            <Terminal className="h-4 w-4" />
+            MANUAL SETUP
+          </div>
+          
+          <div className="flex bg-zinc-900 rounded-md p-1 border border-zinc-800">
+            <button 
+              onClick={() => setActiveTab('next')}
+              className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeTab === 'next' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+            >
+              Next.js
+            </button>
+            <button 
+              onClick={() => setActiveTab('express')}
+              className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeTab === 'express' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+            >
+              Node.js / Express
+            </button>
+            <button 
+              onClick={() => setActiveTab('react')}
+              className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeTab === 'react' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+            >
+              React SPA
+            </button>
+            <button 
+              onClick={() => setActiveTab('python')}
+              className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeTab === 'python' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+            >
+              Python
+            </button>
+            <button 
+              onClick={() => setActiveTab('go')}
+              className={`px-4 py-1.5 text-xs font-medium rounded-sm transition-colors ${activeTab === 'go' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
+            >
+              Go
+            </button>
+          </div>
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {activeTab === 'frontend' ? (
-            <>
-              <div className="bg-[#111] border border-zinc-800 rounded-lg p-6 flex flex-col">
+          <div className="bg-[#111] border border-zinc-800 rounded-lg p-6 flex flex-col">
             <div className="flex items-center gap-3 mb-4">
               <div className="h-6 w-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">1</div>
-              <h4 className="text-white font-medium">Copy our script</h4>
+              <h4 className="text-white font-medium">Install SDK</h4>
             </div>
-            <p className="text-[13px] text-zinc-400 mb-4 flex-1">Start by copying the DeployAI tracking script for your project.</p>
+            <p className="text-[13px] text-zinc-400 mb-4 flex-1">Open your backend project's root terminal and install the tracepilot package.</p>
             
             <div className="bg-black border border-zinc-800 rounded-md overflow-hidden mt-auto">
               <div className="flex items-center bg-[#1a1a1a] px-3 py-2 border-b border-zinc-800">
-                <span className="text-[12px] text-zinc-400 font-medium bg-zinc-800/50 px-2 py-0.5 rounded">HTML</span>
+                <span className="text-[12px] text-zinc-400 font-medium bg-zinc-800/50 px-2 py-0.5 rounded">Backend Root Terminal</span>
                 <button onClick={() => {
-                  navigator.clipboard.writeText(`<script defer src="${process.env.NEXT_PUBLIC_API_URL || "https://api.deployai.in"}/analytics.js" data-tracking-id="${project?.analytics?.trackingId || ''}"></script>`);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
+                  let text = `npm install @swapnil454/tracepilot`;
+                  if (activeTab === 'python') text = `pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation opentelemetry-exporter-otlp`;
+                  if (activeTab === 'go') text = `go get go.opentelemetry.io/otel go.opentelemetry.io/otel/sdk go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`;
+                  navigator.clipboard.writeText(text);
+                  setCopiedBackend(true);
+                  setTimeout(() => setCopiedBackend(false), 2000);
                 }} className="ml-auto text-zinc-400 hover:text-white transition-colors">
-                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedBackend ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                 </button>
               </div>
               <div className="p-3 overflow-x-auto text-[12px] font-mono text-zinc-300 whitespace-nowrap">
-                {`<script defer src="..." data-tracking-id="${project?.analytics?.trackingId || ''}"></script>`}
+                {activeTab === 'python' ? 'pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation opentelemetry-exporter-otlp' : activeTab === 'go' ? 'go get go.opentelemetry.io/otel go.opentelemetry.io/otel/sdk go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp' : 'npm install @swapnil454/tracepilot'}
               </div>
             </div>
           </div>
@@ -111,15 +171,84 @@ export function ObservabilitySetup({
           <div className="bg-[#111] border border-zinc-800 rounded-lg p-6 flex flex-col">
             <div className="flex items-center gap-3 mb-4">
               <div className="h-6 w-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">2</div>
-              <h4 className="text-white font-medium">Add to your layout</h4>
+              <h4 className="text-white font-medium">Configure SDK</h4>
             </div>
-            <p className="text-[13px] text-zinc-400 mb-4 flex-1">Inject the script into the <code>&lt;head&gt;</code> of your app's layout file.</p>
+            <p className="text-[13px] text-zinc-400 mb-4 flex-1">
+              {activeTab === 'next' ? (
+                <span>Create an <code>instrumentation.ts</code> file in the root of your project.</span>
+              ) : activeTab === 'react' ? (
+                <span>Wrap your root <code>App</code> component in <code>main.tsx</code> or <code>index.js</code>.</span>
+              ) : activeTab === 'python' ? (
+                <span>Add this to the very top of your <code>main.py</code> or <code>app.py</code> file.</span>
+              ) : activeTab === 'go' ? (
+                <span>Add this to your <code>main.go</code> file before starting the server.</span>
+              ) : (
+                <span>Add this to the very top of your <code>index.js</code> or <code>app.js</code> file.</span>
+              )}
+            </p>
             
             <div className="bg-black border border-zinc-800 rounded-md overflow-hidden mt-auto">
                <div className="p-3 text-[12px] font-mono text-zinc-300 leading-loose">
-                 <span className="text-purple-400">Next.js (App Router):</span> app/layout.tsx<br/>
-                 <span className="text-purple-400">Next.js (Pages Router):</span> pages/_document.tsx<br/>
-                 <span className="text-purple-400">React/Vite/Other:</span> index.html
+                 {activeTab === 'next' ? (
+                   <>
+                     <span className="text-purple-400">instrumentation.ts:</span><br/>
+                     process.env.TRACEPILOT_TOKEN = '{project?._id || 'your-project-id'}';<br/>
+                     process.env.TRACEPILOT_SERVICE_NAME = '{project?.repoName || 'my-app'}';<br/>
+                     process.env.TRACEPILOT_ENVIRONMENT = 'production';<br/>
+                     import &#123; initTracer, setupGlobalErrorCapture &#125; from '@swapnil454/tracepilot';<br/>
+                     export function register() &#123; initTracer(); setupGlobalErrorCapture(); &#125;
+                   </>
+                 ) : activeTab === 'react' ? (
+                   <>
+                     <span className="text-purple-400">main.tsx / index.js:</span><br/>
+                     import &#123; TracePilotProvider &#125; from '@swapnil454/tracepilot/react';<br/>
+                     <br/>
+                     &lt;TracePilotProvider<br/>
+                     &nbsp;&nbsp;token="{project?._id || 'your-project-id'}"<br/>
+                     &nbsp;&nbsp;serviceName="{project?.repoName || 'my-app'}"<br/>
+                     &nbsp;&nbsp;environment="production"<br/>
+                     &gt;<br/>
+                     &nbsp;&nbsp;&lt;App /&gt;<br/>
+                     &lt;/TracePilotProvider&gt;
+                   </>
+                 ) : activeTab === 'python' ? (
+                   <>
+                     <span className="text-purple-400">main.py:</span><br/>
+                     import os<br/>
+                     from tracepilot import init_tracepilot<br/>
+                     <br/>
+                     os.environ["TRACEPILOT_TOKEN"] = "{project?._id || 'your-project-id'}"<br/>
+                     os.environ["TRACEPILOT_SERVICE_NAME"] = "{project?.repoName || 'my-app'}"<br/>
+                     os.environ["TRACEPILOT_ENVIRONMENT"] = "production"<br/>
+                     <br/>
+                     init_tracepilot()<br/>
+                   </>
+                 ) : activeTab === 'go' ? (
+                   <>
+                     <span className="text-purple-400">main.go:</span><br/>
+                     import (<br/>
+                     &nbsp;&nbsp;"os"<br/>
+                     &nbsp;&nbsp;"github.com/swapnil454/tracepilot-go"<br/>
+                     )<br/>
+                     <br/>
+                     func main() &#123;<br/>
+                     &nbsp;&nbsp;os.Setenv("TRACEPILOT_TOKEN", "{project?._id || 'your-project-id'}")<br/>
+                     &nbsp;&nbsp;os.Setenv("TRACEPILOT_SERVICE_NAME", "{project?.repoName || 'my-app'}")<br/>
+                     &nbsp;&nbsp;os.Setenv("TRACEPILOT_ENVIRONMENT", "production")<br/>
+                     &nbsp;&nbsp;tp := tracepilot.Init()<br/>
+                     &nbsp;&nbsp;defer tp.Shutdown()<br/>
+                     &#125;
+                   </>
+                 ) : (
+                   <>
+                     <span className="text-purple-400">index.js:</span><br/>
+                     process.env.TRACEPILOT_TOKEN = '{project?._id || 'your-project-id'}';<br/>
+                     process.env.TRACEPILOT_SERVICE_NAME = '{project?.repoName || 'my-app'}';<br/>
+                     process.env.TRACEPILOT_ENVIRONMENT = 'production';<br/>
+                     const &#123; initExpressObservability &#125; = require('@swapnil454/tracepilot/express');<br/>
+                     initExpressObservability();
+                   </>
+                 )}
                </div>
             </div>
           </div>
@@ -130,7 +259,7 @@ export function ObservabilitySetup({
               <h4 className="text-white font-medium">Deploy & Verify</h4>
             </div>
             <p className="text-[13px] text-zinc-400 leading-relaxed mb-6 flex-1">
-              Deploy your changes and visit the deployment to start collecting data.<br/>
+              Deploy your changes and visit the deployment to start collecting traces and logs.<br/>
             </p>
             <div className="mt-auto">
               <button 
@@ -141,99 +270,120 @@ export function ObservabilitySetup({
                 {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
                 {verifying ? 'Verifying...' : 'Verify Installation'}
               </button>
+              {verifyError && (
+                <div className="mt-4 text-red-400 text-[13px] bg-red-500/10 p-2 px-3 rounded-md border border-red-500/20 text-center">
+                  {verifyError}
+                </div>
+              )}
             </div>
           </div>
-            </>
-          ) : (
-            <>
-              <div className="bg-[#111] border border-zinc-800 rounded-lg p-6 flex flex-col">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="h-6 w-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">1</div>
-                  <h4 className="text-white font-medium">Install SDK</h4>
-                </div>
-                <p className="text-[13px] text-zinc-400 mb-4 flex-1">Install the tracepilot package using npm, yarn, or pnpm.</p>
-                
-                <div className="bg-black border border-zinc-800 rounded-md overflow-hidden mt-auto">
-                  <div className="flex items-center bg-[#1a1a1a] px-3 py-2 border-b border-zinc-800">
-                    <span className="text-[12px] text-zinc-400 font-medium bg-zinc-800/50 px-2 py-0.5 rounded">Terminal</span>
-                    <button onClick={() => {
-                      navigator.clipboard.writeText(`npm install @swapnil454/tracepilot`);
-                      setCopiedBackend(true);
-                      setTimeout(() => setCopiedBackend(false), 2000);
-                    }} className="ml-auto text-zinc-400 hover:text-white transition-colors">
-                      {copiedBackend ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                    </button>
-                  </div>
-                  <div className="p-3 overflow-x-auto text-[12px] font-mono text-zinc-300 whitespace-nowrap">
-                    npm install @swapnil454/tracepilot
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-[#111] border border-zinc-800 rounded-lg p-6 flex flex-col">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="h-6 w-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">2</div>
-                  <h4 className="text-white font-medium">Configure SDK</h4>
-                </div>
-                <p className="text-[13px] text-zinc-400 mb-4 flex-1">Create an <code>instrumentation.ts</code> file in the root of your project.</p>
-                
-                <div className="bg-black border border-zinc-800 rounded-md overflow-hidden mt-auto">
-                   <div className="p-3 text-[12px] font-mono text-zinc-300 leading-loose">
-                     <span className="text-purple-400">Next.js (instrumentation.ts):</span><br/>
-                     import &#123; registerOTel &#125; from '@swapnil454/tracepilot/next';<br/>
-                     export function register() &#123; registerOTel(); &#125;
-                   </div>
-                </div>
-              </div>
-
-              <div className="bg-[#111] border border-zinc-800 rounded-lg p-6 flex flex-col">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="h-6 w-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">3</div>
-                  <h4 className="text-white font-medium">Deploy & Verify</h4>
-                </div>
-                <p className="text-[13px] text-zinc-400 leading-relaxed mb-6 flex-1">
-                  Deploy your changes and visit the deployment to start collecting traces and logs.<br/>
-                </p>
-                <div className="mt-auto">
-                  <button 
-                    onClick={handleVerify} 
-                    disabled={verifying}
-                    className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-md transition-colors text-[13px]"
-                  >
-                    {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                    {verifying ? 'Verifying...' : 'Verify Installation'}
-                  </button>
-                  {verifyError && (
-                    <div className="mt-4 text-red-400 text-[13px] bg-red-500/10 p-2 px-3 rounded-md border border-red-500/20 text-center">
-                      {verifyError}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
         </div>
 
         <div className="pt-8 mt-6 border-t border-zinc-800/50">
-          <div className="flex items-center gap-2 mb-4 text-zinc-500 text-[13px]">
-            Or, install automatically with AI Agent (free).
+          <div className="flex items-center gap-2 mb-4 text-zinc-500 text-[13px] font-medium">
+            <img src="/ai-icon.svg" alt="AI" className="w-4 h-4 object-contain opacity-50" />
+            AI AGENT SETUP (FREE)
           </div>
 
           {/* Auto Inject Box */}
           <div className="bg-[#111] border border-zinc-800 rounded-lg overflow-hidden flex flex-col">
-            {injectResult?.success ? (
+            
+            {aiState === 'idle' && (
+               <div className="p-8 flex flex-col items-center justify-center min-h-[250px]">
+                  <button
+                    onClick={handleAnalyze}
+                    className="bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-white font-medium px-4 py-2 rounded-md transition-colors flex items-center gap-2"
+                  >
+                    <img src="/ai-icon.svg" alt="AI" className="w-5 h-5 object-contain" />
+                    <span className="text-[13px]">Analyze Backend Project</span>
+                  </button>
+                  <p className="text-[13px] text-zinc-400 mt-6 max-w-md text-center">
+                    Let DeployAI analyze your repository and automatically add the <strong>@swapnil454/tracepilot</strong> dependency and configuration to your backend.
+                  </p>
+                  {aiError && (
+                     <div className="mt-4 text-red-400 text-[13px] bg-red-500/10 p-3 px-5 rounded-md border border-red-500/20 text-center max-w-lg">
+                       {aiError}
+                     </div>
+                  )}
+               </div>
+            )}
+
+            {aiState === 'analyzing' && (
+              <div className="p-8 flex flex-col items-center justify-center min-h-[250px]">
+                 <Loader2 className="h-8 w-8 animate-spin text-zinc-400 mb-4" />
+                 <p className="text-zinc-300 font-medium text-sm">Analyzing Backend Configuration...</p>
+                 <p className="text-zinc-500 text-xs mt-2">Detecting framework and package.json location</p>
+              </div>
+            )}
+
+            {aiState === 'review' && (
               <div className="p-6 lg:p-8 flex flex-col">
-                <p className="text-white font-medium mb-6">Generated Observability Pull Request for this project</p>
-                <h4 className="text-[14px] font-semibold text-white mb-3">Changes Proposed</h4>
-                <p className="text-[14px] text-zinc-400 mb-10">
-                  1. Added frontend tracking script into {injectResult.file || 'layout file'}.<br/>
-                  2. Installed and configured <code>@swapnil454/tracepilot</code> for backend observability.
+                <p className="text-white font-medium mb-4 flex items-center gap-2">
+                  <Check className="w-4 h-4 text-green-500" /> Analysis Complete
                 </p>
+                <div className="bg-black border border-zinc-800 p-4 rounded-md mb-6">
+                   <div className="grid grid-cols-2 gap-4">
+                     <div>
+                       <span className="text-zinc-500 text-xs block mb-1">Detected Framework</span>
+                       <span className="text-zinc-200 text-sm font-medium capitalize">{analysisResult?.framework}</span>
+                     </div>
+                     <div>
+                       <span className="text-zinc-500 text-xs block mb-1">Planned Action</span>
+                       <span className="text-zinc-200 text-sm font-medium">{analysisResult?.action}</span>
+                     </div>
+                   </div>
+                   <p className="text-sm text-zinc-400 mt-4 pt-4 border-t border-zinc-800">
+                     {analysisResult?.message}
+                   </p>
+                </div>
+                
+                {aiError && (
+                   <div className="mb-4 text-red-400 text-[13px] bg-red-500/10 p-3 px-5 rounded-md border border-red-500/20">
+                     {aiError}
+                   </div>
+                )}
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleAutoInject}
+                    className="bg-zinc-100 hover:bg-white text-black font-medium px-4 py-2 rounded-md transition-colors flex items-center gap-2"
+                  >
+                    <Play className="w-4 h-4" />
+                    <span className="text-[13px]">Proceed & Generate PR</span>
+                  </button>
+                  <button
+                    onClick={() => setAiState('idle')}
+                    className="bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-white font-medium px-4 py-2 rounded-md transition-colors"
+                  >
+                    <span className="text-[13px]">Cancel</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {aiState === 'injecting' && (
+              <div className="p-8 flex flex-col items-center justify-center min-h-[250px]">
+                 <Loader2 className="h-8 w-8 animate-spin text-zinc-400 mb-4" />
+                 <p className="text-zinc-300 font-medium text-sm">Generating Pull Request...</p>
+                 <p className="text-zinc-500 text-xs mt-2">Writing code modifications and pushing to a new branch</p>
+              </div>
+            )}
+
+            {aiState === 'success' && injectResult && (
+              <div className="p-6 lg:p-8 flex flex-col">
+                <p className="text-white font-medium mb-6 flex items-center gap-2">
+                  <Check className="w-5 h-5 text-green-500" /> Generated Pull Request
+                </p>
+                <div className="bg-black border border-zinc-800 p-4 rounded-md mb-6">
+                  <p className="text-[14px] text-zinc-400">
+                    Successfully injected SDK code into <code className="text-zinc-200">{injectResult.file}</code>.
+                  </p>
+                </div>
+                
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between border-t border-zinc-800 pt-6 mt-auto gap-4">
                   <div className="flex items-center gap-2">
                     <img src="/ai-icon.svg" alt="AI" className="w-6 h-6 object-contain" />
-                    <span className="text-sm font-medium text-white">Generation Complete</span>
-                    <span className="bg-purple-500/20 text-purple-400 text-[10px] px-1.5 py-0.5 rounded font-medium ml-1">Beta</span>
+                    <span className="text-sm font-medium text-white">Injection Complete</span>
                   </div>
                   <div className="flex flex-col gap-3">
                     <div className="flex gap-3 ml-auto">
@@ -241,56 +391,27 @@ export function ObservabilitySetup({
                         href={injectResult.prUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="bg-zinc-800 text-white hover:bg-zinc-700 text-sm font-medium px-4 py-2 rounded-md transition-colors text-center"
+                        className="bg-zinc-800 text-white hover:bg-zinc-700 text-sm font-medium px-4 py-2 rounded-md transition-colors flex items-center gap-2"
                       >
-                        View Pull Request
+                        <ExternalLink className="w-4 h-4" /> View Pull Request
                       </a>
                       <button 
                         onClick={handleVerify} 
                         disabled={verifying}
-                        className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-md transition-colors flex items-center justify-center gap-2 min-w-[160px]"
+                        className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-md transition-colors flex items-center gap-2"
                       >
-                        {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        {verifying ? 'Verifying...' : 'Verify (After Merge)'}
+                        {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+                        {verifying ? 'Verifying...' : 'Verify Installation'}
                       </button>
                     </div>
-                    {verifyError && (
-                      <div className="text-red-400 text-[13px] bg-red-500/10 p-2 px-3 rounded-md border border-red-500/20 text-right ml-auto">
-                        {verifyError}
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="p-8 flex flex-col items-center justify-center min-h-[250px]">
-                <button
-                  onClick={handleAutoInject}
-                  disabled={injecting}
-                  className="bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-white font-medium px-4 py-2 rounded-md transition-colors flex items-center gap-2"
-                >
-                  {injecting ? <Loader2 className="h-4 w-4 animate-spin text-zinc-400" /> : <img src="/ai-icon.svg" alt="AI" className="w-6 h-6 object-contain" />}
-                  <span className="text-[13px]">{injecting ? 'Generating Pull Request...' : 'Implement with AI Agent'}</span>
-                </button>
-                <p className="text-[13px] text-zinc-400 mt-6 max-w-md text-center">
-                  Automatically generate a pull request with <strong>Web Analytics & Observability</strong> configured for your project — at no charge.
-                </p>
-                {injectResult?.error && (
-                   <div className="mt-4 text-red-400 text-[13px] bg-red-500/10 p-3 px-5 rounded-md border border-red-500/20 text-center max-w-lg">
-                     {injectResult.error}
-                   </div>
-                )}
-              </div>
             )}
-            {!injectResult?.success && (
-              <div className="bg-black border-t border-zinc-800 px-6 py-4 flex items-center gap-2">
-                <img src="/ai-icon.svg" alt="AI" className="w-6 h-6 object-contain" />
-                <span className="text-sm font-medium text-zinc-400">AI Agent</span>
-                <span className="bg-zinc-800 text-zinc-300 text-[10px] px-1.5 py-0.5 rounded font-medium ml-1">Beta</span>
-              </div>
-            )}
+            
           </div>
         </div>
+
       </div>
     </div>
   );

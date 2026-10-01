@@ -235,11 +235,11 @@ Return ONLY the raw new file content. Do NOT wrap it in markdown formatting bloc
 
       let newContent = result.response.text().trim();
         
-        if (newContent.startsWith("\`\`\`")) {
-           const lines = newContent.split("\n");
-           lines.shift();
-           if (lines.length > 0 && lines[lines.length - 1].startsWith("\`\`\`")) lines.pop();
-           newContent = lines.join("\n");
+        const blockMatch = newContent.match(/```[a-z]*\n([\s\S]*?)```/);
+        if (blockMatch) {
+           newContent = blockMatch[1].trim();
+        } else {
+           newContent = newContent.replace(/^```[a-z]*\n/, "").replace(/```$/, "").trim();
         }
 
         if (newContent && newContent !== fileData.content) {

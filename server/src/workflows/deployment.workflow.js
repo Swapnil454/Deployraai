@@ -169,9 +169,15 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
         const injected = await step.run("inject_frontend_env_vars_v1", async () => {
           await appendLog(existingFrontendDeploymentId, 'info', 'env_setup', `Injecting ${targetEnv.key}=${backendUrl}`);
           
-          targetEnv.valueEncrypted = encryptSecret(backendUrl);
-          project.markModified('configuration.envVariables');
-          await project.save();
+          // Refetch project to avoid VersionError since the workflow has been waiting for minutes
+          const latestProject = await Project.findById(project._id);
+          const latestTargetEnv = latestProject.configuration.envVariables.frontend?.find(e => e.isBackendUrlTarget);
+          
+          if (latestTargetEnv) {
+            latestTargetEnv.valueEncrypted = encryptSecret(backendUrl);
+            latestProject.markModified('configuration.envVariables');
+            await latestProject.save();
+          }
           
           return { key: targetEnv.key, value: backendUrl };
         });
@@ -273,9 +279,12 @@ export default defineWorkflow("project-deployment-pipeline", 1, async ({ payload
       await step.run("capture_screenshot_v1", async () => {
         if (frontendUrl) {
           const screenshotUrl = await captureDeploymentScreenshot(existingFrontendDeploymentId, frontendUrl);
-          if (screenshotUrl && target === 'fullstack' && payload.existingFullDeploymentId) {
+          if (target === 'fullstack' && payload.existingFullDeploymentId) {
+            // Propagate the real URL on success, or the 'unavailable' sentinel on failure,
+            // so the fullstack deployment UI always stops polling (never spins forever).
+            const valueToPropagate = screenshotUrl || 'unavailable';
             await Deployment.findByIdAndUpdate(payload.existingFullDeploymentId, {
-              'finalSummary.screenshotUrl': screenshotUrl
+              'finalSummary.screenshotUrl': valueToPropagate
             });
           }
         }

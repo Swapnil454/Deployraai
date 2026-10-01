@@ -102,7 +102,7 @@
 //     return <div className="p-8 text-center text-muted-foreground"><Loader2 className="animate-spin inline mr-2"/>Loading incidents...</div>;
 //   }
 
-//   if (project && !project.analytics?.verified) {
+//   if (project && !project.observability?.verified) {
 //     return (
 //       <div className="space-y-6 max-w-5xl mx-auto pt-8">
 //         <ObservabilitySetup project={project} onVerified={fetchData} />
@@ -373,7 +373,7 @@ export default function IncidentsPage() {
     );
   }
 
-  if (project && !project.analytics?.verified) {
+  if (project && !project.observability?.verified) {
     return (
       <div className="flex flex-col min-h-[calc(100vh-64px)] bg-[#050505] text-zinc-200 pb-20 font-sans p-6 pt-12">
         <ObservabilitySetup project={project} onVerified={fetchData} />

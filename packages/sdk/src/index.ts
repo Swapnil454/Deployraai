@@ -7,3 +7,6 @@ export { withSpan, track, captureError } from './core/span';
 export { getConfig } from './core/config';
 export { ContinuousProfiler } from './core/profiler';
 export type { ProfilerOptions } from './core/profiler';
+
+import { initExpressObservability } from './express';
+export const registerOTel = initExpressObservability;

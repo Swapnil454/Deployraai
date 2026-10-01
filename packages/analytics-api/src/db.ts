@@ -4,6 +4,7 @@ console.log('Using DATABASE_URL:', process.env.DATABASE_URL);
 
 export const db = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://admin:secret@localhost:5432/observability',
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   // Pool sizing for production load
   max: 20,
   idleTimeoutMillis: 30000,

@@ -1,4 +1,5 @@
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { getConfig } from './config';
 
 // Creates the exporter that sends spans to YOUR ingestor,
@@ -16,6 +17,21 @@ export function createExporter() {
       'Content-Type': 'application/json',
     },
     // Send spans in small batches, quickly — don't wait
+    timeoutMillis: 5000,
+  });
+}
+
+export function createMetricExporter() {
+  const config = getConfig();
+
+  return new OTLPMetricExporter({
+    url: `${config.collectorUrl}/v1/metrics`,
+    headers: {
+      'Authorization': `Bearer ${config.token}`,
+      'X-YourPlatform-Project': config.projectId,
+      'X-YourPlatform-Deploy': config.deployId,
+      'Content-Type': 'application/json',
+    },
     timeoutMillis: 5000,
   });
 }

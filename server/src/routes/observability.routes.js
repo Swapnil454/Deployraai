@@ -4,9 +4,177 @@ import { requireAuth, verifyProjectOwnership } from '../middleware/auth.middlewa
 import Project from '../models/Project.js';
 
 const router = express.Router();
-const ANALYTICS_API_URL = process.env.ANALYTICS_API_URL || 'http://localhost:4318';
+let ANALYTICS_API_URL = process.env.ANALYTICS_API_URL || 'http://localhost:4318';
+let INGESTOR_URL = process.env.INGESTOR_URL || 'http://localhost:4317';
 
-// Apply auth middleware to all routes
+// If deployed on Render and they mistakenly pointed the URLs to the main Express app, force localhost since we now auto-spawn them.
+if (ANALYTICS_API_URL.includes(process.env.RENDER_EXTERNAL_URL || 'deployraai.onrender.com')) {
+  ANALYTICS_API_URL = 'http://localhost:4318';
+}
+if (INGESTOR_URL.includes(process.env.RENDER_EXTERNAL_URL || 'deployraai.onrender.com')) {
+  INGESTOR_URL = 'http://localhost:4317';
+}
+
+// Unauthenticated Trace Ingestion Endpoint
+// The tracepilot SDK sends POST to /api/observability/traces/v1/traces
+router.post('/traces/v1/traces', async (req, res) => {
+  try {
+    console.log("Observability Proxy received headers:", req.headers);
+    let authHeader = req.headers.authorization || '';
+    
+    // Fallback to x-tracepilot-project-id for frontend React SDK
+    if (!authHeader && req.headers['x-tracepilot-project-id']) {
+      authHeader = `Bearer ${req.headers['x-tracepilot-project-id']}`;
+    }
+    
+    // If tracepilot sends the service name, resolve it to the project's JWT token
+    if (authHeader.startsWith('Bearer ')) {
+      const possibleName = authHeader.replace('Bearer ', '').trim();
+      const project = await Project.findOne({ repoName: possibleName });
+      if (project?.analytics?.trackingId) {
+        authHeader = `Bearer ${project.analytics.trackingId}`;
+      }
+    }
+
+    const targetUrl = `${INGESTOR_URL}/v1/traces`;
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      data: req.body,
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/json',
+      },
+      timeout: 5000,
+    });
+    res.status(response.status).send(response.data);
+  } catch (error) {
+    console.error('Ingestion API Error:', error.message);
+    res.status(error.response?.status || 502).json(error.response?.data || { error: 'Ingestion failed' });
+  }
+});
+
+// Unauthenticated Metrics Ingestion Endpoint
+router.post('/traces/v1/metrics', async (req, res) => {
+  try {
+    let authHeader = req.headers.authorization || '';
+    
+    if (authHeader.startsWith('Bearer ')) {
+      const possibleName = authHeader.replace('Bearer ', '').trim();
+      const project = await Project.findOne({ repoName: possibleName });
+      if (project?.analytics?.trackingId) {
+        authHeader = `Bearer ${project.analytics.trackingId}`;
+      }
+    }
+
+    const targetUrl = `${INGESTOR_URL}/v1/metrics`;
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      data: req.body,
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/json',
+      },
+      timeout: 5000,
+    });
+    res.status(response.status).send(response.data);
+  } catch (error) {
+    console.error('Metrics Ingestion API Error:', error.message);
+    res.status(error.response?.status || 502).json(error.response?.data || { error: 'Metrics Ingestion failed' });
+  }
+});
+
+// Unauthenticated RUM Ingestion Endpoint
+router.post(['/rum/v1/rum', '/traces/v1/rum'], async (req, res) => {
+  try {
+    let authHeader = req.headers.authorization || '';
+    
+    // If tracepilot sends the service name, resolve it to the project's JWT token
+    if (authHeader.startsWith('Bearer ')) {
+      const possibleName = authHeader.replace('Bearer ', '').trim();
+      const project = await Project.findOne({ repoName: possibleName });
+      if (project?.analytics?.trackingId) {
+        authHeader = `Bearer ${project.analytics.trackingId}`;
+      }
+    }
+
+    const targetUrl = `${INGESTOR_URL}/v1/rum`;
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      data: req.body,
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/json',
+      },
+      timeout: 5000,
+    });
+    res.status(response.status).send(response.data);
+  } catch (error) {
+    console.error('RUM Ingestion API Error:', error.message);
+    res.status(error.response?.status || 502).json(error.response?.data || { error: 'RUM Ingestion failed' });
+  }
+});
+// Unauthenticated Profiles Ingestion Endpoint
+router.post('/profiles/v1/profiles', express.raw({ type: 'application/octet-stream', limit: '20mb' }), async (req, res) => {
+  console.log('[Proxy] Received profiles request:', {
+    method: req.method,
+    headers: req.headers,
+    bodyType: typeof req.body,
+    isBuffer: Buffer.isBuffer(req.body),
+    bodyLength: req.body?.length
+  });
+  try {
+    let authHeader = req.headers.authorization || '';
+    const rawProjectId = req.headers['x-project-id'];
+
+    if (!authHeader && rawProjectId) {
+      console.log(`[Proxy] Resolving project JWT for projectId: ${rawProjectId}`);
+      // Find the project by MongoDB ID to get its tracking JWT
+      const project = await Project.findById(rawProjectId);
+      if (project?.analytics?.trackingId) {
+        authHeader = `Bearer ${project.analytics.trackingId}`;
+        console.log(`[Proxy] Successfully resolved project JWT`);
+      } else {
+        console.warn(`[Proxy] Could not resolve project tracking ID for: ${rawProjectId}`);
+      }
+    }
+
+    const targetUrl = `${INGESTOR_URL}/v1/profiles`;
+    console.log('[Proxy] Forwarding to ingestor at:', targetUrl);
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      data: req.body,
+      headers: {
+        Authorization: authHeader,
+        'x-service-name': req.headers['x-service-name'] || '',
+        'x-profile-type': req.headers['x-profile-type'] || 'cpu',
+        'Content-Type': req.headers['content-type'] || 'application/octet-stream',
+      },
+      timeout: 15000,
+      responseType: 'arraybuffer' // handle raw buffer data correctly if response returns any
+    });
+    console.log('[Proxy] Ingestor response status:', response.status);
+    res.status(response.status).send(response.data);
+  } catch (error) {
+    console.error('[Proxy] Profiles Ingestion API Error:', error.message);
+    if (error.response) {
+      console.error('[Proxy] Ingestor returned status:', error.response.status);
+      console.error('[Proxy] Ingestor response data:', error.response.data ? Buffer.from(error.response.data).toString() : 'no data');
+    }
+    res.status(error.response?.status || 502).json(error.response?.data ? JSON.parse(Buffer.from(error.response.data).toString()) : { error: 'Profiles Ingestion failed' });
+  }
+});
+
+import cors from 'cors';
+
+// Apply auth middleware to all OTHER routes (dashboard fetch)
+router.use(cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    credentials: true
+}));
 router.use(requireAuth);
 
 // Catch-all proxy route
@@ -27,6 +195,7 @@ router.use('/', verifyProjectOwnership, async (req, res) => {
         Authorization: cookieToken ? `Bearer ${cookieToken}` : (req.headers.authorization || ''),
       },
       responseType: 'stream',
+      decompress: false,
       timeout: 30000, // 30s — prevent hanging if analytics-api is slow
     });
 

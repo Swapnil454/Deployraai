@@ -19,6 +19,7 @@ import { customDashboardsRouter } from './routes/custom-dashboards.js';
 import { profilesRouter } from './routes/profiles.js';
 import { issuesRouter } from './routes/issues.js';
 import { infrastructureRouter } from './routes/infrastructure.js';
+import { sdkUsageRouter } from './routes/sdk-usage.js';
 
 const app = Fastify({
   logger: true,
@@ -27,7 +28,7 @@ const app = Fastify({
 });
 
 app.register(cors, {
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : true,
   credentials: true
 });
 
@@ -57,14 +58,19 @@ app.register(customDashboardsRouter, { prefix: '/custom-dashboards' });
 app.register(profilesRouter, { prefix: '/profiles' });
 app.register(issuesRouter, { prefix: '/issues' });
 app.register(infrastructureRouter, { prefix: '/infrastructure' });
+app.register(sdkUsageRouter, { prefix: '/sdk-usage' });
 
 app.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
+app.get('/health-1', async () => ({ status: 'ok', ts: Date.now() }));
+app.get('/health-2', async () => ({ status: 'ok', ts: Date.now() }));
+app.get('/health-3', async () => ({ status: 'ok', ts: Date.now() }));
 
 const start = async () => {
   try {
     // Port 4318 for analytics API, separate from 4317 ingestor
-    await app.listen({ port: 4318, host: '0.0.0.0' });
-    console.log('Analytics Query API running on port 4318');
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 4318;
+    await app.listen({ port, host: '0.0.0.0' });
+    console.log(`Analytics Query API running on port ${port}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

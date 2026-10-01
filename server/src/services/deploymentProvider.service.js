@@ -40,17 +40,22 @@ export const startFrontendProviderDeployment = async (deployment, project, injec
   if (!token) throw new Error("Vercel is not connected. Please connect it first.");
   
   const user = await getVercelUser(token);
-  const envVars = [];
+  const envVarsMap = new Map();
   if (project.configuration.envVariables && project.configuration.envVariables.frontend) {
     for (const env of project.configuration.envVariables.frontend) {
       if (env.key && env.key.trim() !== '') {
-        envVars.push({ key: env.key, value: decryptSecret(env.valueEncrypted) });
+        envVarsMap.set(env.key, decryptSecret(env.valueEncrypted) || "");
       }
     }
   }
   if (injectedEnvVars && injectedEnvVars.length > 0) {
-    envVars.push(...injectedEnvVars);
+    for (const env of injectedEnvVars) {
+      if (env.key && env.key.trim() !== '') {
+        envVarsMap.set(env.key, env.value || "");
+      }
+    }
   }
+  const envVars = Array.from(envVarsMap, ([key, value]) => ({ key, value }));
 
   let providerServiceId = project.configuration.vercelProjectId;
   let deploymentUrl;
@@ -310,7 +315,11 @@ export const updateBackendEnvAndRedeploy = async (deployment, project, frontendU
     const platform = backendProviderCtx.platform;
     const token = backendProviderCtx.token;
     
-    const targetEnv = project.configuration.envVariables.backend?.find(e => e.isFrontendUrlTarget);
+    const Project = (await import('../models/Project.js')).default;
+    const latestProject = await Project.findById(project._id);
+    if (!latestProject) throw new Error("Project not found");
+    
+    const targetEnv = latestProject.configuration.envVariables.backend?.find(e => e.isFrontendUrlTarget);
     if (!targetEnv) {
       await appendLog(deployment._id, 'info', 'env_setup', 'No backend variable marked for Frontend URL injection. Skipping backend background redeploy.');
       return;
@@ -319,12 +328,12 @@ export const updateBackendEnvAndRedeploy = async (deployment, project, frontendU
     await appendLog(deployment._id, 'info', 'env_setup', `Injecting Frontend URL into backend variable: ${targetEnv.key}`);
     
     targetEnv.valueEncrypted = encryptSecret(frontendUrl);
-    project.markModified('configuration.envVariables');
-    await project.save();
+    latestProject.markModified('configuration.envVariables');
+    await latestProject.save();
     
     const varsMap = {};
-    if (project.configuration.envVariables && project.configuration.envVariables.backend) {
-      for (const env of project.configuration.envVariables.backend) {
+    if (latestProject.configuration.envVariables && latestProject.configuration.envVariables.backend) {
+      for (const env of latestProject.configuration.envVariables.backend) {
         if (env.key && env.key.trim() !== '') {
            varsMap[env.key] = decryptSecret(env.valueEncrypted);
         }

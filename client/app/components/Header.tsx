@@ -40,7 +40,7 @@ export default function Header() {
     }
   };
 
-  if (pathname.startsWith("/dashboard") || pathname.startsWith("/login") || pathname.startsWith("/signup")) {
+  if (pathname.startsWith("/dashboard") || pathname.startsWith("/login") || pathname.startsWith("/signup") || pathname.startsWith("/status-page")) {
     return null;
   }
 

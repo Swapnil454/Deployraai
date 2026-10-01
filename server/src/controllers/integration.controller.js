@@ -14,7 +14,7 @@ const getOauthProviders = () => ({
     authorizeUrl: "https://github.com/login/oauth/authorize",
     tokenUrl: "https://github.com/login/oauth/access_token",
     callbackUrl: process.env.GITHUB_CALLBACK_URL,
-    scopes: "read:user user:email public_repo"
+    scopes: "read:user user:email repo"
   },
   vercel: {
     clientId: process.env.VERCEL_CLIENT_ID,
@@ -88,17 +88,21 @@ export const connectProvider = async (req, res) => {
   }
 
   const state = crypto.randomBytes(16).toString("hex");
-  let returnTo = req.query.returnTo || `${process.env.FRONTEND_URL}/dashboard`;
+  let returnTo = req.query.returnTo || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard`;
   
   // Prevent Open Redirect: Ensure returnTo begins with the configured FRONTEND_URL
-  if (!returnTo.startsWith(process.env.FRONTEND_URL)) {
-    returnTo = `${process.env.FRONTEND_URL}/dashboard`;
+  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+  if (!returnTo.startsWith(FRONTEND_URL)) {
+    returnTo = `${FRONTEND_URL}/dashboard`;
   }
   
   res.cookie(`oauth_state_${provider}`, state, { httpOnly: true, maxAge: 10 * 60 * 1000 });
   res.cookie(`oauth_return_${provider}`, returnTo, { httpOnly: true, maxAge: 10 * 60 * 1000 });
 
-  const authUrl = `${config.authorizeUrl}?client_id=${config.clientId}&redirect_uri=${encodeURIComponent(config.callbackUrl)}&state=${state}&response_type=code&prompt=consent`;
+  let authUrl = `${config.authorizeUrl}?client_id=${config.clientId}&redirect_uri=${encodeURIComponent(config.callbackUrl)}&state=${state}&response_type=code&prompt=consent`;
+  if (config.scopes) {
+    authUrl += `&scope=${encodeURIComponent(config.scopes)}`;
+  }
   
   res.redirect(authUrl);
 };
@@ -108,11 +112,12 @@ export const callbackProvider = async (req, res) => {
   const { code, state, error, error_description } = req.query;
   const config = getOauthProviders()[provider];
 
-  let returnTo = req.cookies[`oauth_return_${provider}`] || process.env.FRONTEND_URL;
+  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+  let returnTo = req.cookies[`oauth_return_${provider}`] || FRONTEND_URL;
   const storedState = req.cookies[`oauth_state_${provider}`];
   
-  if (!returnTo.startsWith(process.env.FRONTEND_URL)) {
-    returnTo = process.env.FRONTEND_URL;
+  if (!returnTo.startsWith(FRONTEND_URL)) {
+    returnTo = FRONTEND_URL;
   }
 
   // Clear cookies
@@ -192,6 +197,18 @@ export const callbackProvider = async (req, res) => {
       },
       { upsert: true, returnDocument: 'after' }
     );
+
+    // Update legacy flags on the User model for backward compatibility
+    const update = {};
+    update[`${provider}Connected`] = true;
+    if (provider === 'github') {
+      update.githubAccessTokenEncrypted = encryptSecret(accessToken);
+    } else if (provider === 'vercel') {
+      update.vercelAccessTokenEncrypted = encryptSecret(accessToken);
+    }
+    if (Object.keys(update).length > 0) {
+      await User.findByIdAndUpdate(req.user.userId, update);
+    }
 
     res.redirect(`${returnTo}?connected=${provider}`);
     } catch (error) {

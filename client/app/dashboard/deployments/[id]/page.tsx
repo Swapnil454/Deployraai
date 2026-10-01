@@ -184,6 +184,8 @@ export default function DeploymentDetailsPage() {
 
   const [loading, setLoading] = useState(true);
   const [deployment, setDeployment] = useState<any>(null);
+  // True when the server confirmed screenshot is unavailable OR when 3-min UI timeout fires
+  const [screenshotTimedOut, setScreenshotTimedOut] = useState(false);
   
   const [explaining, setExplaining] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<any>(null);
@@ -347,8 +349,18 @@ export default function DeploymentDetailsPage() {
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    const isPending = !deployment || deployment.status === 'queued' || deployment.status === 'running' || 
-      ((deployment.status === 'completed' || deployment.status === 'success') && !deployment.finalSummary?.screenshotUrl);
+    let screenshotTimeout: NodeJS.Timeout;
+
+    const screenshotUrl = deployment?.finalSummary?.screenshotUrl;
+    // Server writes 'unavailable' when all capture providers fail — stop polling
+    const screenshotUnavailable = screenshotUrl === 'unavailable';
+    const isPending = !deployment || deployment.status === 'queued' || deployment.status === 'running' ||
+      ((deployment.status === 'completed' || deployment.status === 'success') &&
+        !screenshotUrl && !screenshotUnavailable && !screenshotTimedOut);
+
+    if (screenshotUnavailable) {
+      setScreenshotTimedOut(true);
+    }
 
     if (isPending && deploymentId) {
       interval = setInterval(async () => {
@@ -361,12 +373,24 @@ export default function DeploymentDetailsPage() {
           }
         } catch (err) {}
       }, 3000);
+
+      // Safety timeout: if a completed deployment still has no screenshot after 3 min, stop spinning
+      const isAwaitingScreenshot =
+        (deployment?.status === 'completed' || deployment?.status === 'success') &&
+        !screenshotUrl && !screenshotUnavailable && !screenshotTimedOut;
+
+      if (isAwaitingScreenshot) {
+        screenshotTimeout = setTimeout(() => {
+          setScreenshotTimedOut(true);
+        }, 3 * 60 * 1000); // 3 minutes
+      }
     }
 
     return () => {
       if (interval) clearInterval(interval);
+      if (screenshotTimeout) clearTimeout(screenshotTimeout);
     };
-  }, [deployment?.status, deployment?.finalSummary?.screenshotUrl, deploymentId]);
+  }, [deployment?.status, deployment?.finalSummary?.screenshotUrl, deploymentId, screenshotTimedOut]);
 
   const fetchDeployment = async () => {
     try {
@@ -653,7 +677,7 @@ export default function DeploymentDetailsPage() {
             <div className="w-full lg:w-[45%] xl:w-[40%] flex-shrink-0">
               {deployment.type === 'backend' ? (
                 <LiveMonitorWidget deployment={deployment} primaryDomain={allDomainsToShow[0]} />
-              ) : deployment.finalSummary?.screenshotUrl ? (
+              ) : deployment.finalSummary?.screenshotUrl && deployment.finalSummary.screenshotUrl !== 'unavailable' ? (
                 <div className="w-full aspect-[16/10] relative rounded-lg border border-zinc-800 overflow-hidden group">
                   <div className="absolute top-0 left-0 w-full h-4 bg-[#111] flex items-center px-2 gap-1 z-10 border-b border-zinc-800">
                     <div className="w-1.5 h-1.5 rounded-full bg-zinc-700"></div>
@@ -685,7 +709,7 @@ export default function DeploymentDetailsPage() {
                     <div className="w-1.5 h-1.5 rounded-full bg-white/30"></div>
                     <div className="w-1.5 h-1.5 rounded-full bg-white/30"></div>
                   </div>
-                  {isSuccess ? (
+                  {isSuccess && !screenshotTimedOut ? (
                     <>
                       <div className="flex items-center justify-center mb-2">
                          <Loader2 className="h-6 w-6 text-white/50 animate-spin" />
@@ -695,6 +719,15 @@ export default function DeploymentDetailsPage() {
                       </h3>
                       <p className="text-white/70 text-xs text-center mt-1 px-4">
                         We are currently capturing a live snapshot of your deployment.
+                      </p>
+                    </>
+                  ) : isSuccess && screenshotTimedOut ? (
+                    <>
+                      <h3 className="text-xl font-bold text-white text-center mt-2">
+                        {deployment.projectId?.name || "Application Preview"}
+                      </h3>
+                      <p className="text-white/70 text-xs text-center mt-1 px-4">
+                        Screenshot unavailable. Visit your live site using the button above.
                       </p>
                     </>
                   ) : (

@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Loader2, ArrowLeft, BarChart2, MousePointerClick, Globe, Monitor, Smartphone, Code, Wand2, GitBranch, ExternalLink, CheckCircle2, MoreHorizontal, Copy, Check, ChevronDown, Calendar } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ProjectAvatar } from "@/components/dashboard/ProjectAvatar";
-import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
+import { AnalyticsSetup } from "@/components/analytics/AnalyticsSetup";
 
 const chartConfig = {
   visitors: { label: "Visitors", key: "visitors", suffix: "" },
@@ -222,7 +222,7 @@ export default function ProjectAnalyticsPage() {
       <div className="max-w-[1440px] w-full mx-auto px-8 py-8 flex-1">
         {!isVerified ? (
           <div className="mt-8">
-            <ObservabilitySetup 
+            <AnalyticsSetup 
               project={project}
               onVerified={fetchProject}
             />
@@ -346,7 +346,7 @@ export default function ProjectAnalyticsPage() {
             {/* Integration Section */}
             {showSetup && (
               <div className="mb-4">
-                <ObservabilitySetup 
+                <AnalyticsSetup 
                   project={project}
                   onVerified={fetchProject}
                 />

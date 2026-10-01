@@ -535,5 +535,4 @@ async function resolveStatusPageIncident(rule: AlertRule) {
   }
 }
 
-setInterval(evaluateAlerts, 60 * 1000);
-evaluateAlerts();
+

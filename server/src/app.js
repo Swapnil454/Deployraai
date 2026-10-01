@@ -24,18 +24,73 @@ import statusComponentRoutes from "./routes/statusComponent.routes.js";
 import logPipelinesRoutes from "./routes/logPipelines.routes.js";
 import incidentRoutes from "./routes/incident.routes.js";
 import internalRoutes from "./routes/internal.routes.js";
+import uptimeCronRoutes from "./routes/uptimeCron.routes.js";
 import "./workflows/index.js"; // Register workflows
 
 const app = express();
 app.set('trust proxy', 1);
 
-app.use(cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    credentials: true
-}));
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false, limit: '2mb' }));
+
+// Analytics routes need open CORS since they're called from arbitrary user websites
+// We mount this BEFORE the global CORS and CSRF middleware so that tracking events 
+// don't get rejected for having a foreign Origin.
+app.use("/api/analytics", (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+});
+
+// Observability trace ingest endpoints also need open CORS
+app.use("/api/observability/traces", (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-tracepilot-project-id");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+});
+app.use("/api/observability/rum", (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-tracepilot-project-id");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+});
+app.use("/api/observability/profiles/v1", (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-project-id, x-service-name, x-profile-type");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+});
+
+app.use("/api/analytics", async (req, res, next) => {
+    try {
+        const { default: router } = await import("./routes/analytics.routes.js");
+        return router(req, res, next);
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.use("/api/observability", observabilityRoutes);
+
+// CORS origin allowlist
+// Set ALLOWED_ORIGINS in Render env as comma-separated list, e.g.:
+//   ALLOWED_ORIGINS=https://deployraai.vercel.app,http://localhost:3000
+const _rawOrigins = process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:3000';
+const ALLOWED_ORIGINS = new Set(_rawOrigins.split(',').map(o => o.trim()).filter(Boolean));
+function corsOriginFn(origin, cb) {
+  if (!origin) return cb(null, true);
+  if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+  cb(new Error('CORS: origin ' + origin + ' is not allowed'));
+}
+app.use(cors({ origin: corsOriginFn, credentials: true, methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization','Cookie'] }));
+app.options('/*splat', cors({ origin: corsOriginFn, credentials: true }));
 
 const apiLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
@@ -67,12 +122,9 @@ app.use("/api/fix-prs", fixPrRoutes);
 
 
 
-app.use("/api", domainRoutes);
-app.use("/api", monitoringRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/projects/:projectId/workflows", workflowRoutes);
 app.use("/api/support", supportRoutes);
-app.use("/api/observability", observabilityRoutes);
 app.use("/api/projects", alertRoutes);
 app.use("/api/projects", issueRoutes);
 app.use("/api/projects", sloRoutes);
@@ -81,24 +133,11 @@ app.use("/api/observability/projects", logPipelinesRoutes);
 app.use("/api/projects", incidentRoutes);
 app.use("/api/public/status", statusRoutes);
 app.use("/api/internal", internalRoutes);
+app.use("/api/uptime-cron", uptimeCronRoutes);
 
-// Analytics routes need open CORS since they're called from arbitrary user websites
-app.use("/api/analytics", (req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type");
-    if (req.method === "OPTIONS") return res.sendStatus(204);
-    next();
-});
-
-app.use("/api/analytics", async (req, res, next) => {
-    try {
-        const { default: router } = await import("./routes/analytics.routes.js");
-        return router(req, res, next);
-    } catch (err) {
-        next(err);
-    }
-});
+// Generic /api mounts MUST go last to prevent their global middleware from swallowing specific routes
+app.use("/api", domainRoutes);
+app.use("/api", monitoringRoutes);
 
 
 app.get("/", (req, res) => {
@@ -112,6 +151,9 @@ app.get("/health", (req, res) => {
         "status": "healthy",
     })
 });
+app.get("/health-1", (req, res) => { res.send({ "status": "healthy" }) });
+app.get("/health-2", (req, res) => { res.send({ "status": "healthy" }) });
+app.get("/health-3", (req, res) => { res.send({ "status": "healthy" }) });
 
 // Add test endpoint
 app.post("/api/test", (req, res) => {

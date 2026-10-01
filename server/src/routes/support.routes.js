@@ -16,6 +16,7 @@ import { BoundedCache } from '../utils/BoundedCache.js';
 import { GitHubService } from '../services/providers/github.service.js';
 import ConnectedAccount from '../models/ConnectedAccount.js';
 import { decryptSecret } from '../utils/encryption.js';
+import { trackAiUsage } from '../utils/aiTracker.js';
 
 const upload = multer({ 
   dest: os.tmpdir(),
@@ -788,6 +789,9 @@ When the user sends an image:
     const modelMessage = { role: "model", content: responseText };
     supportCase.messages.push(modelMessage);
     await supportCase.save();
+
+    // Track AI Usage for chat
+    await trackAiUsage(userId, null, 'support_chat');
 
     // Return the newly created model message (with its DB generated ID and timestamp)
     const savedModelMessage = supportCase.messages[supportCase.messages.length - 1];

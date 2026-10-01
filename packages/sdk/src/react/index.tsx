@@ -1,7 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { WebTracerProvider } from '@opentelemetry/sdk-trace-web';
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-web';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch';
+import { XMLHttpRequestInstrumentation } from '@opentelemetry/instrumentation-xml-http-request';
+import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { Resource } from '@opentelemetry/resources';
 import { trace, context, SpanStatusCode } from '@opentelemetry/api';
 import * as rrweb from 'rrweb';
@@ -20,6 +23,7 @@ interface TracePilotProviderProps {
   ingestorUrl?: string;
   rumUrl?: string;
   enableSessionReplay?: boolean;
+  allowedCorsUrls?: (string | RegExp)[];
 }
 
 let currentSessionId = crypto.randomUUID();
@@ -41,7 +45,8 @@ export function TracePilotProvider({
   serviceName = 'browser-app',
   ingestorUrl = 'https://ingest.tracepilot.ai/v1/traces',
   rumUrl = 'https://ingest.tracepilot.ai/v1/rum',
-  enableSessionReplay = false
+  enableSessionReplay = false,
+  allowedCorsUrls = [/.*/] // By default allow context propagation to any backend
 }: TracePilotProviderProps) {
   const [provider, setProvider] = useState<WebTracerProvider | null>(null);
   
@@ -69,6 +74,19 @@ export function TracePilotProvider({
     }) as any);
 
     webProvider.register();
+
+    registerInstrumentations({
+      tracerProvider: webProvider,
+      instrumentations: [
+        new FetchInstrumentation({
+          propagateTraceHeaderCorsUrls: allowedCorsUrls,
+        }),
+        new XMLHttpRequestInstrumentation({
+          propagateTraceHeaderCorsUrls: allowedCorsUrls,
+        }),
+      ],
+    });
+
     setProvider(webProvider);
 
     // --- 2. WEB VITALS ---
@@ -101,14 +119,24 @@ export function TracePilotProvider({
       onTTFB(reportVitals, { reportAllChanges: true });
     }
 
+    // --- 2.5 ALWAYS FLUSH TRACES ON VISIBILITY CHANGE ---
+    const handleTraceFlushOnHide = () => {
+      if (document.visibilityState === 'hidden') {
+        webProvider.forceFlush().catch(console.error);
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleTraceFlushOnHide);
+    }
+
     // --- 3. SESSION REPLAY (rrweb) ---
     let stopFn: (() => void) | undefined;
     let flushInterval: any;
     let handleVisibilityChange: (() => void) | undefined;
     
-    if (enableSessionReplay && typeof window !== 'undefined' && process.env.NEXT_PUBLIC_TRACEPILOT_RUM_KEY) {
+    if (enableSessionReplay && typeof window !== 'undefined' && token) {
       let events: any[] = [];
-      const rumKey = process.env.NEXT_PUBLIC_TRACEPILOT_RUM_KEY;
+      const rumKey = token;
       
       const recordOptions = {
         emit(event: any) {
@@ -182,12 +210,15 @@ export function TracePilotProvider({
       webProvider.forceFlush().catch(console.error);
       if (stopFn) stopFn();
       if (flushInterval) clearInterval(flushInterval);
-      if (typeof document !== 'undefined' && handleVisibilityChange) {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (typeof document !== 'undefined') {
+        if (handleVisibilityChange) {
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+        }
+        document.removeEventListener('visibilitychange', handleTraceFlushOnHide);
       }
       __flushRRWebEvents = null;
     };
-  }, [token, serviceName, ingestorUrl, rumUrl, enableSessionReplay]);
+  }, [token, serviceName, ingestorUrl, rumUrl, enableSessionReplay, allowedCorsUrls]);
 
   return (
     <TracePilotContext.Provider value={{ provider }}>

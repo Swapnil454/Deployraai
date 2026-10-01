@@ -177,6 +177,4 @@ async function checkProject(project: Project, region: string) {
   }
 }
 
-// Run every minute via setInterval
-setInterval(runHealthChecks, 60 * 1000);
-runHealthChecks(); // also run immediately on start
+

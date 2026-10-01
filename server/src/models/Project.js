@@ -66,6 +66,13 @@ const ProjectSchema = new mongoose.Schema({
     enabledAt: Date,
   },
 
+  observability: {
+    verified: {
+      type: Boolean,
+      default: false,
+    }
+  },
+
   logPipelines: [LogPipelineSchema],
 
   configuration: {

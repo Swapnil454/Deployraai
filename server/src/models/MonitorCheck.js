@@ -23,11 +23,39 @@ const monitorCheckSchema = new mongoose.Schema({
 // Index for querying checks by monitor over time
 monitorCheckSchema.index({ monitorId: 1, checkedAt: -1 });
 
-// TTL index: MongoDB automatically deletes MonitorCheck documents older than 30 days.
-// Without this, every 5-minute check generates a new document forever.
-// At 100 monitors × 12 checks/hr × 24hrs × 365 days = ~10.5M docs/year (~4GB).
-// This single index prevents unbounded MongoDB OOM growth with zero application code changes.
-monitorCheckSchema.index({ checkedAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
-
+// Raw checks are retained for the longest period offered in the UI: 30 days.
+// A startup migration keeps the existing MongoDB TTL index aligned with that policy.
+// The TTL index bounds growth while retaining the full data window users can select.
 const MonitorCheck = mongoose.model("MonitorCheck", monitorCheckSchema);
+
+// Update the old TTL index with collMod rather than declaring it in the schema.
+// This prevents an index-option conflict on deployments created with 30-day retention.
+export const ensureMonitorCheckRetention = async () => {
+  const retentionSeconds = 30 * 24 * 60 * 60;
+  const collection = MonitorCheck.collection;
+  let indexes = [];
+  try {
+    indexes = await collection.indexes();
+  } catch (error) {
+    // A fresh MongoDB database has no collection to list yet; createIndex below creates it.
+    if (error.codeName !== 'NamespaceNotFound') throw error;
+  }
+  const ttlIndex = indexes.find(index => index.key?.checkedAt === 1 && index.expireAfterSeconds != null);
+
+  if (ttlIndex) {
+    if (ttlIndex.expireAfterSeconds !== retentionSeconds) {
+      await mongoose.connection.db.command({
+        collMod: collection.collectionName,
+        index: { name: ttlIndex.name, expireAfterSeconds: retentionSeconds }
+      });
+    }
+    return;
+  }
+
+  await collection.createIndex(
+    { checkedAt: 1 },
+    { name: 'monitor_check_retention', expireAfterSeconds: retentionSeconds }
+  );
+};
+
 export default MonitorCheck;

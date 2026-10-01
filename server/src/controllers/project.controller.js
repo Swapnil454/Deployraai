@@ -6,7 +6,7 @@ import User from "../models/User.js";
 import { decryptSecret } from "../utils/encryption.js";
 
 
-function generateProjectToken(projectId) {
+export function generateProjectToken(projectId) {
   if (!process.env.INGESTOR_JWT_SECRET) {
     console.warn("WARNING: INGESTOR_JWT_SECRET not set, falling back to secure random hex");
     return `da_${crypto.randomBytes(16).toString("hex")}`;
@@ -18,9 +18,18 @@ function generateProjectToken(projectId) {
   );
 }
 
+import ConnectedAccount from "../models/ConnectedAccount.js";
+
 const getGithubToken = async (userId) => {
+  // 1. Try to get token from ConnectedAccount
+  const connectedAccount = await ConnectedAccount.findOne({ userId, provider: 'github', status: 'connected' });
+  if (connectedAccount && connectedAccount.accessTokenEncrypted) {
+    return decryptSecret(connectedAccount.accessTokenEncrypted);
+  }
+
+  // 2. Fallback to legacy User model
   const user = await User.findById(userId);
-  if (!user || !user.githubConnected || !user.githubAccessTokenEncrypted) {
+  if (!user || (!user.githubConnected && !user.githubAccessTokenEncrypted)) {
     throw new Error("GitHub account not connected or token missing");
   }
   return decryptSecret(user.githubAccessTokenEncrypted);
@@ -157,7 +166,13 @@ export const analyzeProject = async (req, res) => {
     if (error.response?.status === 401 || error.message.includes("token missing")) {
       return res.status(401).json({ error: "GitHub connection expired. Please reconnect GitHub." });
     }
-    res.status(500).json({ error: "Failed to analyze project" });
+    if (error.response?.status === 404) {
+      return res.status(400).json({ error: "Repository or branch not found on GitHub. Please check your spelling and permissions." });
+    }
+    if (error.response?.status === 403) {
+      return res.status(400).json({ error: "GitHub rate limit exceeded or access denied." });
+    }
+    res.status(400).json({ error: "Failed to analyze project. Please try again." });
   }
 };
 
@@ -852,13 +867,56 @@ export const getProjectUsage = async (req, res) => {
           getRenderRequests(token, serviceId, startTime, endTime).catch((err) => ({ error: err.message, usage: [] }))
         ]);
 
+        // ── SDK Fallback ─────────────────────────────────────────────────────────
+        // Render free tier returns 0 for CPU Core-hrs and HTTP Requests.
+        // When this happens, fall back to ClickHouse data from the SDK:
+        //  • CPU  → infrastructure_metrics (from @opentelemetry/host-metrics)
+        //  • Reqs → spans table (from OTel HTTP auto-instrumentation)
+        const sumDataValues = (res) => {
+          const d = res?.data || res?.usage || [];
+          if (!Array.isArray(d)) return 0;
+          return d.reduce((s, item) => s + (item.values || []).reduce((vs, v) => vs + (v.value || 0), 0), 0);
+        };
+
+        let finalCpu = cpuRes;
+        let finalRequests = requestsRes;
+        let sdkFallbackUsed = false;
+
+        if (sumDataValues(cpuRes) === 0 || sumDataValues(requestsRes) === 0) {
+          try {
+            // Always hit the local embedded analytics API on port 4318 to guarantee no network issues
+            const localApiUrl = 'http://localhost:4318';
+            const sdkRes = await axios.get(`${localApiUrl}/sdk-usage`, {
+              params: { projectId: project._id.toString(), range },
+              headers: { 'x-internal-secret': process.env.INTERNAL_API_SECRET || 'deployra-internal' },
+              timeout: 10000 // 10s timeout
+            });
+
+            if (sdkRes.data && sdkRes.data.success) {
+              sdkFallbackUsed = true;
+              if (sumDataValues(cpuRes) === 0 && sdkRes.data.usage?.cpu) {
+                finalCpu = sdkRes.data.usage.cpu;
+              }
+              if (sumDataValues(requestsRes) === 0 && sdkRes.data.usage?.requests) {
+                finalRequests = sdkRes.data.usage.requests;
+              }
+            } else {
+              console.warn('[Usage] SDK fallback query returned non-success:', sdkRes.data);
+            }
+          } catch (sdkErr) {
+            console.error('[Usage] SDK fallback query HTTP failed:', sdkErr.message);
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────────────
+
         return res.json({ 
           success: true, 
-          platform: 'render', 
+          platform: 'render',
+          sdkFallback: sdkFallbackUsed,
           usage: {
             bandwidth: bandwidthRes,
-            cpu: cpuRes,
-            requests: requestsRes
+            cpu: finalCpu,
+            requests: finalRequests
           }
         });
       } catch (err) {

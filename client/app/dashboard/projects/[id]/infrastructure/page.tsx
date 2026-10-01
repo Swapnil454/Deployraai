@@ -2,26 +2,29 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, Activity, Server, Cpu, Database, Network, Calendar, Filter } from "lucide-react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { ArrowLeft, Loader2, Activity, Server, Cpu, Database, Network, Calendar, Filter, ChevronDown, ChevronUp } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { ObservabilitySetup } from "@/components/observability/ObservabilitySetup";
 
 // Highly contrasting colors WITHIN each chart so overlapping lines never blend
-const CPU_COLORS = ['#fc0000ff', '#055eecff', '#09ec5cff']; // Red, Blue, Green
-const MEM_COLORS = ['#16f9d3ff', '#f10538ff', '#70cc00ff']; // Orange, Purple, Cyan
-const NET_COLORS = ['#ec4899', '#eab308', '#0051baff']; // Pink, Yellow, Light Gray
+const CPU_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#a855f7'];
+const MEM_COLORS = ['#06b6d4', '#d9f99d', '#ec4899', '#818cf8', '#f97316'];
+const NET_COLORS = ['#8b5cf6', '#eab308', '#10b981', '#38bdf8', '#fb7185'];
+const INITIAL_REPLICA_COUNT = 5;
 
 export default function InfrastructurePage() {
   const params = useParams();
   const router = useRouter();
-  const projectId = params.id;
+  const projectId = params.id as string;
 
   const [loading, setLoading] = useState(true);
   const [metricsData, setMetricsData] = useState<any[]>([]);
+  const [project, setProject] = useState<any>(null);
   const [timeRange, setTimeRange] = useState(24); // hours
   const [groupBy, setGroupBy] = useState('k8s_pod_name');
-  
   const [isGroupDropdownOpen, setIsGroupDropdownOpen] = useState(false);
   const [isTimeDropdownOpen, setIsTimeDropdownOpen] = useState(false);
+  const [showAllReplicas, setShowAllReplicas] = useState(false);
 
   useEffect(() => {
     fetchMetrics();
@@ -37,15 +40,21 @@ export default function InfrastructurePage() {
       const end = Date.now();
       const start = end - timeRange * 60 * 60 * 1000;
       
-      const metrics = 'system.cpu.utilization,system.memory.usage,network.io';
+      const metrics = 'system.cpu.utilization,system.memory.usage,http.throughput';
       
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/observability/infrastructure/metrics?projectId=${projectId}&start=${start}&end=${end}&metrics=${metrics}&groupBy=${groupBy}`, { 
-        credentials: "include" 
-      });
+      const [res, projectRes] = await Promise.all([
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/observability/infrastructure/metrics?projectId=${projectId}&start=${start}&end=${end}&metrics=${metrics}&groupBy=${groupBy}`, { 
+          credentials: "include" 
+        }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects/${projectId}`, { credentials: "include" })
+      ]);
       
       if (res.ok) {
         const json = await res.json();
         setMetricsData(json.data || []);
+      }
+      if (projectRes.ok) {
+        setProject(await projectRes.json());
       }
     } catch (err) {
       console.error(err);
@@ -53,7 +62,6 @@ export default function InfrastructurePage() {
       setLoading(false);
     }
   };
-
   // Pivot data for Recharts
   const processChartData = (metricName: string) => {
     const timeMap = new Map<string, any>();
@@ -61,19 +69,36 @@ export default function InfrastructurePage() {
 
     metricsData.forEach(d => {
       if (d.metric_name === metricName) {
-        const timeKey = d.time; // ISO string from ClickHouse
+        const timeKey = d.time; // string from ClickHouse, often missing 'Z'
+        
+        let dateObj = new Date(timeKey);
+        if (typeof timeKey === 'string' && !timeKey.endsWith('Z')) {
+          // Force UTC parsing for ClickHouse strings like "2026-09-18 14:48:00"
+          dateObj = new Date(timeKey.replace(' ', 'T') + 'Z');
+        }
+
         if (!timeMap.has(timeKey)) {
           timeMap.set(timeKey, { 
             time: timeKey, 
-            formattedTime: new Date(timeKey).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            rawTime: new Date(timeKey).getTime()
+            formattedTime: dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            rawTime: dateObj.getTime()
           });
         }
         
         const groupVal = d.group_val || 'unknown';
         groups.add(groupVal);
         
-        timeMap.get(timeKey)[groupVal] = d.avg_value;
+        let value = d.avg_value;
+        // Normalize values for charts
+        if (metricName === 'system.memory.usage') {
+          value = value / (1024 * 1024); // Bytes to MB
+        } else if (metricName === 'system.cpu.utilization') {
+          // Note: since the backend averages all states (including idle), this is just an approximation for now.
+          // We multiply by 100 to make it a percentage.
+          value = (value * 100); 
+        }
+
+        timeMap.get(timeKey)[groupVal] = value;
       }
     });
 
@@ -83,7 +108,7 @@ export default function InfrastructurePage() {
 
   const cpuChart = useMemo(() => processChartData('system.cpu.utilization'), [metricsData]);
   const memChart = useMemo(() => processChartData('system.memory.usage'), [metricsData]);
-  const netChart = useMemo(() => processChartData('network.io'), [metricsData]);
+  const netChart = useMemo(() => processChartData('http.throughput'), [metricsData]);
 
   const renderLineChart = (chartInfo: { data: any[], groups: string[] }, yAxisLabel: string, colors: string[]) => {
     if (chartInfo.data.length === 0) {
@@ -94,10 +119,14 @@ export default function InfrastructurePage() {
       );
     }
 
+    const visibleGroups = showAllReplicas ? chartInfo.groups : chartInfo.groups.slice(0, INITIAL_REPLICA_COUNT);
+    const hiddenReplicaCount = Math.max(chartInfo.groups.length - INITIAL_REPLICA_COUNT, 0);
+
     return (
-      <div className="h-[380px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartInfo.data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+      <div className="w-full">
+        <div className="h-[305px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartInfo.data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <CartesianGrid stroke="#27272a" vertical={false} />
             <XAxis 
               dataKey="formattedTime" 
@@ -114,39 +143,75 @@ export default function InfrastructurePage() {
               fontSize={11} 
               tickLine={false}
               axisLine={false}
-              tickFormatter={(val) => `${val}${yAxisLabel}`}
+              tickFormatter={(val) => {
+                if (yAxisLabel.trim() === 'MB' && val > 999) return `${(val / 1024).toFixed(1)} GB`;
+                return `${val}${yAxisLabel}`;
+              }}
               tickMargin={12}
             />
             <Tooltip 
-              formatter={(value: any, name: any) => [`${Number(value || 0).toFixed(2)}${yAxisLabel}`, name]}
+              formatter={(value: any, name: any) => {
+                const num = Number(value || 0);
+                if (yAxisLabel.trim() === 'MB' && num > 999) return [`${(num / 1024).toFixed(2)} GB`, name];
+                return [`${num.toFixed(2)}${yAxisLabel}`, name];
+              }}
               contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '4px', color: '#fff' }}
               itemStyle={{ color: '#e4e4e7', fontWeight: 500 }}
               labelStyle={{ color: '#a1a1aa', marginBottom: '0.25rem', fontWeight: 600, fontSize: '12px' }}
             />
-            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '15px' }} iconType="plainline" iconSize={14} />
-            {chartInfo.groups.map((group, i) => (
+            {visibleGroups.map((group, i) => (
               <Line 
                 key={group}
-                type="monotone" 
+                type="linear" 
                 dataKey={group} 
                 stroke={colors[i % colors.length]} 
                 dot={false}
-                strokeWidth={1.2}
+                strokeWidth={1.8}
                 isAnimationActive={false}
               />
             ))}
-          </LineChart>
-        </ResponsiveContainer>
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-zinc-900 pt-3">
+          {visibleGroups.map((group, i) => (
+            <div key={group} className="flex max-w-[210px] items-center gap-1.5" title={group}>
+              <span className="h-0.5 w-3 shrink-0 rounded-full" style={{ backgroundColor: colors[i % colors.length] }} />
+              <span className="truncate text-[11px] text-zinc-400">{group}</span>
+            </div>
+          ))}
+          {hiddenReplicaCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAllReplicas(!showAllReplicas)}
+              aria-expanded={showAllReplicas}
+              className="ml-auto inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-white"
+            >
+              {showAllReplicas ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              {showAllReplicas ? 'Show fewer' : `Show ${hiddenReplicaCount} more`}
+            </button>
+          )}
+          {chartInfo.groups.length > INITIAL_REPLICA_COUNT && showAllReplicas && (
+            <span className="text-[11px] text-zinc-500">Showing all {chartInfo.groups.length} replicas</span>
+          )}
+        </div>
       </div>
     );
   };
 
   return (
-    <div className="min-h-screen bg-black p-6">
-      <div className="mx-auto max-w-5xl space-y-6">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
-          <div>
-            <h1 className="mb-2 text-2xl font-bold text-white flex items-center gap-3">
+    <div className="min-h-screen bg-black p-6 pb-24">
+      <div className="mx-auto max-w-7xl space-y-6">
+        {project && !project.observability?.verified ? (
+          <div className="mt-8">
+            <ObservabilitySetup project={project} onVerified={fetchMetrics} />
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
+              <div>
+                <h1 className="mb-2 text-2xl font-bold text-white flex items-center gap-3">
               <Server className="h-6 w-6 text-white" />
               Infrastructure Metrics
             </h1>
@@ -230,7 +295,7 @@ export default function InfrastructurePage() {
             <div className="bg-transparent border-t border-zinc-800 pt-6">
               <div className="mb-6">
                 <h2 className="text-lg font-semibold text-white">Average CPU Utilization</h2>
-                <p className="text-sm text-zinc-400 mt-1">Across all instances</p>
+                <p className="text-sm text-zinc-400 mt-1">Showing {showAllReplicas ? 'all' : `up to ${INITIAL_REPLICA_COUNT}`} replicas</p>
               </div>
               <div>
                 {renderLineChart(cpuChart, '%', CPU_COLORS)}
@@ -241,7 +306,7 @@ export default function InfrastructurePage() {
             <div className="bg-transparent border-t border-zinc-800 pt-6">
               <div className="mb-6">
                 <h2 className="text-lg font-semibold text-white">Average Memory Utilization</h2>
-                <p className="text-sm text-zinc-400 mt-1">Across all instances</p>
+                <p className="text-sm text-zinc-400 mt-1">Showing {showAllReplicas ? 'all' : `up to ${INITIAL_REPLICA_COUNT}`} replicas</p>
               </div>
               <div>
                 {renderLineChart(memChart, ' MB', MEM_COLORS)}
@@ -251,16 +316,18 @@ export default function InfrastructurePage() {
             {/* Network Chart */}
             <div className="bg-transparent border-y border-zinc-800 pt-6 pb-6">
               <div className="mb-6">
-                <h2 className="text-lg font-semibold text-white">Network I/O</h2>
-                <p className="text-sm text-zinc-400 mt-1">Across all instances</p>
+                <h2 className="text-lg font-semibold text-white">HTTPS Requests</h2>
+                <p className="text-sm text-zinc-400 mt-1">Showing {showAllReplicas ? 'all' : `up to ${INITIAL_REPLICA_COUNT}`} replicas</p>
               </div>
               <div>
-                {renderLineChart(netChart, ' KB/s', NET_COLORS)}
+                {renderLineChart(netChart, ' Req/Min', NET_COLORS)}
               </div>
             </div>
           </div>
         )}
-      </div>
+        </>
+      )}
+    </div>
     </div>
   );
 }

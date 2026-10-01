@@ -11,7 +11,7 @@ import { debounce } from "lodash";
 import { DashboardWidget, WidgetDef } from "@/components/observability/DashboardWidget";
 import { toast } from "sonner";
 
-function CustomSelect({ value, onChange, options, label }: { value: string, onChange: (v: string) => void, options: {label: string, value: string}[], label: string }) {
+function CustomSelect({ value, onChange, options, label, direction = 'down' }: { value: string, onChange: (v: string) => void, options: {label: string, value: string}[], label: string, direction?: 'up' | 'down' }) {
   const [open, setOpen] = useState(false);
   
   useEffect(() => {
@@ -33,7 +33,7 @@ function CustomSelect({ value, onChange, options, label }: { value: string, onCh
       </button>
       
       {open && (
-        <div className="absolute z-50 top-full mt-2 w-full bg-[#0f0f11] border border-[#222] rounded-lg shadow-2xl py-1.5 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+        <div className={`absolute z-50 ${direction === 'up' ? 'bottom-full mb-2' : 'top-full mt-2'} w-full bg-[#0f0f11] border border-[#222] rounded-lg shadow-2xl py-1.5 overflow-hidden animate-in fade-in zoom-in-95 duration-100`}>
           {options.map(opt => (
             <button
               key={opt.value}
@@ -373,6 +373,7 @@ export default function SingleDashboardPage() {
                   label="Aggregation"
                   value={wAgg}
                   onChange={(v) => setWAgg(v as any)}
+                  direction="up"
                   options={[
                     { label: 'Count Total Events', value: 'COUNT' },
                     { label: 'Sum of Property', value: 'SUM' },

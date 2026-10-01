@@ -9,6 +9,7 @@ import { ProjectAvatar } from "./ProjectAvatar";
 const TITLE_MAP: Record<string, string> = {
   "/dashboard/projects": "Overview",
   "/dashboard/logs": "Logs",
+  "/dashboard/monitoring": "Monitoring",
   "/dashboard/analytics": "Analytics",
   "/dashboard/domains": "Domains",
   "/dashboard/usages": "Usages",
@@ -44,17 +45,20 @@ export const Header = ({ projects }: { projects: any[] }) => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isProjectDropdownOpen]);
 
-  let currentTitle = TITLE_MAP[pathname] || "Overview";
+  const isUptimeCron = pathname.startsWith("/dashboard/uptime-cron");
+  let currentTitle = isUptimeCron ? "Uptime Cron Job" : TITLE_MAP[pathname] || "Overview";
   
   // Dynamic titles for dynamic routes
   if (pathname.startsWith("/dashboard/logs/")) {
     currentTitle = "Deployment Logs";
+  } else if (pathname.endsWith("/monitoring")) {
+    currentTitle = "Monitoring";
   } else if (pathname.startsWith("/dashboard/analytics/")) {
     currentTitle = "Analytics";
   }
 
   return (
-    <div className="w-full border-b border-zinc-800 bg-black px-8 h-[48px] shrink-0 sticky top-0 z-40">
+    <div className={`w-full border-b border-zinc-800 bg-black shrink-0 sticky top-0 z-40 ${isUptimeCron ? "h-10 px-6" : "h-[48px] px-8"}`}>
       <div className="max-w-[1440px] w-full mx-auto flex items-center justify-between relative h-full">
         {/* Left: All Projects Dropdown */}
         <div className="flex-1 flex items-center h-full">
@@ -84,6 +88,8 @@ export const Header = ({ projects }: { projects: any[] }) => {
                       router.push('/dashboard/deployments/fullstack');
                     } else if (pathname.startsWith('/dashboard/logs')) {
                       router.push('/dashboard/logs');
+                    } else if (pathname.endsWith('/monitoring')) {
+                      router.push('/dashboard/monitoring');
                     } else if (pathname.startsWith('/dashboard/domains')) {
                       router.push('/dashboard/domains');
                     } else if (pathname.startsWith('/dashboard/usages')) {
@@ -144,6 +150,8 @@ export const Header = ({ projects }: { projects: any[] }) => {
                           router.push(`/dashboard/workflows?projectId=${p._id}`);
                         } else if (pathname.startsWith('/dashboard/logs')) {
                           router.push(`/dashboard/logs/${p._id}`);
+                        } else if (pathname.endsWith('/monitoring')) {
+                          router.push(`/dashboard/projects/${p._id}/monitoring`);
                         } else if (pathname.startsWith('/dashboard/domains')) {
                           router.push(`/dashboard/domains?projectId=${p._id}`);
                         } else {
@@ -214,8 +222,30 @@ export const Header = ({ projects }: { projects: any[] }) => {
           </h2>
         </div>
 
-        {/* Right: Empty spacer to balance flex */}
-        <div className="flex-1"></div>
+        {/* Right: Project ID / Setup info */}
+        <div className="flex-1 flex justify-end items-center">
+          {currentProject && (
+            <div className="flex items-center gap-2 bg-zinc-900/50 border border-zinc-800/80 px-2 py-1 rounded-md">
+              <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest select-none">Project ID</span>
+              <code className="text-[11px] text-zinc-300 font-mono select-all">
+                {currentProject._id}
+              </code>
+              <button 
+                onClick={(e) => {
+                  navigator.clipboard.writeText(currentProject._id);
+                  const btn = e.currentTarget;
+                  const originalHtml = btn.innerHTML;
+                  btn.innerHTML = '<span class="text-[10px] text-emerald-400 font-bold px-1">Copied!</span>';
+                  setTimeout(() => { btn.innerHTML = originalHtml; }, 2000);
+                }}
+                className="text-zinc-500 hover:text-white transition-colors p-0.5 rounded cursor-pointer"
+                title="Copy Project ID"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

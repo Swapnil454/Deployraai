@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Link2, Loader2, ExternalLink, Copy, Check, AlertCircle, Server, RefreshCw, Rocket, ChevronUp, ChevronDown, ChevronRight, Globe, Zap, Clock, ArrowUp, XCircle, AlertTriangle, Wrench } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Link2, Loader2, ExternalLink, Copy, Check, AlertCircle, Server, RefreshCw, Rocket, ChevronUp, ChevronDown, ChevronRight, Globe, Zap, Clock, ArrowUp, XCircle, AlertTriangle, Wrench, Activity, Radio, Route } from "lucide-react";
 
 export default function DeployPage() {
   const router = useRouter();
@@ -509,30 +509,74 @@ export default function DeployPage() {
                 <div className="space-y-5">
                 {monitors.map((monitor: any, index: number) => {
                   const uptimePct = 100; // Mock or calculate if we have history. 
-                  
-                  // Try to find a screenshot URL from a recent successful deployment
-                  const latestFrontendDeploy = deploymentsHistory.find((dep: any) => 
-                    dep.type === 'frontend' && (dep.status === 'success' || dep.status === 'completed') && dep.finalSummary?.screenshotUrl
+                  const isBackendMonitor = monitor.type?.toLowerCase() === 'backend';
+                  const hasUsableScreenshot = (dep: any) =>
+                    (dep.status === 'success' || dep.status === 'completed') &&
+                    dep.finalSummary?.screenshotUrl &&
+                    dep.finalSummary.screenshotUrl !== 'unavailable';
+
+                  // A full deployment receives the same screenshot as its frontend child.
+                  // Reuse it for the backend card so the two services visibly belong together.
+                  const latestFullstackDeploy = deploymentsHistory.find((dep: any) =>
+                    dep.type === 'full' && hasUsableScreenshot(dep)
                   );
-                  const screenshotUrl = latestFrontendDeploy ? latestFrontendDeploy.finalSummary.screenshotUrl : null;
+                  const latestFrontendDeploy = deploymentsHistory.find((dep: any) =>
+                    dep.type === 'frontend' && hasUsableScreenshot(dep)
+                  );
+                  const screenshotUrl = isBackendMonitor
+                    ? latestFullstackDeploy?.finalSummary?.screenshotUrl || null
+                    : latestFrontendDeploy?.finalSummary?.screenshotUrl || latestFullstackDeploy?.finalSummary?.screenshotUrl || null;
+                  const isSharedFullstackPreview = isBackendMonitor && Boolean(screenshotUrl);
                   
                   return (
                   <div key={index} className="flex flex-col md:flex-row gap-5 md:items-center">
-                    {/* Left side: Browser preview */}
+                    {/* Frontend preview, shared with backend for full-stack releases. */}
                     <div className="w-full md:w-[220px] aspect-[4/3] relative flex-shrink-0 rounded-xl border border-[#1e2329] bg-[#0c1015] overflow-hidden group shadow-lg">
-                      <div className="absolute top-0 left-0 w-full h-5 bg-[#161b22] flex items-center px-2.5 gap-1.5 z-10 border-b border-[#1e2329]">
-                        <div className="w-2 h-2 rounded-full bg-[#ff5f56]"></div>
-                        <div className="w-2 h-2 rounded-full bg-[#ffbd2e]"></div>
-                        <div className="w-2 h-2 rounded-full bg-[#27c93f]"></div>
-                      </div>
                       {screenshotUrl ? (
-                        <img 
-                          src={screenshotUrl.startsWith('http') ? screenshotUrl : `${process.env.NEXT_PUBLIC_API_URL}${screenshotUrl}`} 
-                          alt="Preview" 
-                          className="w-full h-full object-cover object-top pt-5"
-                        />
+                        <>
+                          <div className="absolute top-0 left-0 w-full h-5 bg-[#161b22] flex items-center px-2.5 gap-1.5 z-10 border-b border-[#1e2329]">
+                            <div className="w-2 h-2 rounded-full bg-[#ff5f56]"></div>
+                            <div className="w-2 h-2 rounded-full bg-[#ffbd2e]"></div>
+                            <div className="w-2 h-2 rounded-full bg-[#27c93f]"></div>
+                            {isSharedFullstackPreview && <span className="ml-auto text-[8px] font-bold tracking-wider text-teal-300">FULL STACK PREVIEW</span>}
+                          </div>
+                          <img
+                            src={screenshotUrl.startsWith('http') ? screenshotUrl : `${process.env.NEXT_PUBLIC_API_URL}${screenshotUrl}`}
+                            alt={isSharedFullstackPreview ? "Full-stack application preview" : "Frontend preview"}
+                            className="w-full h-full object-cover object-top pt-5"
+                          />
+                        </>
+                      ) : isBackendMonitor ? (
+                        <div className="relative h-full overflow-hidden bg-gradient-to-br from-[#101823] via-[#0d131c] to-[#090c11] px-4 pt-8">
+                          <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-indigo-500/10 blur-2xl" />
+                          <div className="absolute -bottom-12 -left-8 h-28 w-28 rounded-full bg-emerald-500/10 blur-2xl" />
+                          <div className="absolute inset-x-0 top-0 flex h-5 items-center border-b border-[#273140] bg-[#151d28] px-2.5">
+                            <span className="text-[8px] font-bold tracking-[0.16em] text-indigo-300">API SERVICE</span>
+                            <span className="ml-auto flex items-center gap-1 text-[8px] font-semibold text-emerald-400"><Radio className="h-2.5 w-2.5" /> LIVE</span>
+                          </div>
+                          <div className="relative flex h-full flex-col justify-center">
+                            <div className="mb-3 flex items-center gap-2">
+                              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-indigo-400/20 bg-indigo-500/10 shadow-[0_0_18px_rgba(99,102,241,0.15)]">
+                                <Server className="h-4 w-4 text-indigo-300" />
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-semibold text-white">Backend service</p>
+                                <p className="text-[9px] text-zinc-500">Endpoint monitoring</p>
+                              </div>
+                            </div>
+                            <div className="space-y-1.5 rounded-lg border border-white/[0.06] bg-black/20 p-2">
+                              <div className="flex items-center gap-2 text-[9px] text-zinc-400"><Route className="h-3 w-3 text-indigo-400" /><span className="truncate">{monitor.url.replace(/^https?:\/\//, '')}</span></div>
+                              <div className="flex items-center gap-2 text-[9px] text-zinc-400"><Activity className="h-3 w-3 text-emerald-400" /><span>{monitor.lastResponseTimeMs ? `${monitor.lastResponseTimeMs} ms response` : 'Awaiting health check'}</span></div>
+                            </div>
+                          </div>
+                        </div>
                       ) : (
-                        <div className="w-full h-full pt-5 relative overflow-hidden bg-[#111] flex items-center justify-center">
+                        <div className="w-full h-full relative overflow-hidden bg-[#111] flex items-center justify-center">
+                          <div className="absolute top-0 left-0 w-full h-5 bg-[#161b22] flex items-center px-2.5 gap-1.5 border-b border-[#1e2329]">
+                            <div className="w-2 h-2 rounded-full bg-[#ff5f56]"></div>
+                            <div className="w-2 h-2 rounded-full bg-[#ffbd2e]"></div>
+                            <div className="w-2 h-2 rounded-full bg-[#27c93f]"></div>
+                          </div>
                            <Globe className="h-8 w-8 text-emerald-500/50" />
                         </div>
                       )}

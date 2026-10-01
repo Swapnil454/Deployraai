@@ -10,6 +10,7 @@ const SIDEBAR_ITEMS = [
   { name: "Projects", path: "/dashboard/projects" },
   { name: "Deployments", path: "" }, // Folder
   { name: "Logs", path: "/dashboard/logs" }, // Deployment Logs remain here
+  { name: "Monitoring", path: "/dashboard/monitoring" },
   { name: "Log Rules", path: "/dashboard/log-rules" },
   { name: "Infrastructure", path: "/dashboard/infrastructure" },
   { name: "Observability", path: "" }, // Folder
@@ -19,6 +20,7 @@ const SIDEBAR_ITEMS = [
   { name: "Backend Usage", path: "/dashboard/backend-usage" },
   { name: "Frontend Usage", path: "/dashboard/frontend-usage" },
   { name: "Workflows", path: "/dashboard/workflows" },
+  { name: "Uptime Cron Job", path: "/dashboard/uptime-cron" },
   { name: "Support", path: "/dashboard/support" },
   { name: "Settings", path: "/dashboard/settings" }
 ];
@@ -44,7 +46,24 @@ const OBSERVABILITY_SUBPAGES = [
   { name: "SLOs", path: "/dashboard/slos" }
 ];
 
-export const Sidebar = ({ user }: { user: any }) => {
+const UPTIME_CRON_SUBPAGES = [
+  { name: "Monitoring", path: "/dashboard/uptime-cron" },
+  { name: "Groups", path: "/dashboard/uptime-cron/groups" },
+  { name: "Incidents", path: "/dashboard/uptime-cron/incidents" },
+  { name: "Status pages", path: "/dashboard/uptime-cron/status-pages" },
+  { name: "Maintenance", path: "/dashboard/uptime-cron/maintenance" },
+  { name: "Team members", path: "/dashboard/uptime-cron/team-members" },
+  { name: "Integrations & API", path: "/dashboard/uptime-cron/integrations" }
+];
+
+type SidebarUser = {
+  avatar?: string;
+  name?: string;
+  email?: string;
+  githubUsername?: string;
+};
+
+export const Sidebar = ({ user }: { user: SidebarUser | null | undefined }) => {
   const pathname = usePathname() || "";
   const router = useRouter();
   
@@ -67,6 +86,8 @@ export const Sidebar = ({ user }: { user: any }) => {
     pathname.startsWith("/dashboard/status-pages") ||
     pathname.startsWith("/dashboard/slos");
   const [isObservabilityExpanded, setIsObservabilityExpanded] = useState(isObservabilityActive);
+  const isUptimeCronActive = pathname.startsWith("/dashboard/uptime-cron");
+  const [isUptimeCronExpanded, setIsUptimeCronExpanded] = useState(isUptimeCronActive);
 
   const handleLogout = async () => {
     try {
@@ -175,7 +196,26 @@ export const Sidebar = ({ user }: { user: any }) => {
             );
           }
 
-          const isActive = pathname.startsWith(item.path);
+          if (item.name === "Uptime Cron Job") {
+            return (
+              <div key={item.name}>
+                <button
+                  onClick={() => setIsUptimeCronExpanded(!isUptimeCronExpanded)}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-sm rounded-md transition-colors ${isUptimeCronActive ? "bg-zinc-800/50 text-white font-medium" : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50"}`}
+                >
+                  <span>{item.name}</span>
+                  <ChevronsUpDown className={`h-3 w-3 text-zinc-500 transition-transform ${isUptimeCronExpanded ? "rotate-180" : ""}`} />
+                </button>
+                {isUptimeCronExpanded && <div className="flex flex-col ml-3 pl-3 border-l border-zinc-800/60 mt-1 mb-2 space-y-0.5">
+                  {UPTIME_CRON_SUBPAGES.map((sub) => <Link key={sub.name} href={sub.path} className={`w-full flex items-center px-3 py-1.5 text-sm rounded-md transition-colors ${pathname === sub.path ? "bg-zinc-800/80 text-white font-medium" : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50"}`}>{sub.name}</Link>)}
+                </div>}
+              </div>
+            );
+          }
+
+          const isActive = item.name === "Monitoring"
+            ? pathname === item.path || pathname.endsWith("/monitoring")
+            : pathname.startsWith(item.path);
           return (
             <Link
               key={item.name}

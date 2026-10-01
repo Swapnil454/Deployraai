@@ -10,10 +10,13 @@ export function initExpressObservability() {
   setupGlobalErrorCapture();
 }
 
+// Alias to catch AI hallucinations
+export const registerOTel = initExpressObservability;
+
 // Express middleware — add with app.use(observabilityMiddleware())
 export function observabilityMiddleware(): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (!process.env.TRACEPILOT_TOKEN) {
+    if (!getConfig().token) {
       return next();
     }
     const tracer = trace.getTracer('@swapnil454/tracepilot');

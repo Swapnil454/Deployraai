@@ -89,7 +89,7 @@ export default function AnalysisDashboard() {
     );
   }
 
-  if (project && !project.analytics?.verified) {
+  if (project && !project.observability?.verified) {
     return (
       <div className="flex flex-col min-h-[calc(100vh-64px)] bg-[#050505] text-zinc-200 font-sans p-6 pt-12">
         <ObservabilitySetup project={project} onVerified={fetchAnalysis} />
