@@ -5,7 +5,8 @@ import {
   getIncident, getMonitorDashboard,
   listChecks, listGroups, listIncidents, listMonitors,
   pauseMonitor, updateMonitor,
-  ingestHeartbeatPing
+  ingestHeartbeatPing,
+  getMonitorLatency, getMonitorUptime
 } from "../uptime-cron/controller.js";
 
 import {
@@ -35,6 +36,8 @@ router.get("/monitors",                       listMonitors);
 router.post("/monitors",                      createMonitor);
 router.get("/monitors/:monitorId",            getMonitorDashboard);
 router.get("/monitors/:monitorId/checks",     listChecks);
+router.get("/monitors/:monitorId/latency",    getMonitorLatency);
+router.get("/monitors/:monitorId/uptime",     getMonitorUptime);
 router.patch("/monitors/:monitorId",          updateMonitor);
 router.patch("/monitors/:monitorId/pause",    pauseMonitor);
 router.delete("/monitors/:monitorId",         deleteMonitor);

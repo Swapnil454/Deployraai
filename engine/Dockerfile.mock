@@ -1,0 +1,9 @@
+FROM golang:latest AS builder
+WORKDIR /app
+COPY loadtest/mock/main.go .
+RUN go build -o mock-server main.go
+
+FROM debian:bookworm-slim
+WORKDIR /app
+COPY --from=builder /app/mock-server .
+CMD ["./mock-server"]

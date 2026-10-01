@@ -51,6 +51,7 @@ export async function initializeUptimeCronSchema() {
       last_ping_at TIMESTAMPTZ,
       next_expected_at TIMESTAMPTZ,
       last_checked_at TIMESTAMPTZ,
+      current_interval_seconds INTEGER,
       checking_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -84,6 +85,7 @@ export async function initializeUptimeCronSchema() {
     CREATE INDEX IF NOT EXISTS uptime_checks_success_idx ON uptime_checks_log (monitor_id, checked_at DESC) WHERE success = TRUE;
     CREATE INDEX IF NOT EXISTS uptime_checks_fail_idx ON uptime_checks_log (monitor_id, checked_at DESC) WHERE success = FALSE;
     CREATE INDEX IF NOT EXISTS uptime_incidents_open_idx ON uptime_incidents (monitor_id) WHERE resolved_at IS NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS uptime_incidents_one_open ON uptime_incidents (monitor_id) WHERE resolved_at IS NULL;
     CREATE INDEX IF NOT EXISTS uptime_monitors_heartbeat_idx ON uptime_monitors (monitor_type, next_expected_at);
     CREATE INDEX IF NOT EXISTS uptime_monitors_heartbeat_token_prev_idx ON uptime_monitors (heartbeat_token_previous);
   `);
@@ -136,6 +138,26 @@ export async function initializeUptimeCronSchema() {
     END $$;
 
     ALTER TABLE uptime_monitors ADD CONSTRAINT uptime_monitors_monitor_type_check CHECK (monitor_type IN ('http', 'keyword', 'ping', 'port', 'heartbeat', 'dns', 'api', 'udp'));
+
+    ALTER TABLE uptime_monitors ADD COLUMN IF NOT EXISTS managed_by TEXT NOT NULL DEFAULT 'node';
+
+    CREATE OR REPLACE FUNCTION notify_monitor_change() RETURNS trigger AS $$
+    BEGIN 
+      PERFORM pg_notify('monitor_updates', json_build_object('action',TG_OP,'id',COALESCE(NEW.id,OLD.id))::text); 
+      RETURN NULL; 
+    END $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS monitor_cfg_insdel ON uptime_monitors;
+    CREATE TRIGGER monitor_cfg_insdel AFTER INSERT OR DELETE ON uptime_monitors
+    FOR EACH ROW EXECUTE FUNCTION notify_monitor_change();
+
+    DROP TRIGGER IF EXISTS monitor_cfg_upd ON uptime_monitors;
+    CREATE TRIGGER monitor_cfg_upd AFTER UPDATE ON uptime_monitors FOR EACH ROW
+    WHEN (OLD.url IS DISTINCT FROM NEW.url OR OLD.interval_seconds IS DISTINCT FROM NEW.interval_seconds
+       OR OLD.monitor_type IS DISTINCT FROM NEW.monitor_type OR OLD.is_paused IS DISTINCT FROM NEW.is_paused
+       OR OLD.managed_by IS DISTINCT FROM NEW.managed_by OR OLD.timeout_seconds IS DISTINCT FROM NEW.timeout_seconds
+       OR OLD.target_host IS DISTINCT FROM NEW.target_host)
+    EXECUTE FUNCTION notify_monitor_change();
 
     CREATE INDEX IF NOT EXISTS uptime_checks_slow_idx
       ON uptime_checks_log (monitor_id, checked_at DESC)

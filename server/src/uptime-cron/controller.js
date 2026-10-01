@@ -1,6 +1,7 @@
 import { uptimeDb } from "./db.js";
 import { validateMonitorPayload } from "./validation.js";
 import { isMonitorUnderMaintenance } from "./maintenanceEvaluation.js";
+import { ch } from "../utils/clickhouse.js";
 
 const owner = (req) => String(req.user.userId);
 
@@ -722,6 +723,81 @@ export async function ingestHeartbeatPing(req, res) {
   } catch (error) {
     console.error("Heartbeat ingestion error:", error);
     return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+function plan(hours) {
+  if (hours <= 6)   return { table: 'uptime_telemetry', step: 'toStartOfInterval(toDateTime(ts), INTERVAL 1 MINUTE)',  kind: 'raw' };
+  if (hours <= 168) return { table: 'telemetry_5m',     step: 'toStartOfInterval(bucket, INTERVAL 15 MINUTE)',          kind: 'roll' };
+  return               { table: 'telemetry_5m',     step: 'toStartOfInterval(bucket, INTERVAL 6 HOUR)',             kind: 'roll' };
+}
+
+export async function getMonitorLatency(req, res) {
+  try {
+    const { monitorId } = req.params;
+    if (!/^[0-9a-f-]{36}$/i.test(monitorId)) return res.status(400).end();
+
+    const authCheck = await uptimeDb.query("SELECT id FROM uptime_monitors WHERE id = $1 AND user_id = $2", [monitorId, owner(req)]);
+    if (!authCheck.rowCount) return res.status(404).end();
+
+    const hours = Math.min(Number(req.query.hours) || 24, 24 * 90);
+    const p = plan(hours);
+
+    const query = p.kind === 'raw'
+      ? `SELECT ${p.step} AS time,
+                round(avgIf(latency_us, status != 0) / 1000, 3)               AS avg_ms,
+                round(quantileTDigestIf(0.95)(latency_us, status != 0) / 1000, 3) AS p95_ms,
+                round(maxIf(latency_us, status != 0) / 1000, 3)               AS max_ms,
+                round(100 * sumIf(interval_s, status != 0) / sum(interval_s), 3)  AS uptime_pct
+         FROM uptime_telemetry
+         WHERE monitor_id = {id:UUID} AND ts >= now() - INTERVAL {h:UInt32} HOUR
+         GROUP BY time ORDER BY time ASC
+         WITH FILL STEP INTERVAL 1 MINUTE`
+      : `SELECT ${p.step} AS time,
+                round(sum(lat_sum_us) / nullIf(sum(up_probes), 0) / 1000, 3) AS avg_ms,
+                round(quantilesTDigestMerge(0.5, 0.95, 0.99)(lat_q)[2] / 1000, 3) AS p95_ms,
+                round(max(lat_max_us) / 1000, 3)                              AS max_ms,
+                round(100 * sum(up_s) / nullIf(sum(total_s), 0), 3)           AS uptime_pct
+         FROM telemetry_5m
+         WHERE monitor_id = {id:UUID} AND bucket >= now() - INTERVAL {h:UInt32} HOUR
+         GROUP BY time ORDER BY time ASC`;
+
+    const rs = await ch.query({ query, query_params: { id: monitorId, h: hours }, format: 'JSONEachRow' });
+    res.set('Cache-Control', 'private, max-age=15').json(await rs.json());
+  } catch (error) {
+    console.error("Get monitor latency error:", error);
+    res.status(500).json({ error: "Failed to get latency" });
+  }
+}
+
+export async function getMonitorUptime(req, res) {
+  try {
+    const { monitorId } = req.params;
+    if (!/^[0-9a-f-]{36}$/i.test(monitorId)) return res.status(400).end();
+
+    const authCheck = await uptimeDb.query("SELECT id FROM uptime_monitors WHERE id = $1 AND user_id = $2", [monitorId, owner(req)]);
+    if (!authCheck.rowCount) return res.status(404).end();
+
+    const hours = Math.min(Number(req.query.hours) || 24, 24 * 90);
+
+    const query = `
+      SELECT
+        sum(probes) AS total_probes,
+        sum(up_probes) AS up_probes,
+        sum(total_s) AS total_s,
+        sum(up_s) AS up_s,
+        round(100 * sum(up_s) / nullIf(sum(total_s), 0), 3) AS uptime_pct,
+        round(quantilesTDigestMerge(0.5, 0.95, 0.99)(lat_q)[2] / 1000, 3) AS p95_ms
+      FROM telemetry_5m
+      WHERE monitor_id = {id:UUID} AND bucket >= now() - INTERVAL {h:UInt32} HOUR
+    `;
+
+    const rs = await ch.query({ query, query_params: { id: monitorId, h: hours }, format: 'JSONEachRow' });
+    const data = await rs.json();
+    res.set('Cache-Control', 'private, max-age=15').json({ success: true, uptime: data[0] || null });
+  } catch (error) {
+    console.error("Get monitor uptime error:", error);
+    res.status(500).json({ error: "Failed to get uptime" });
   }
 }
 

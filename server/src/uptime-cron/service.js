@@ -1,4 +1,5 @@
 import { uptimeDb } from "./db.js";
+import { chWrite } from "../utils/clickhouse.js";
 import { runHttpCheck } from "./checker.js";
 import { runPingCheck } from "./pingChecker.js";
 import { runPortCheck } from "./portChecker.js";
@@ -14,6 +15,7 @@ let running = false;
 // --- HYPER-OPTIMIZED BATCHING BUFFERS ---
 const checksLogBuffer = [];
 const dailyMetricsBuffer = new Map();
+const clickhouseBuffer = [];
 let isFlushing = false;
 
 function bufferDailyMetric(monitorId, success, responseTimeMs) {
@@ -83,6 +85,20 @@ async function flushBuffers() {
     isFlushing = false;
     client.release();
   }
+
+  // --- ClickHouse Telemetry Flush (Asynchronous, Non-Blocking) ---
+  if (clickhouseBuffer.length > 0) {
+    const chBatch = clickhouseBuffer.splice(0, clickhouseBuffer.length);
+    try {
+      await chWrite.insert({
+        table: 'uptime_telemetry',
+        values: chBatch,
+        format: 'JSONEachRow'
+      });
+    } catch (chErr) {
+      console.error("[Uptime Cron] ClickHouse flush error:", chErr.message);
+    }
+  }
 }
 
 // Flush buffers every 5 seconds asynchronously
@@ -105,6 +121,7 @@ async function claimDueMonitors() {
     + " SELECT id FROM uptime_monitors"
     + " WHERE is_paused = FALSE"
     + " AND monitor_type != 'heartbeat'"
+    + " AND managed_by != 'engine'"
     + " AND (checking_at IS NULL OR checking_at < NOW() - INTERVAL '2 minutes')"
     + " AND (last_checked_at IS NULL OR last_checked_at + (interval_seconds * INTERVAL '1 second') <= NOW())"
     + " ORDER BY last_checked_at NULLS FIRST LIMIT 100 FOR UPDATE SKIP LOCKED"
@@ -170,6 +187,17 @@ async function persistCheck(monitor, result) {
     });
     
     bufferDailyMetric(monitor.id, result.success || isSuppressed, result.responseTimeMs);
+
+    // Buffer ClickHouse Telemetry natively for complex monitors handled by Node.js (V2 Architecture Parity)
+    clickhouseBuffer.push({
+      monitor_id: monitor.id,
+      ts: Date.now(),
+      latency_us: result.responseTimeMs * 1000,
+      interval_s: monitor.interval_seconds || 30,
+      status: result.success ? 1 : 0,
+      err: result.success ? 0 : (result.cause === 'timeout' ? 1 : 2),
+      kind: 1 // Kind 1 = Node.js Complex Probe
+    });
 
     // ── 2. Core incident management (ONE incident per downtime span) ───────────
     const nextStatus = result.success || isSuppressed ? "up" : "down"; // Status remains UP if suppressed

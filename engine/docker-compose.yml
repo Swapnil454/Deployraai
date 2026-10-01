@@ -1,0 +1,49 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: engine
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: engine_test
+    volumes:
+      - ./loadtest/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - ./loadtest/verify.sql:/tmp/verify.sql
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engine -d engine_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mock:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock
+    ports:
+      - "8443:8443"
+
+  engine:
+    build:
+      context: .
+      args:
+        BUILD_TAGS: "loadtest"
+    environment:
+      - DATABASE_URL_DIRECT=postgresql://engine:password@db:5432/engine_test?sslmode=disable
+      - DATABASE_URL_POOLED=postgresql://engine:password@db:5432/engine_test?sslmode=disable
+      - HTTP_WORKERS=1700
+      - ENABLE_ENGINE_B=true
+      - GOMEMLIMIT=400MiB
+      - GOMAXPROCS=1
+    ports:
+      - "6060:6060"
+    privileged: true
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M

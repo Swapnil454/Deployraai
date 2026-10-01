@@ -62,30 +62,14 @@ export const initCron = () => {
     });
   }
 
-  // ── 1. Uptime monitor — every 5 minutes ───────────────────────────────────
+  // ── 1. Uptime monitor (DISABLED: V1 system replaced by Go Engine & V2 uptime-cron) ───
+  /* 
   if (!monitorCronJob) {
     monitorCronJob = cron.schedule('*/5 * * * *', async () => {
-      let client;
-      let lockAcquired = false;
-      try {
-        client = await db.connect();
-        const { rows } = await client.query('SELECT pg_try_advisory_lock(1001) as locked');
-        if (!rows[0].locked) return; // Another instance has the lock — still releases client in finally
-        lockAcquired = true;
-
-        console.log('[Cron:monitors] Running all uptime monitors...');
-        await runAllMonitors();
-        console.log('[Cron:monitors] Finished.');
-      } catch (error) {
-        console.error('[Cron:monitors] Error:', error);
-      } finally {
-        if (client) {
-          if (lockAcquired) await client.query('SELECT pg_advisory_unlock(1001)');
-          client.release();
-        }
-      }
+      // Disabled to prevent duplicate checks against V1 MongoDB monitors
     });
   }
+  */
 
   // ── 2. Domain health — every 5 minutes ────────────────────────────────────
   // Re-verifies all active/partially_active/degraded/pending_dns domains.
