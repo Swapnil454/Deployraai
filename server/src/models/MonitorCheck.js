@@ -20,8 +20,12 @@ const monitorCheckSchema = new mongoose.Schema({
   }
 });
 
-// Index for querying checks by monitor over time
+// Index for querying checks by monitor over time (primary engine write path)
 monitorCheckSchema.index({ monitorId: 1, checkedAt: -1 });
+// Compound index for project-scoped time-range queries (dashboard summary)
+monitorCheckSchema.index({ projectId: 1, checkedAt: -1 });
+// Covers aggregate $match+$group without a full collection scan
+monitorCheckSchema.index({ monitorId: 1, checkedAt: -1, status: 1 });
 
 // Raw checks are retained for the longest period offered in the UI: 30 days.
 // A startup migration keeps the existing MongoDB TTL index aligned with that policy.

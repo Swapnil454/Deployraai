@@ -6,6 +6,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"net/netip"
 	"strings"
 )
 
@@ -30,6 +31,6 @@ func resolveHost(ctx context.Context, host string) ([]net.IP, error) {
 	return net.DefaultResolver.LookupIP(ctx, "ip", host)
 }
 
-func isRestrictedIP(ip net.IP) bool {
+func isBlockedIP(addr netip.Addr) bool {
 	return false
 }

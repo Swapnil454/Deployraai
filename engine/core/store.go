@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"net/netip"
 
 	"github.com/google/uuid"
 )
@@ -40,6 +41,13 @@ type Monitor struct {
     ChecksTotal        uint64
     ChecksOK           uint64
     LatencySumMs       uint64
+    
+    // HTTP specific
+    TimeoutMs          int
+    Keyword            string
+    KeywordMaxBytes    int64
+    ExpectedStatus     []int
+    ForceGET           bool
 }
 
 type MonitorStore struct {
@@ -149,21 +157,44 @@ func ResolveTargetIP(ptr *atomic.Pointer[Monitor]) {
     if err != nil || len(ips) == 0 {
         log.Printf("DNS resolution failed for %s (URL: %s): %v", mon.ID, mon.URL, err)
         CASUpdate(ptr, func(m *Monitor) {
+            m.TargetIP = "" // Clear so dispatchEBPFPing fails immediately
             m.TargetIPResolvedAt = time.Now()
         })
         return
     }
 
+    // Prefer IPv4 first: raw-socket ping and hash paths assume IPv4.
+    // Fall back to IPv6 only if no public IPv4 is available.
     var safeIP net.IP
     for _, ip := range ips {
-        if !isRestrictedIP(ip) {
+        if ip.To4() == nil {
+            continue // skip IPv6 on first pass
+        }
+        if addr, ok := netip.AddrFromSlice(ip); ok && !isBlockedIP(addr.Unmap()) {
             safeIP = ip
             break
         }
     }
+    if safeIP == nil && mon.Type != "ping" && mon.Type != "port" {
+        // IPv4 pass found nothing; try IPv6 (skip for ping/port as engine B assumes IPv4)
+        for _, ip := range ips {
+            if ip.To4() != nil {
+                continue
+            }
+            if addr, ok := netip.AddrFromSlice(ip); ok && !isBlockedIP(addr.Unmap()) {
+                safeIP = ip
+                break
+            }
+        }
+    }
 
     if safeIP == nil {
-        log.Printf("DNS resolution failed or returned only restricted IPs for %s", mon.ID)
+        // All resolved IPs are restricted, or no IPv4 available for ping/port.
+        log.Printf("[CONFIG_ERROR] DNS returned no suitable public IPs for %s (%s)", mon.ID, mon.URL)
+        CASUpdate(ptr, func(m *Monitor) {
+            m.TargetIP = "" // Clear so state machine sees the CONFIG_ERROR
+            m.TargetIPResolvedAt = time.Now()
+        })
         return
     }
 
@@ -173,3 +204,4 @@ func ResolveTargetIP(ptr *atomic.Pointer[Monitor]) {
         m.TargetIPResolvedAt = time.Now()
     })
 }
+

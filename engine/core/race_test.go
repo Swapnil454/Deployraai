@@ -24,7 +24,7 @@ func TestCoreRace(t *testing.T) {
 		m := &Monitor{
 			ID:          id,
 			Interval:    30,
-			Timeout:     5,
+			TimeoutMs:     5,
 			Type:        "http",
 			LastStatus:  "UP",
 			NextCheckAt: time.Now(),
@@ -73,7 +73,7 @@ func TestCoreRace(t *testing.T) {
 				if j%2 == 0 {
 					HandleSuccess(id, uint64(j%100))
 				} else {
-					HandleFailure(id, "Test cause", "Test msg")
+					HandleFailure(id, ErrTimeout, "Test cause", "Test msg")
 				}
 			}
 		}()

@@ -1,3 +1,4 @@
+//go:debug tlsmlkem=0
 package main
 
 import (
@@ -63,7 +64,12 @@ func main() {
 	}
 
 	// --- Phase 2: Start Dual-Engine Prober ---
-	httpJobs := make(chan *core.Monitor, 5000)
+	// Channel must hold at least one slot per monitor so the first-tick
+	// burst (all 35k monitors due simultaneously after boot jitter) never
+	// causes the dispatcher to skip monitors and print "HTTP queue full".
+	channelSize := monitorCount + monitorCount/10 + 1000 // +10% headroom
+	if channelSize < 5000 { channelSize = 5000 }
+	httpJobs := make(chan *core.Monitor, channelSize)
 
 	// 10 Postgres incident workers to prevent connection stampedes
 	db.StartIncidentWorkers(ctx, &wg, pool, 10)
@@ -90,7 +96,12 @@ func main() {
 		log.Println("UPTIMER_CLICKHOUSE_URL not set, telemetry disabled")
 	}
 
-	httpWorkers := 2000
+	// Default worker count: 1 worker per 20 monitors, capped at 5000.
+	// At 35k monitors this gives 1750 workers which is plenty to drain
+	// the queue within the 30s check interval.
+	httpWorkers := monitorCount / 20
+	if httpWorkers < 500 { httpWorkers = 500 }
+	if httpWorkers > 5000 { httpWorkers = 5000 }
 	if hwStr := os.Getenv("HTTP_WORKERS"); hwStr != "" {
 		if hw, err := strconv.Atoi(hwStr); err == nil && hw > 0 {
 			httpWorkers = hw
@@ -98,7 +109,10 @@ func main() {
 	}
 
 	// Configurable FastHTTP workers
-	core.StartHTTPWorkers(ctx, &wg, httpWorkers, httpJobs)
+	core.StartWorkers(ctx, &wg, httpWorkers, httpJobs)
+
+	// Quorum State Machine Dispatcher (Shell)
+	core.StartConfirmationDispatcher(ctx, &wg, 10)
 
 	// eBPF Reader (Ping events)
 	ebpf.StartEBPFReader(ctx, &wg)
@@ -113,7 +127,20 @@ func main() {
 
 	<-ctx.Done()
 	log.Println("Shutting down cleanly... waiting for routines to exit")
-	wg.Wait()
+	
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Println("All routines exited gracefully")
+	case <-time.After(15 * time.Second):
+		log.Println("WARNING: Shutdown timeout exceeded, some routines may have leaked! Forcing dead-letter drain.")
+	}
+
 	db.DrainQueueToDeadLetter() // Final catch-all for events generated during shutdown
 	pool.Close()
 	log.Println("Shutdown complete.")

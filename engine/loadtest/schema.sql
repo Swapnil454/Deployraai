@@ -1,11 +1,16 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+DROP TABLE IF EXISTS uptime_daily_metrics CASCADE;
+DROP TABLE IF EXISTS uptime_incidents CASCADE;
+DROP TABLE IF EXISTS uptime_monitors CASCADE;
+
 CREATE TABLE IF NOT EXISTS uptime_monitors (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id TEXT NOT NULL DEFAULT 'mock',
     monitor_type TEXT NOT NULL DEFAULT 'http' CHECK (monitor_type IN ('http', 'keyword', 'ping', 'port', 'heartbeat', 'dns', 'api', 'udp')),
     target_host TEXT,
     url TEXT,
+    keyword TEXT,
     tags TEXT[] NOT NULL DEFAULT '{}',
     interval_seconds INTEGER NOT NULL,
     timeout_seconds INTEGER NOT NULL DEFAULT 30,

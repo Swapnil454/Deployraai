@@ -21,16 +21,22 @@ func StartEBPFReader(ctx context.Context, wg *sync.WaitGroup) error {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				// Simulate the eBPF ringbuffer reading SYN-ACKs instantly
+				// Collect eligible IDs first under RLock, then release before calling HandleSuccess.
+				// HandleSuccess calls UpdateRuntime which also acquires RLock — sync.RWMutex is NOT
+				// reentrant, so calling it while already holding RLock causes an instant deadlock.
+				var due []string
 				core.Store.Mu.RLock()
 				for id, ptr := range core.Store.Monitors {
 					m := ptr.Load()
 					if m.AwaitingResult && m.Type != "http" {
-						// Simulate ~20ms latency
-						core.HandleSuccess(id, 20)
+						due = append(due, id)
 					}
 				}
 				core.Store.Mu.RUnlock()
+
+				for _, id := range due {
+					core.HandleSuccess(id, 20) // Simulate ~20ms latency
+				}
 			}
 		}
 	}()

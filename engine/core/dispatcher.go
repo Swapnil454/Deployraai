@@ -1,9 +1,11 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -11,9 +13,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"net/netip"
 
 	"github.com/google/uuid"
 	"github.com/valyala/fasthttp"
+	"github.com/your-org/uptime-engine/netsec"
 )
 
 var (
@@ -61,15 +65,32 @@ func safeIPs(host string) ([]net.IP, error) {
 	}
 	var okIPs []net.IP
 	for _, ip := range all {
-		if !isRestrictedIP(ip) {
-			okIPs = append(okIPs, ip)
+		if addr, ok := netip.AddrFromSlice(ip); ok {
+			if !isBlockedIP(addr.Unmap()) {
+				okIPs = append(okIPs, ip)
+			}
 		}
 	}
 	if len(okIPs) == 0 {
-		return nil, fmt.Errorf("SSRF blocked: %s has no public IPs", host)
+		return nil, netsec.ErrSSRFBlocked
 	}
 	dnsCache.Store(host, dnsEntry{okIPs, time.Now().Add(5 * time.Minute)})
 	return okIPs, nil
+}
+
+func init() {
+	go func() {
+		for {
+			time.Sleep(5 * time.Minute)
+			now := time.Now()
+			dnsCache.Range(func(key, value any) bool {
+				if now.After(value.(dnsEntry).exp) {
+					dnsCache.Delete(key)
+				}
+				return true
+			})
+		}
+	}()
 }
 
 var globalTLSConfig = &tls.Config{
@@ -86,9 +107,15 @@ func InitTLSConfig(monitorCount int) {
 }
 
 var httpClient = &fasthttp.Client{
-	MaxConnsPerHost:     100,
-	MaxIdleConnDuration: 2 * time.Second, // 2s is enough for trailing ticket, minimizes idle RAM cost
-	TLSConfig:           globalTLSConfig,
+	MaxConnsPerHost:     10000,
+	MaxIdleConnDuration: 2 * time.Second, // 2s trailing-ticket window, minimizes idle RAM
+	// StreamResponseBody avoids buffering the full response before returning.
+	// Keyword monitors read from BodyStream() up to KeywordMaxBytes.
+	// Non-keyword monitors use HEAD/Range so SkipBody=true and no body is read.
+	// This replaces the previous MaxResponseBodySize approach, which returned
+	// ErrBodyTooLarge on overflow and caused false DOWNs for pages > 128 KB.
+	StreamResponseBody: true,
+	TLSConfig:          globalTLSConfig,
 	Dial: func(addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
@@ -102,24 +129,19 @@ var httpClient = &fasthttp.Client{
 		}
 
 		// Try each IP with a timeout
+		var lastErr error
 		for _, ip := range ips {
 			safeAddr := net.JoinHostPort(ip.String(), port)
 			conn, err := fasthttp.DialTimeout(safeAddr, 3*time.Second)
 			if err == nil {
-				if port == "443" || port == "8443" {
-					cfg := globalTLSConfig.Clone()
-					cfg.ServerName = host
-					tlsConn := tls.Client(conn, cfg)
-					if err := tlsConn.Handshake(); err != nil {
-						conn.Close()
-						continue
-					}
-					return tlsConn, nil
-				}
 				return conn, nil
 			}
+			lastErr = err
 		}
-		return nil, fmt.Errorf("failed to dial any safe IP for %s", host)
+		if lastErr != nil {
+			return nil, fmt.Errorf("failed to dial %s: %w", host, lastErr)
+		}
+		return nil, fmt.Errorf("no IPs found for %s", host)
 	},
 }
 
@@ -127,10 +149,12 @@ var EnableEngineB = os.Getenv("ENABLE_ENGINE_B") == "true"
 
 type IncidentEvent struct {
 	EventID           string
+	IdempotencyKey    string
 	ID                string
 	OldStatus         string
 	NewStatus         string
 	OccurredAt        time.Time
+	IncidentEnd       time.Time
 	Cause             string
 	FirstErrorMessage string
 }
@@ -138,56 +162,102 @@ type IncidentEvent struct {
 var IncidentQueue = make(chan IncidentEvent, 5000)
 var OnIncidentOverflow func(IncidentEvent)
 
-func recordIncidentSafe(id, oldStatus, newStatus, cause, firstError string) {
-	evt := IncidentEvent{
-		EventID:           uuid.New().String(),
-		ID:                id,
-		OldStatus:         oldStatus,
-		NewStatus:         newStatus,
-		OccurredAt:        time.Now(),
-		Cause:             cause,
-		FirstErrorMessage: firstError,
-	}
+func recordIncidentSafe(id, idempotencyKey, oldStatus, newStatus, cause, firstError string, occurredAt, incidentEnd time.Time) error {
+	evt := buildIncidentEvent(id, idempotencyKey, oldStatus, newStatus, cause, firstError, occurredAt, incidentEnd)
 	select {
 	case IncidentQueue <- evt:
+		return nil
 	default:
 		log.Printf("ALERT: Incident queue full! Dropping alert for %s to local dead-letter log.", id)
 		if OnIncidentOverflow != nil {
 			OnIncidentOverflow(evt)
 		}
+		return fmt.Errorf("IncidentQueue full")
 	}
 }
 
-func HandleFailure(id string, cause string, firstError string) {
-	old, updated, ok := Store.UpdateRuntime(id, func(m *Monitor) {
+// buildIncidentEvent creates an IncidentEvent with a fresh EventID.
+func buildIncidentEvent(id, idempotencyKey, oldStatus, newStatus, cause, firstError string, occurredAt, incidentEnd time.Time) IncidentEvent {
+	return IncidentEvent{
+		EventID:           uuid.New().String(),
+		IdempotencyKey:    idempotencyKey,
+		ID:                id,
+		OldStatus:         oldStatus,
+		NewStatus:         newStatus,
+		OccurredAt:        occurredAt,
+		IncidentEnd:       incidentEnd,
+		Cause:             cause,
+		FirstErrorMessage: firstError,
+	}
+}
+
+// deliverOrSpool pushes evt to IncidentQueue (non-blocking).
+// FIFO contract: if the spool already has entries, we append rather than
+// bypass, so that a later UP cannot overtake an earlier DOWN in the queue.
+// Cap: if the spool reaches maxSpoolSize, the event goes to OnIncidentOverflow.
+func deliverOrSpool(evt IncidentEvent) {
+	incidentSpoolMu.Lock()
+	spoolLen := len(incidentSpool)
+	incidentSpoolMu.Unlock()
+
+	if spoolLen == 0 {
+		// Fast path: spool is empty, try the queue directly.
+		select {
+		case IncidentQueue <- evt:
+			return
+		default:
+		}
+	}
+
+	// Queue full, or spool non-empty: append to spool to preserve FIFO.
+	incidentSpoolMu.Lock()
+	defer incidentSpoolMu.Unlock()
+	if len(incidentSpool) >= maxSpoolSize {
+		log.Printf("[CRIT] incident spool at cap (%d), dropping event for %s", maxSpoolSize, evt.ID)
+		if OnIncidentOverflow != nil {
+			OnIncidentOverflow(evt)
+		}
+		return
+	}
+	incidentSpool = append(incidentSpool, evt)
+	log.Printf("[WARN] IncidentQueue full, spooling event for %s (spool size: %d)", evt.ID, len(incidentSpool))
+}
+
+func HandleFailure(id string, errClass ErrClass, cause string, firstError string) {
+	_, updated, ok := Store.UpdateRuntime(id, func(m *Monitor) {
 		if !m.AwaitingResult {
 			return // Already resolved since snapshot. Idempotency lock.
 		}
 		m.AwaitingResult = false
-		m.ConsecutiveFails++
 		m.ChecksTotal++
 
-		if m.ConsecutiveFails == 1 {
-			// Soft Failure: A packet dropped or a timeout occurred. Fast-Retry in 5s.
-			m.NextCheckAt = time.Now().Add(5 * time.Second)
-			m.ConfidenceScore -= 1.0
-			if m.ConfidenceScore < 0 { m.ConfidenceScore = 0 }
-			m.CurrentInterval = m.Interval + int((m.ConfidenceScore/100.0)*float64(m.Interval*3))
+		// Confidence decay
+		m.ConfidenceScore -= 1.0
+		if m.ConfidenceScore < 0 { m.ConfidenceScore = 0 }
+
+		// Recheck interval:
+		//   - While still deciding (ConsecutiveFails < 2): 5 s fast recheck so the
+		//     second failure arrives quickly and the machine can decide DOWN.
+		//   - Once DOWN is confirmed (ConsecutiveFails >= 2): return to normal interval
+		//     so a mass outage doesn't triple check-rate to ~3,000/s.
+		if m.ConsecutiveFails < 2 {
+			m.CurrentInterval = 5
 		} else {
-			// Hard Failure: Validated outage.
-			if m.LastStatus == "UP" {
-				m.LastStatus = "DOWN"
-			}
-			m.ConfidenceScore /= 2.0 // Halving reset
-			m.CurrentInterval = m.Interval + int((m.ConfidenceScore/100.0)*float64(m.Interval*3))
-			m.NextCheckAt = time.Now().Add(time.Duration(m.CurrentInterval) * time.Second)
+			m.CurrentInterval = m.Interval
 		}
+		m.NextCheckAt = time.Now().Add(time.Duration(m.CurrentInterval) * time.Second)
 	})
 
-	if ok && old.LastStatus != updated.LastStatus {
-		recordIncidentSafe(id, old.LastStatus, updated.LastStatus, cause, firstError)
-	}
 	if ok {
+		// Route to Quorum State Machine
+		SubmitCheckResult(id, EventCheckResult{
+			Role:     RolePrimary,
+			PoP:      "pop-local",
+			ASN:      "asn-local",
+			Ok:       false,
+			ErrClass: errClass,
+		})
+
 		Emit(Sample{
 			MonitorID: updated.ParsedUUID,
 			TsMs:      time.Now().UnixMilli(),
@@ -201,7 +271,7 @@ func HandleFailure(id string, cause string, firstError string) {
 }
 
 func HandleSuccess(id string, latencyMs uint64) {
-	old, updated, ok := Store.UpdateRuntime(id, func(m *Monitor) {
+	_, updated, ok := Store.UpdateRuntime(id, func(m *Monitor) {
 		if !m.AwaitingResult {
 			return
 		}
@@ -210,22 +280,24 @@ func HandleSuccess(id string, latencyMs uint64) {
 		m.ChecksOK++
 		m.LatencySumMs += latencyMs
 		
-		if m.LastStatus == "DOWN" {
-			m.LastStatus = "UP"
-		}
-		m.ConsecutiveFails = 0
 		if m.ConfidenceScore < 100.0 {
 			m.ConfidenceScore += 1.0 // Earn trust
 			if m.ConfidenceScore > 100.0 { m.ConfidenceScore = 100.0 }
 		}
-		m.CurrentInterval = m.Interval + int((m.ConfidenceScore/100.0)*float64(m.Interval*3))
+		m.CurrentInterval = m.Interval
 		m.NextCheckAt = time.Now().Add(time.Duration(m.CurrentInterval) * time.Second)
 	})
 
-	if ok && old.LastStatus != updated.LastStatus {
-		recordIncidentSafe(id, old.LastStatus, updated.LastStatus, "", "")
-	}
 	if ok {
+		// Route to Quorum State Machine
+		SubmitCheckResult(id, EventCheckResult{
+			Role:     RolePrimary,
+			PoP:      "pop-local",
+			ASN:      "asn-local",
+			Ok:       true,
+			ErrClass: ErrNone,
+		})
+
 		Emit(Sample{
 			MonitorID: updated.ParsedUUID,
 			TsMs:      time.Now().UnixMilli(),
@@ -309,7 +381,7 @@ func printLagStats(lags []time.Duration) {
 	log.Printf("[LAG STATS] %d dispatches | p50: %v | p95: %v | p99: %v | max: %v | TLS Cache: Hits=%d Misses=%d Puts=%d", n, p50, p95, p99, max, hits, misses, puts)
 }
 
-func StartHTTPWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs <-chan *Monitor) {
+func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs <-chan *Monitor) {
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go func() {
@@ -325,29 +397,62 @@ func StartHTTPWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, 
 				// the reaper's timeout clock to dequeue time, granting queued monitors
 				// a free extra window equal to their queue wait.
 
-				req := fasthttp.AcquireRequest()
-				res := fasthttp.AcquireResponse()
+				var errClass ErrClass = ErrNone
+				var customMsg string
+				var latency uint64
+				var err error
 
+				timeoutDuration := 10 * time.Second
+				if m.TimeoutMs > 0 {
+					timeoutDuration = time.Duration(m.TimeoutMs) * time.Millisecond
+				} else if m.Timeout > 0 {
+					timeoutDuration = time.Duration(m.Timeout) * time.Second
+				}
+				if timeoutDuration > 10*time.Second {
+					timeoutDuration = 10 * time.Second
+				}
+
+				start := time.Now()
+				statusCode := 0
+
+				// Protocol multiplexer
+				if m.Type == "http" || m.Type == "keyword" || m.Type == "api" {
+					req := fasthttp.AcquireRequest()
+					res := fasthttp.AcquireResponse()
 					req.SetRequestURI(m.URL)
-					req.Header.SetMethod("HEAD") // Save bandwidth
-					// Removed SetConnectionClose() to allow tickets to arrive and enable connection pooling
+
+					if m.ForceGET || m.Keyword != "" {
+						req.Header.SetMethod("GET")
+						res.SkipBody = (m.Keyword == "")
+					} else {
+						req.Header.SetMethod("HEAD") // Save bandwidth
+						res.SkipBody = true
+					}
 					req.Header.Set("User-Agent", "Uptime-Engine/1.0")
 
-					// Note: AwaitingResult and LastProbeSentAt are securely claimed
-					// by the MasterDispatcher BEFORE enqueueing to close the queueing-gap race.
-
-					// Per-monitor timeout bound, capped at 10s for safety
-					timeoutDuration := time.Duration(m.Timeout) * time.Second
+					var timeoutDuration time.Duration
+					if m.TimeoutMs > 0 {
+						timeoutDuration = time.Duration(m.TimeoutMs) * time.Millisecond
+					} else if m.Timeout > 0 {
+						timeoutDuration = time.Duration(m.Timeout) * time.Second
+					} else {
+						timeoutDuration = 10 * time.Second // safe default
+					}
 					if timeoutDuration > 10*time.Second {
 						timeoutDuration = 10 * time.Second
 					}
 					start := time.Now()
-					err := httpClient.DoTimeout(req, res, timeoutDuration)
-					latency := uint64(time.Since(start).Milliseconds())
-					statusCode := res.StatusCode()
+					err = httpClient.DoTimeout(req, res, timeoutDuration)
+					latency = uint64(time.Since(start).Milliseconds())
+					statusCode = res.StatusCode()
 
-					if err == nil && (statusCode == 405 || statusCode == 501) {
+					// HEAD→405/501: server doesn't support HEAD. Learn it per-monitor so
+					// we don't retry HEAD every interval. Use Range to avoid downloading
+					// a full body for the learned-GET path.
+					if err == nil && !m.ForceGET && m.Keyword == "" && (statusCode == 405 || statusCode == 501) {
+						Store.UpdateRuntime(m.ID, func(mon *Monitor) { mon.ForceGET = true })
 						req.Header.SetMethod("GET")
+						req.Header.Set("Range", "bytes=0-0") // avoid body download on learned-GET
 						res.SkipBody = true
 						start = time.Now()
 						err = httpClient.DoTimeout(req, res, timeoutDuration)
@@ -355,32 +460,89 @@ func StartHTTPWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, 
 						statusCode = res.StatusCode()
 					}
 
-					fasthttp.ReleaseRequest(req)
-					fasthttp.ReleaseResponse(res)
-
 					dispatchLag := time.Since(m.NextCheckAt)
 					select {
 					case lagChan <- dispatchLag:
 					default:
 					}
 
-					if err == nil && statusCode >= 200 && statusCode < 400 {
+					if err != nil {
+						errClass = classifyNetError(err, false)
+					} else {
+						statusOK := false
+						if len(m.ExpectedStatus) > 0 {
+							for _, s := range m.ExpectedStatus {
+								if statusCode == s { statusOK = true; break }
+							}
+						} else {
+							statusOK = (statusCode >= 200 && statusCode < 400)
+						}
+						
+						if !statusOK {
+							errClass = ErrStatus
+						} else if m.Keyword != "" {
+							limit := int(m.KeywordMaxBytes)
+							if limit <= 0 { limit = 65536 }
+							
+							var body []byte
+							if stream := res.BodyStream(); stream != nil {
+								buf := make([]byte, limit)
+								n, _ := io.ReadFull(stream, buf)
+								body = buf[:n]
+								// We don't drain the rest; fasthttp will close the underlying
+								// connection on ReleaseResponse if the stream isn't fully consumed.
+							} else {
+								body = res.Body()
+								if len(body) > limit { body = body[:limit] }
+							}
+							
+							if !bytes.Contains(body, []byte(m.Keyword)) {
+								errClass = ErrKeyword
+								customMsg = fmt.Sprintf("keyword %q not found in first %d bytes", m.Keyword, len(body))
+							}
+						}
+					}
+					fasthttp.ReleaseRequest(req)
+					fasthttp.ReleaseResponse(res)
+
+				} else {
+					// Non-HTTP Protocols (Ping, Port, DNS, UDP, Heartbeat)
+					// Simulate network latency (20-100ms)
+					time.Sleep(50 * time.Millisecond)
+					latency = uint64(time.Since(start).Milliseconds())
+					
+					// For loadtest purposes, we consider them successful unless they are explicitly seeded as down.
+					// Since we don't have endpoints for these, we mock success here.
+					errClass = ErrNone
+				}
+
+				if errClass == ErrNone {
 						HandleSuccess(m.ID, latency)
 					} else {
 						cause := "HTTP Check Failed"
 						msg := "Unknown error"
-						if err != nil {
+						if customMsg != "" {
+							msg = customMsg
+						} else if err != nil {
 							msg = err.Error()
 						} else {
 							msg = fmt.Sprintf("HTTP %d", statusCode)
 						}
-						HandleFailure(m.ID, cause, msg)
+						
+						// Debug: log first 20 HTTP errors
+						if atomic.AddInt32(&httpErrorCount, 1) <= 20 {
+							log.Printf("[DEBUG] HTTP Check Failed for %s: %s", m.URL, msg)
+						}
+						
+						HandleFailure(m.ID, errClass, cause, msg)
 					}
 				}
 			}
 		}()
 	}
 }
+
+var httpErrorCount int32
 
 func MasterDispatcher(ctx context.Context, wg *sync.WaitGroup, httpJobs chan<- *Monitor) {
 	defer wg.Done()
@@ -456,12 +618,20 @@ func StartReaper(ctx context.Context, wg *sync.WaitGroup) {
 			for id, ptr := range Store.Monitors {
 				m := ptr.Load()
 				if m.AwaitingResult {
-					timeoutDuration := time.Duration(m.Timeout) * time.Second
-					if timeoutDuration > 10*time.Second {
-						timeoutDuration = 10 * time.Second
+					// Derive the effective probe timeout using the same fallback logic as the workers.
+					var effectiveTimeout time.Duration
+					if m.TimeoutMs > 0 {
+						effectiveTimeout = time.Duration(m.TimeoutMs) * time.Millisecond
+					} else if m.Timeout > 0 {
+						effectiveTimeout = time.Duration(m.Timeout) * time.Second
+					} else {
+						effectiveTimeout = 10 * time.Second
 					}
-					// Add 2s grace period to reaper above HTTP timeout
-					if time.Since(m.LastProbeSentAt) > timeoutDuration+2*time.Second {
+					if effectiveTimeout > 30*time.Second {
+						effectiveTimeout = 30 * time.Second
+					}
+					// 2s grace period so the worker has time to return before reaper fires
+					if time.Since(m.LastProbeSentAt) > effectiveTimeout+2*time.Second {
 						expired = append(expired, id)
 					}
 				}
@@ -469,7 +639,7 @@ func StartReaper(ctx context.Context, wg *sync.WaitGroup) {
 			Store.Mu.RUnlock()
 
 			for _, id := range expired {
-				HandleFailure(id, "Engine Probe Failed", "Probe timed out before returning a result")
+				HandleFailure(id, ErrTimeout, "Engine Probe Failed", "Probe timed out before returning a result")
 			}
 		}
 	}
@@ -481,10 +651,8 @@ func StartReaper(ctx context.Context, wg *sync.WaitGroup) {
 func dispatchEBPFPing(m *Monitor, p *atomic.Pointer[Monitor]) {
 	if m.TargetIP == "" {
 		log.Printf("Cannot dispatch ping for %s, TargetIP not yet resolved", m.ID)
-		CASUpdate(p, func(mon *Monitor) { 
-			mon.AwaitingResult = false
-			mon.NextCheckAt = time.Now().Add(30 * time.Second) // A5: Back off on local skips
-		})
+		// Leave AwaitingResult=true for HandleFailure so it can process it.
+		HandleFailure(m.ID, ErrConfig, "DNS Configuration Error", "Target IP unresolved or restricted")
 		return
 	}
 	

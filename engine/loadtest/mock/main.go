@@ -125,6 +125,19 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
+	// Keyword monitor endpoint: returns a body with "HEALTHY" embedded.
+	// Simulates real pages where monitors scan for a status string.
+	http.HandleFunc("/mock/keyword", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&reqCount, 1)
+		time.Sleep(time.Duration(50+mrand.Intn(200)) * time.Millisecond)
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`<!DOCTYPE html><html><head><title>Status</title></head><body>
+<h1>Service Status</h1><p class="status">System: <strong>HEALTHY</strong></p>
+<p>All systems operational. Uptime: 99.99%%</p>
+</body></html>`))
+	})
+
 	http.HandleFunc("/mock/count", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(fmt.Sprintf("%d", atomic.LoadInt64(&reqCount))))

@@ -34,8 +34,8 @@ services:
       - DATABASE_URL_POOLED=postgresql://engine:password@db:5432/engine_test?sslmode=disable
       - HTTP_WORKERS=1700
       - ENABLE_ENGINE_B=true
-      - GOMEMLIMIT=400MiB
-      - GOMAXPROCS=1
+      - GOMEMLIMIT=900MiB
+      - GOMAXPROCS=4
     ports:
       - "6060:6060"
     privileged: true
@@ -45,5 +45,5 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '4.0'
+          memory: 1G

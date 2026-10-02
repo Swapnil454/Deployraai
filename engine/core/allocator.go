@@ -6,29 +6,54 @@ import (
 	"sync/atomic"
 )
 
+const portRangeMin = 10000
+const portRangeMax = 65000
+const portRangeSize = portRangeMax - portRangeMin + 1
+
 type portAllocator struct {
-	slots [65536]atomic.Pointer[string]
+	slots    [65536]atomic.Pointer[string]
+	freeList chan int
 }
 
-var PortAllocator = &portAllocator{}
+var PortAllocator = func() *portAllocator {
+	pa := &portAllocator{
+		freeList: make(chan int, portRangeSize),
+	}
+	for p := portRangeMin; p <= portRangeMax; p++ {
+		pa.freeList <- p
+	}
+	return pa
+}()
 
+// Allocate is O(1) — pops a pre-computed free port from the channel.
 func (pa *portAllocator) Allocate(id string) (port int, ok bool) {
-	for port := 10000; port <= 65000; port++ {
+	select {
+	case port = <-pa.freeList:
 		if pa.slots[port].CompareAndSwap(nil, &id) {
 			return port, true
 		}
+		// Slot was re-used by a concurrent caller after we popped it — shouldn't
+		// happen with a channel free-list, but be safe: put it back.
+		pa.freeList <- port
+		return 0, false
+	default:
+		return 0, false // pool exhausted
 	}
-	return 0, false
 }
 
+// Deallocate is O(1) — clears the slot and returns the port to the free list.
 func (pa *portAllocator) Deallocate(port int) {
-	if port >= 10000 && port <= 65000 {
-		pa.slots[port].Store(nil)
+	if port < portRangeMin || port > portRangeMax {
+		return
+	}
+	if pa.slots[port].Swap(nil) != nil {
+		// Only return to free list if it was actually occupied
+		pa.freeList <- port
 	}
 }
 
 func (pa *portAllocator) Lookup(port uint16) (string, bool) {
-	if port >= 10000 && port <= 65000 {
+	if port >= portRangeMin && port <= portRangeMax {
 		ptr := pa.slots[port].Load()
 		if ptr != nil {
 			return *ptr, true

@@ -170,7 +170,14 @@ func appendDeadLetter(evt core.IncidentEvent) {
 
 	b, err := json.Marshal(evt)
 	if err == nil {
-		f.Write(append(b, '\n'))
+		if _, werr := f.Write(append(b, '\n')); werr != nil {
+			log.Printf("CRITICAL: Failed to write dead-letter entry: %v", werr)
+			return
+		}
+		// fsync so kernel buffer flushes before process crash
+		if serr := f.Sync(); serr != nil {
+			log.Printf("CRITICAL: Failed to fsync dead-letter file: %v", serr)
+		}
 	}
 }
 
@@ -208,7 +215,10 @@ func processReplayingFile(ctx context.Context, pool *pgxpool.Pool, filename stri
 	}
 
 	var pending []core.IncidentEvent
+	// Use an explicit large buffer (1MB) to handle long error messages
+	// that would otherwise silently truncate with the default 64KB limit.
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -275,6 +285,11 @@ func processReplayingFile(ctx context.Context, pool *pgxpool.Pool, filename stri
 			cf.Close()
 		}
 		tf.Close()
+		// fsync before rename to guarantee the file lands atomically on crash
+		if sf, err2 := os.Open(tempFile); err2 == nil {
+			_ = sf.Sync()
+			sf.Close()
+		}
 
 		os.Rename(tempFile, deadLetterFile)
 		os.Remove(filename)

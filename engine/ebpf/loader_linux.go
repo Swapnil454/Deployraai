@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -52,29 +53,34 @@ func StartEBPFReader(ctx context.Context, wg *sync.WaitGroup) error {
 	
 	rd, err := ringbuf.NewReader(objs.PingEvents)
 	if err != nil {
+		l.Close()   // don't leak the XDP link
+		objs.Close()
 		return err
 	}
 
 	log.Printf("XDP Hook attached successfully to interface %s. Ringbuffer started.", iface.Name)
 
+	// Shutdown watcher: close the ringbuf reader first (unblocks Read()),
+	// then detach the XDP link, then release all kernel BPF objects.
+	go func() {
+		<-ctx.Done()
+		rd.Close()
+		l.Close()
+		objs.Close()
+	}()
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer l.Close()
-		defer rd.Close()
 
 		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				record, err := rd.Read()
-				if err != nil {
-					if errors.Is(err, ringbuf.ErrClosed) {
-						return
-					}
-					continue
+			record, err := rd.Read()
+			if err != nil {
+				if errors.Is(err, ringbuf.ErrClosed) || errors.Is(err, os.ErrClosed) {
+					return
 				}
+				continue
+			}
 
 				// bpf2go creates the bpfPingEventT struct automatically!
 				// Wait, doing raw bytes is safer if bpfPingEventT has padding issues.
@@ -122,7 +128,6 @@ func StartEBPFReader(ctx context.Context, wg *sync.WaitGroup) error {
 					}
 				}
 			}
-		}
 	}()
 	return nil
 }

@@ -18,9 +18,9 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
     
     // We now select ONLY supported types managed by the engine
     query := `
-        SELECT id, COALESCE(url, target_host, ''), interval_seconds, timeout_seconds, monitor_type, is_paused, status, last_checked_at, current_interval_seconds 
+        SELECT id, COALESCE(url, target_host, ''), interval_seconds, timeout_seconds, monitor_type, is_paused, status, last_checked_at, current_interval_seconds, COALESCE(keyword, '')
         FROM uptime_monitors
-        WHERE managed_by = 'engine' AND monitor_type IN ('http', 'port', 'ping')
+        WHERE managed_by = 'engine' AND monitor_type IN ('http', 'keyword', 'ping', 'port', 'heartbeat', 'dns', 'api', 'udp')
     `
     rows, err := pool.Query(ctx, query)
     if err != nil { return err }
@@ -32,6 +32,7 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
         Timeout               int
         IsPaused              bool
         Status                string
+        Keyword               string
         LastCheckedAt         *time.Time
         CurrentIntervalFromDB *int
     }
@@ -40,7 +41,7 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
     for rows.Next() {
         var r row
         var isPaused *bool
-        if err := rows.Scan(&r.ID, &r.URL, &r.Interval, &r.Timeout, &r.Type, &isPaused, &r.Status, &r.LastCheckedAt, &r.CurrentIntervalFromDB); err == nil {
+        if err := rows.Scan(&r.ID, &r.URL, &r.Interval, &r.Timeout, &r.Type, &isPaused, &r.Status, &r.LastCheckedAt, &r.CurrentIntervalFromDB, &r.Keyword); err == nil {
             if r.Interval <= 0 { r.Interval = 30 }
             if r.Timeout <= 0 { r.Timeout = 30 }
             if isPaused != nil { r.IsPaused = *isPaused }
@@ -72,7 +73,7 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
                     m.ConfidenceScore = 0.0
                     m.CurrentInterval = r.Interval
                 }
-                m.URL, m.Timeout, m.IsPaused = r.URL, r.Timeout, r.IsPaused
+                m.URL, m.Timeout, m.IsPaused, m.Keyword = r.URL, r.Timeout, r.IsPaused, r.Keyword
                 m.ConfigSyncedAt = time.Now()
             })
             if ok && old.Type != r.Type {
@@ -117,7 +118,7 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
                 parsedUUID = u
             }
             m := &core.Monitor{
-                ID: r.ID, ParsedUUID: parsedUUID, URL: r.URL, Interval: r.Interval, Timeout: r.Timeout, Type: r.Type, IsPaused: r.IsPaused,
+                ID: r.ID, ParsedUUID: parsedUUID, URL: r.URL, Interval: r.Interval, Timeout: r.Timeout, Type: r.Type, IsPaused: r.IsPaused, Keyword: r.Keyword,
                 LastStatus: "UP", ConfidenceScore: 0.0, CurrentInterval: r.Interval, ConfigSyncedAt: time.Now(),
             }
             

@@ -61,7 +61,7 @@ export const getProjectMonitors = async (req, res) => {
     const project = await Project.findOne({ _id: projectId, userId: req.user.userId });
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    const monitors = await Monitor.find({ projectId }).sort({ type: -1 });
+    const monitors = await Monitor.find({ projectId }).sort({ type: -1 }).lean();
     res.json({ success: true, monitors });
   } catch (error) {
     console.error("Get monitors error:", error);
@@ -141,14 +141,13 @@ export const getProjectMonitorSummary = async (req, res) => {
     const project = await Project.findOne({ _id: projectId, userId: req.user.userId });
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    let monitors = await Monitor.find({ projectId });
+    let monitors = await Monitor.find({ projectId }).lean();
     
     // Auto-create monitors if they don't exist for this project
     if (monitors.length === 0) {
-      const { createDefaultMonitors } = await import('../services/monitoring.service.js');
       try {
         await createDefaultMonitors(projectId);
-        monitors = await Monitor.find({ projectId });
+        monitors = await Monitor.find({ projectId }).lean();
       } catch (err) {
         console.error("Failed to auto-create monitors in summary:", err);
       }
@@ -172,7 +171,7 @@ export const getProjectMonitorSummary = async (req, res) => {
           lastCheckedAt: { $max: '$checkedAt' }
         }
       }
-    ]);
+    ]).allowDiskUse(true);
 
     const statsForType = (type) => {
       const typeMonitorIds = new Set(monitors.filter(m => m.type === type).map(m => m._id.toString()));
@@ -194,10 +193,13 @@ export const getProjectMonitorSummary = async (req, res) => {
       });
     };
 
-    const totalChecks = await MonitorCheck.countDocuments(rangeMatch);
+    // Derive total check count from the already-fetched aggregation
+    // instead of issuing a second countDocuments full-scan.
+    const totalChecks = statsByMonitor.reduce((sum, s) => sum + s.totalChecks, 0);
     const totalPages = Math.max(Math.ceil(totalChecks / limit), 1);
     const currentPage = Math.min(page, totalPages);
     const recentChecks = await MonitorCheck.find(rangeMatch)
+      .select('monitorId status checkedAt responseTimeMs statusCode')
       .sort({ checkedAt: -1 })
       .skip((currentPage - 1) * limit)
       .limit(limit)
@@ -242,7 +244,7 @@ export const getMonitorHistory = async (req, res) => {
     const project = await Project.findOne({ _id: projectId, userId: req.user.userId });
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    const monitors = await Monitor.find({ projectId });
+    const monitors = await Monitor.find({ projectId }).lean();
     if (monitors.length === 0) return res.json({ success: true, history: { frontend: [], backend: [] } });
 
     const { startDate, endDate, label } = getMonitorRange(timeRange);
@@ -253,9 +255,14 @@ export const getMonitorHistory = async (req, res) => {
       monitorId: { $in: monitorIds },
       checkedAt: { $gte: startDate, $lte: endDate }
     })
-    .sort({ checkedAt: 1 })
+    .select('monitorId status checkedAt responseTimeMs')
+    .sort({ checkedAt: -1 })
+    .limit(10000)
     .populate('monitorId', 'name type')
     .lean();
+
+    // Reverse to chronological order since we fetched descending to cap memory safely
+    checks.reverse();
 
     const history = {
       frontend: [],

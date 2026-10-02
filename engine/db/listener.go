@@ -38,6 +38,11 @@ func StartListener(ctx context.Context, dsn string, pool *pgxpool.Pool, wg *sync
     }
 }
 
+// notifySem limits concurrent processNotification goroutines.
+// During rapid bulk inserts, Postgres can fire thousands of NOTIFY events.
+// Each goroutine does a Postgres query; without a cap we'd exhaust the pool.
+var notifySem = make(chan struct{}, 32)
+
 func listenLoop(ctx context.Context, dsn string, pool *pgxpool.Pool) error {
     connConfig, err := pgx.ParseConfig(dsn)
     if err != nil { return err }
@@ -71,7 +76,19 @@ func listenLoop(ctx context.Context, dsn string, pool *pgxpool.Pool) error {
             }
             return err 
         }
-        processNotification(ctx, pool, notification.Payload)
+
+        payload := notification.Payload
+        // Acquire semaphore slot — non-blocking: drop if at capacity (backpressure).
+        // The periodic reconciliation loop (every 5min) will catch any missed events.
+        select {
+        case notifySem <- struct{}{}:
+            go func() {
+                defer func() { <-notifySem }()
+                processNotification(ctx, pool, payload)
+            }()
+        default:
+            log.Printf("WARN: notification worker pool full, dropping payload (reconciler will catch): %.80s", payload)
+        }
     }
 }
 
@@ -112,7 +129,9 @@ func processNotification(ctx context.Context, pool *pgxpool.Pool, payloadStr str
         Interval, Timeout        int
         IsPaused                 bool
     }
-    err := pool.QueryRow(ctx, query, id).Scan(&r.ID, &r.URL, &r.Interval, &r.Timeout, &r.Type, &r.IsPaused, &r.ManagedBy)
+    queryCtx, queryCancel := context.WithTimeout(ctx, 10*time.Second)
+    defer queryCancel()
+    err := pool.QueryRow(queryCtx, query, id).Scan(&r.ID, &r.URL, &r.Interval, &r.Timeout, &r.Type, &r.IsPaused, &r.ManagedBy)
     if err != nil {
         if err != pgx.ErrNoRows {
             log.Printf("Failed to fetch monitor %s: %v", id, err)

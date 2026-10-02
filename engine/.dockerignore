@@ -1,0 +1,20 @@
+# Logs & temp files
+*.log
+*.txt
+*.csv
+*.jsonl
+
+# Test output
+*_test_out*
+loadtest_*
+engine_logs*
+
+# IDE / OS
+.git
+.gemini
+.vscode
+*.swp
+*.tmp
+
+# Build artifacts (outside docker)
+uptime-engine
