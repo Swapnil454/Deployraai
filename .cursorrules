@@ -1,0 +1,4 @@
+# AI Agent Instructions for this Project
+
+- **Documentation & Walkthroughs:** Whenever you write an implementation plan, report, walkthrough, or architectural document, DO NOT place it in the root or in a generic artifacts directory. Instead, you MUST create it inside the `c:\mini Desktop\AI_Agents\algorithms` folder. 
+- **Subfolders:** You should create appropriate subfolders inside the `algorithms` folder (e.g., `algorithms/reports/`, `algorithms/plans/`, `algorithms/walkthroughs/`) for proper readability and organization.
