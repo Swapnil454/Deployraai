@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -109,6 +108,7 @@ func InitTLSConfig(monitorCount int) {
 var httpClient = &fasthttp.Client{
 	MaxConnsPerHost:     10000,
 	MaxIdleConnDuration: 2 * time.Second, // 2s trailing-ticket window, minimizes idle RAM
+	ReadTimeout:         10 * time.Second, // Phase 1 safe core backstop
 	// StreamResponseBody avoids buffering the full response before returning.
 	// Keyword monitors read from BodyStream() up to KeywordMaxBytes.
 	// Non-keyword monitors use HEAD/Range so SkipBody=true and no body is read.
@@ -249,7 +249,6 @@ func HandleFailure(id string, errClass ErrClass, cause string, firstError string
 	})
 
 	if ok {
-		// Route to Quorum State Machine
 		SubmitCheckResult(id, EventCheckResult{
 			Role:     RolePrimary,
 			PoP:      "pop-local",
@@ -289,7 +288,6 @@ func HandleSuccess(id string, latencyMs uint64) {
 	})
 
 	if ok {
-		// Route to Quorum State Machine
 		SubmitCheckResult(id, EventCheckResult{
 			Role:     RolePrimary,
 			PoP:      "pop-local",
@@ -429,6 +427,9 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 						res.SkipBody = true
 					}
 					req.Header.Set("User-Agent", "Uptime-Engine/1.0")
+					if m.Keyword != "" && compressionEnabledFor(m.ID) {
+						req.Header.Set("Accept-Encoding", AcceptEncoding)
+					}
 
 					var timeoutDuration time.Duration
 					if m.TimeoutMs > 0 {
@@ -484,22 +485,21 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 							limit := int(m.KeywordMaxBytes)
 							if limit <= 0 { limit = 65536 }
 							
-							var body []byte
-							if stream := res.BodyStream(); stream != nil {
-								buf := make([]byte, limit)
-								n, _ := io.ReadFull(stream, buf)
-								body = buf[:n]
-								// We don't drain the rest; fasthttp will close the underlying
-								// connection on ReleaseResponse if the stream isn't fully consumed.
-							} else {
-								body = res.Body()
-								if len(body) > limit { body = body[:limit] }
-							}
-							
-							if !bytes.Contains(body, []byte(m.Keyword)) {
+							br, rerr := ReadKeywordBody(res, limit)
+							canary := compressionEnabledFor(m.ID)
+							RecordBody(canary, br.Encoding, br.WireBytes, len(br.Body), br.WindowFull, rerr != nil)
+
+							switch {
+							case bytes.Contains(br.Body, []byte(m.Keyword)):
+								// present: valid even if the stream broke afterwards
+							case rerr != nil:
+								errClass = classifyBodyErr(rerr)
+								customMsg = fmt.Sprintf("body read error: %v", rerr)
+							default:
 								errClass = ErrKeyword
-								customMsg = fmt.Sprintf("keyword %q not found in first %d bytes", m.Keyword, len(body))
+								customMsg = fmt.Sprintf("keyword %q not found in first %d bytes", m.Keyword, len(br.Body))
 							}
+							br.Release()
 						}
 					}
 					fasthttp.ReleaseRequest(req)
