@@ -51,7 +51,7 @@ func btCompress(t *testing.T, kind string, data []byte) []byte {
 	case "br":
 		w = brotli.NewWriter(&buf)
 	case "zstd":
-		w, err = zstd.NewWriter(&buf)
+		w, err = zstd.NewWriter(&buf, zstd.WithWindowSize(zstdMaxWin), zstd.WithEncoderConcurrency(1))
 	default:
 		t.Fatalf("unknown kind %q", kind)
 	}
