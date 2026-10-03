@@ -31,16 +31,16 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// AcceptEncoding matches what current Chrome sends. Because we advertise
-// deflate, the decoder registry below must support it.
-const AcceptEncoding = "gzip, deflate, br, zstd"
+// AcceptEncoding matches what current Chrome sends without zstd for initial canary.
+// zstd decoder remains active for unsolicited Content-Encoding: zstd responses.
+const AcceptEncoding = "gzip, deflate, br"
 
 const (
 	wireFactor   = 4         // wire cap = limit*wireFactor + wireSlack
 	wireSlack    = 256 << 10 // headroom for small/incompressible bodies
 	maxPooledBuf = 1 << 20   // don't pin huge buffers in the pool
-	zstdMaxWin   = 8 << 20   // RFC 9659 cap for the HTTP "zstd" coding
-	zstdPoolSize = 64
+	zstdMaxWin   = 2 << 20   // Capped at 2 MB to prevent memory bloat from hostile 8 MB zstd windows
+	zstdPoolSize = 16        // Reduced idle retention cap to ~40 MB
 )
 
 var (
