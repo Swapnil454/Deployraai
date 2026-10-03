@@ -15,6 +15,7 @@ import (
 	"net"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -221,4 +222,43 @@ func TestChunkedTruncationGap(t *testing.T) {
 	// To reproduce: serve a chunked HTTP/1.1 body that closes the connection
 	// mid-stream (without a 0-length terminating chunk) and assert that
 	// ReadKeywordBody returns errBodyTruncated rather than nil.
+}
+
+// TestConcurrentRealServerReadKeywordBody runs high-concurrency requests through real
+// HTTP listeners with pooled decoders and verifies br.Release() and br.Body under -race.
+func TestConcurrentRealServerReadKeywordBody(t *testing.T) {
+	url := btServe(t, func(c net.Conn, done <-chan struct{}) {
+		resp := "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 26\r\n\r\n<html>Keyword Match</html>"
+		_, _ = c.Write([]byte(resp))
+	})
+
+	const concurrency = 20
+	const requestsPerWorker = 50
+
+	var doneWg sync.WaitGroup
+	doneWg.Add(concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			defer doneWg.Done()
+			client := &fasthttp.Client{StreamResponseBody: true, ReadTimeout: 5 * time.Second}
+			for j := 0; j < requestsPerWorker; j++ {
+				req := fasthttp.AcquireRequest()
+				res := fasthttp.AcquireResponse()
+				req.SetRequestURI(url)
+				req.Header.Set("Accept-Encoding", AcceptEncoding)
+
+				if err := client.Do(req, res); err == nil {
+					br, rerr := ReadKeywordBody(res, 65536)
+					if rerr == nil && !bytes.Contains(br.Body, []byte("Keyword Match")) {
+						t.Errorf("expected Keyword Match in body")
+					}
+					br.Release()
+				}
+				fasthttp.ReleaseRequest(req)
+				fasthttp.ReleaseResponse(res)
+			}
+		}()
+	}
+	doneWg.Wait()
 }
