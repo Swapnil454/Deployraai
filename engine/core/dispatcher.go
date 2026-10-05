@@ -116,7 +116,7 @@ var dnsCacheMode = os.Getenv("ENGINE_DNS_CACHE") // "off", "shadow", "on"
 func newHTTPClient(d *CachedDialer, tlsCfg *tls.Config) *fasthttp.Client {
 	return &fasthttp.Client{
 		MaxConnsPerHost:     10000,
-		MaxIdleConnDuration: 2 * time.Second, // 2s trailing-ticket window, minimizes idle RAM
+		MaxIdleConnDuration: 35 * time.Second, // 35s window enables keep-alive reuse across 30s check cycles
 		ReadTimeout:         10 * time.Second, // Phase 1 safe core backstop
 		ReadBufferSize:      16384,            // Support large headers up to 16KB without error
 		WriteBufferSize:     8192,
@@ -129,8 +129,8 @@ func newHTTPClient(d *CachedDialer, tlsCfg *tls.Config) *fasthttp.Client {
 func InitHTTPClients(monitorCount int) {
 	tlsInitOnce.Do(func() {
 		cacheSize := monitorCount + (monitorCount / 10) // 10% headroom to prevent thrashing while saving RAM
-		if cacheSize < 50000 {
-			cacheSize = 50000
+		if cacheSize < 100000 {
+			cacheSize = 100000
 		}
 		cache := &instrumentedSessionCache{cache: tls.NewLRUClientSessionCache(cacheSize)}
 
