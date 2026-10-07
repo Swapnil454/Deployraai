@@ -4,14 +4,20 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/netip"
 	"os"
+	"runtime"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +30,38 @@ var (
 	sessionCacheMisses int64
 	sessionCachePuts   int64
 )
+
+var dialingGoroutines sync.Map // map[uint64]*bool
+
+func getGID() uint64 {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	str := strings.TrimPrefix(string(buf[:n]), "goroutine ")
+	idx := strings.IndexByte(str, ' ')
+	if idx > 0 {
+		id, _ := strconv.ParseUint(str[:idx], 10, 64)
+		return id
+	}
+	return 0
+}
+
+func setGoroutineDialing(dialed *bool) uint64 {
+	gid := getGID()
+	dialingGoroutines.Store(gid, dialed)
+	return gid
+}
+
+func clearGoroutineDialing(gid uint64) {
+	dialingGoroutines.Delete(gid)
+}
+
+func markGoroutineDialed() {
+	gid := getGID()
+	if v, ok := dialingGoroutines.Load(gid); ok {
+		ptr := v.(*bool)
+		*ptr = true
+	}
+}
 
 type instrumentedSessionCache struct {
 	cache tls.ClientSessionCache
@@ -44,7 +82,16 @@ func (c *instrumentedSessionCache) Put(sessionKey string, cs *tls.ClientSessionS
 	c.cache.Put(sessionKey, cs)
 }
 
+var globalDNSSem = make(chan struct{}, 100)
+
 func resolveHostForDNSCache(ctx context.Context, host string) ([]netip.Addr, error) {
+	select {
+	case globalDNSSem <- struct{}{}:
+		defer func() { <-globalDNSSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
 	ips, err := resolveHost(ctx, host)
 	if err != nil {
 		return nil, err
@@ -90,6 +137,7 @@ var (
 		Shadow          *fasthttp.Client
 		CachedClassical *fasthttp.Client
 		FreshClassical  *fasthttp.Client
+		FullPhase       *fasthttp.Client
 	}
 	tlsInitOnce sync.Once
 )
@@ -100,6 +148,7 @@ func InitTLSConfig(monitorCount int) {
 
 func guardedDial(d *CachedDialer) fasthttp.DialFunc {
 	return func(addr string) (net.Conn, error) {
+		markGoroutineDialed()
 		host, _, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, err
@@ -115,23 +164,57 @@ var dnsCacheMode = os.Getenv("ENGINE_DNS_CACHE") // "off", "shadow", "on"
 
 func newHTTPClient(d *CachedDialer, tlsCfg *tls.Config) *fasthttp.Client {
 	return &fasthttp.Client{
-		MaxConnsPerHost:     10000,
-		MaxIdleConnDuration: 35 * time.Second, // 35s window enables keep-alive reuse across 30s check cycles
-		ReadTimeout:         10 * time.Second, // Phase 1 safe core backstop
-		ReadBufferSize:      16384,            // Support large headers up to 16KB without error
-		WriteBufferSize:     8192,
-		StreamResponseBody:  true,
-		TLSConfig:           tlsCfg,
-		Dial:                guardedDial(d),
+		MaxConnsPerHost:           10000,
+		MaxIdleConnDuration:       90 * time.Second, // 90s window enables keep-alive reuse across 30s check cycles
+		MaxIdemponentCallAttempts: 1,                // Explicit retry managed by engine to track warm vs fresh failures
+		ReadTimeout:               10 * time.Second, // Phase 1 safe core backstop
+		ReadBufferSize:            16384,            // Support large headers up to 16KB without error
+		WriteBufferSize:           8192,
+		StreamResponseBody:        true,
+		TLSConfig:                 tlsCfg,
+		Dial:                      guardedDial(d),
 	}
+}
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, fasthttp.ErrTimeout) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "timeout")
+}
+
+// isStaleSocketError returns true if an HTTP check failed due to a server-side idle socket closure.
+func isStaleSocketError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, fasthttp.ErrConnectionClosed) {
+		return true
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "connection reset by peer") ||
+		strings.Contains(errStr, "forcibly closed by the remote host") ||
+		strings.Contains(errStr, "use of closed network connection") ||
+		strings.Contains(errStr, "closed connection") ||
+		strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "wsarecv") ||
+		strings.Contains(errStr, "wsasend")
 }
 
 func InitHTTPClients(monitorCount int) {
 	tlsInitOnce.Do(func() {
-		cacheSize := monitorCount + (monitorCount / 10) // 10% headroom to prevent thrashing while saving RAM
-		if cacheSize < 100000 {
-			cacheSize = 100000
+		if monitorCount <= 0 {
+			Store.Mu.RLock()
+			monitorCount = len(Store.Monitors)
+			Store.Mu.RUnlock()
 		}
+		if monitorCount < 100000 {
+			monitorCount = 100000
+		}
+		cacheSize := monitorCount + (monitorCount / 10) // 10% headroom to prevent thrashing while saving RAM
 		cache := &instrumentedSessionCache{cache: tls.NewLRUClientSessionCache(cacheSize)}
 
 		// Cohort 0 (Default)
@@ -151,18 +234,46 @@ func InitHTTPClients(monitorCount int) {
 		HTTPClients.Shadow = newHTTPClient(shadowDialer, globalTLSConfig)
 		HTTPClients.CachedClassical = newHTTPClient(cachedDialerClassical, cc)
 		HTTPClients.FreshClassical = newHTTPClient(freshDialerClassical, cc)
+
+		fullPhaseTLSConfig := &tls.Config{
+			ClientSessionCache: nil, // Force full handshake to extract peer certs without ticket resumption
+			InsecureSkipVerify: TLSInsecureSkipVerify,
+		}
+		HTTPClients.FullPhase = &fasthttp.Client{
+			MaxConnsPerHost:     10000,
+			MaxIdleConnDuration: 1 * time.Nanosecond, // Explicit short idle duration so sockets are never pooled
+			ReadTimeout:         10 * time.Second,
+			ReadBufferSize:      16384,
+			WriteBufferSize:     8192,
+			StreamResponseBody:  true,
+			TLSConfig:           fullPhaseTLSConfig,
+			Dial:                guardedDial(freshDialer),
+		}
 	})
 }
 
-func GetHTTPClient(m *Monitor, monKey uint64) *fasthttp.Client {
-	if HTTPClients.Cached == nil {
-		InitHTTPClients(50000)
+func isFullPhaseNeeded(m *Monitor, now time.Time) bool {
+	monKey := MonitorKey(m.ID)
+	if m.FullPhaseInterval <= 0 {
+		m.FullPhaseInterval = GetFullPhaseInterval(monKey, m.FullPhaseCount)
 	}
+	if m.LastFullPhaseAt.IsZero() {
+		h64 := Splitmix64(monKey ^ 0x9e3779b97f4a7c15)
+		offsetSec := time.Duration(h64 % uint64(m.FullPhaseInterval.Seconds())) * time.Second
+		m.LastFullPhaseAt = now.Add(-offsetSec)
+	}
+	return !now.Before(m.LastFullPhaseAt.Add(m.FullPhaseInterval))
+}
+
+func GetHTTPClient(m *Monitor, monKey uint64) *fasthttp.Client {
+	InitHTTPClients(0)
 
 	useClassical := isClassicalCohortEnabled(monKey) && !hasCredentials(m)
-	useFresh := (m.ConsecutiveFails > 0) || (dnsCacheMode != "on" && dnsCacheMode != "shadow")
+	useFresh := (m.ConsecutiveFails > 0) || dnsCacheMode == "off"
 
 	switch {
+	case isFullPhaseNeeded(m, time.Now()):
+		return HTTPClients.FullPhase
 	case useFresh && useClassical:
 		return HTTPClients.FreshClassical
 	case useFresh:
@@ -291,14 +402,27 @@ func deliverOrSpool(evt IncidentEvent) {
 	log.Printf("[WARN] IncidentQueue full, spooling event for %s (spool size: %d)", evt.ID, len(incidentSpool))
 }
 
+type ProbeMeta struct {
+	ProbeKind      uint8 // 0=scheduled, 1=verification (5s recheck)
+	PhaseKind      uint8 // 0=warm, 1=full, 2=warm_retry
+	Attempts       uint8 // 1 or 2
+	TotalLatencyUs uint32
+	Reused         uint8 // 0=new, 1=reused
+	DidResume      uint8 // 0=full, 1=resumed
+	ReqMethod      uint8
+	ReqScheme      uint8
+}
+
 func HandleFailure(id string, p *atomic.Pointer[Monitor], errClass ErrClass, cause string, firstError string) {
+	HandleFailureDetailed(id, p, errClass, cause, firstError, ProbeMeta{})
+}
+
+func HandleFailureDetailed(id string, p *atomic.Pointer[Monitor], errClass ErrClass, cause string, firstError string, meta ProbeMeta) {
 	var updated *Monitor
 	var ok bool
 	mutate := func(m *Monitor) {
-		if !m.AwaitingResult {
-			return // Already resolved since snapshot. Idempotency lock.
-		}
 		m.AwaitingResult = false
+		m.LastStatus = "DOWN"
 		m.ChecksTotal++
 
 		// Confidence decay
@@ -320,7 +444,7 @@ func HandleFailure(id string, p *atomic.Pointer[Monitor], errClass ErrClass, cau
 		_, updated, ok = Store.UpdateRuntime(id, mutate)
 	}
 
-	if ok && updated.AwaitingResult == false {
+	if ok {
 		SubmitCheckResult(id, EventCheckResult{
 			Role:     RolePrimary,
 			PoP:      "pop-local",
@@ -330,13 +454,21 @@ func HandleFailure(id string, p *atomic.Pointer[Monitor], errClass ErrClass, cau
 		})
 
 		Emit(Sample{
-			MonitorID: updated.ParsedUUID,
-			TsMs:      time.Now().UnixMilli(),
-			LatencyUs: 0,
-			IntervalS: uint16(updated.CurrentInterval),
-			Status:    0,
-			Err:       1, // Timeout/Failure
-			Kind:      typeToKind(updated.Type),
+			MonitorID:      updated.ParsedUUID,
+			TsMs:           time.Now().UnixMilli(),
+			LatencyUs:      0,
+			IntervalS:      uint16(updated.CurrentInterval),
+			Status:         0,
+			Err:            1, // Timeout/Failure
+			Kind:           typeToKind(updated.Type),
+			ProbeKind:      meta.ProbeKind,
+			PhaseKind:      meta.PhaseKind,
+			Attempts:       meta.Attempts,
+			TotalLatencyUs: meta.TotalLatencyUs,
+			Reused:         meta.Reused,
+			DidResume:      meta.DidResume,
+			ReqMethod:      meta.ReqMethod,
+			ReqScheme:      meta.ReqScheme,
 		})
 	}
 }
@@ -356,17 +488,19 @@ func typeToKind(mType string) uint8 {
 	}
 }
 
-func HandleSuccess(id string, p *atomic.Pointer[Monitor], latencyMs uint64) {
+func HandleSuccess(id string, p *atomic.Pointer[Monitor], latencyUs uint32) {
+	HandleSuccessDetailed(id, p, latencyUs, ProbeMeta{})
+}
+
+func HandleSuccessDetailed(id string, p *atomic.Pointer[Monitor], latencyUs uint32, meta ProbeMeta) {
 	var updated *Monitor
 	var ok bool
 	mutate := func(m *Monitor) {
-		if !m.AwaitingResult {
-			return
-		}
 		m.AwaitingResult = false
+		m.LastStatus = "UP"
 		m.ChecksTotal++
 		m.ChecksOK++
-		m.LatencySumMs += latencyMs
+		m.LatencySumMs += uint64(latencyUs / 1000)
 		
 		if m.ConfidenceScore < 100.0 {
 			m.ConfidenceScore += 1.0 // Earn trust
@@ -392,14 +526,31 @@ func HandleSuccess(id string, p *atomic.Pointer[Monitor], latencyMs uint64) {
 			ErrClass: ErrNone,
 		})
 
+		totLatUs := meta.TotalLatencyUs
+		if totLatUs == 0 {
+			totLatUs = latencyUs
+		}
+		attempts := meta.Attempts
+		if attempts == 0 {
+			attempts = 1
+		}
+
 		Emit(Sample{
-			MonitorID: updated.ParsedUUID,
-			TsMs:      time.Now().UnixMilli(),
-			LatencyUs: uint32(latencyMs * 1000), // convert ms to us
-			IntervalS: uint16(updated.CurrentInterval),
-			Status:    1,
-			Err:       0,
-			Kind:      typeToKind(updated.Type),
+			MonitorID:      updated.ParsedUUID,
+			TsMs:           time.Now().UnixMilli(),
+			LatencyUs:      latencyUs,
+			IntervalS:      uint16(updated.CurrentInterval),
+			Status:         1,
+			Err:            0,
+			Kind:           typeToKind(updated.Type),
+			ProbeKind:      meta.ProbeKind,
+			PhaseKind:      meta.PhaseKind,
+			Attempts:       attempts,
+			TotalLatencyUs: totLatUs,
+			Reused:         meta.Reused,
+			DidResume:      meta.DidResume,
+			ReqMethod:      meta.ReqMethod,
+			ReqScheme:      meta.ReqScheme,
 		})
 	}
 }
@@ -525,18 +676,31 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 				start := time.Now()
 				statusCode := 0
 
+				var isFullPhase bool
+				var probeKind = "warm"
+				var reused bool
+				var didResumeVal uint8
+				var reqMethod uint8 = 2 // 2=OTHER
+				var reqScheme uint8 = 0
+
 				// Protocol multiplexer
 				if m.Type == "http" || m.Type == "keyword" || m.Type == "api" {
 					req := fasthttp.AcquireRequest()
 					res := fasthttp.AcquireResponse()
 					req.SetRequestURI(m.URL)
 
+					if strings.HasPrefix(m.URL, "https://") {
+						reqScheme = 1 // 1=HTTPS
+					}
+
 					if m.ForceGET || m.Keyword != "" {
 						req.Header.SetMethod("GET")
 						res.SkipBody = (m.Keyword == "")
+						reqMethod = 1 // 1=GET
 					} else {
 						req.Header.SetMethod("HEAD") // Save bandwidth
 						res.SkipBody = true
+						reqMethod = 0 // 0=HEAD
 					}
 					req.Header.Set("User-Agent", "Uptime-Engine/1.0")
 					if m.Keyword != "" && compressionEnabledFor(m.ID) {
@@ -562,10 +726,28 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 					}
 
 					client := GetHTTPClient(m, monKey)
+					parsedHost := ExtractHost(m.URL)
+					isFullPhase = isFullPhaseNeeded(m, time.Now())
+					if isFullPhase {
+						probeKind = "full"
+						req.SetConnectionClose()
+					} else if globalHostReconnectTracker.ShouldForceReconnect(parsedHost) || m.NoKeepAlive {
+						req.SetConnectionClose()
+					}
+
+					var dialed bool
+					gid := setGoroutineDialing(&dialed)
 					start = time.Now()
 					err = client.DoTimeout(req, res, timeoutDuration)
-					latency = uint64(time.Since(start).Milliseconds())
+					clearGoroutineDialing(gid)
+					elapsed := time.Since(start)
+					latency = uint64(elapsed.Microseconds())
 					statusCode = res.StatusCode()
+					reused = !dialed
+					if !reused && !isFullPhase {
+						didResumeVal = 1 // warm new connection uses TLS session resumption
+					}
+
 
 					// HEAD→405/501: server doesn't support HEAD. Learn it per-monitor so
 					// we don't retry HEAD every interval. Use Range to avoid downloading
@@ -573,13 +755,61 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 					if err == nil && !m.ForceGET && m.Keyword == "" && (statusCode == 405 || statusCode == 501) {
 						Store.UpdateRuntime(m.ID, func(mon *Monitor) { mon.ForceGET = true })
 						req.Header.SetMethod("GET")
+						reqMethod = 1 // 1=GET
 						req.Header.Set("Range", "bytes=0-0") // avoid body download on learned-GET
 						res.SkipBody = true
+						var rDialed bool
+						rgid := setGoroutineDialing(&rDialed)
 						start = time.Now()
 						err = client.DoTimeout(req, res, timeoutDuration)
-						latency = uint64(time.Since(start).Milliseconds())
+						clearGoroutineDialing(rgid)
+						latency = uint64(time.Since(start).Microseconds())
 						statusCode = res.StatusCode()
 					}
+
+					// Explicit single retry on fresh connection ONLY when failure occurs on a warm reused socket
+					// AND remaining budget > 200ms
+					remainingBudget := timeoutDuration - elapsed
+					if err != nil && reused && remainingBudget > 200*time.Millisecond && (isStaleSocketError(err) || isTimeoutError(err)) {
+						req.SetConnectionClose()
+						var retryDialed bool
+						rgid := setGoroutineDialing(&retryDialed)
+						rstart := time.Now()
+						retryErr := client.DoTimeout(req, res, remainingBudget)
+						clearGoroutineDialing(rgid)
+						rElapsed := time.Since(rstart)
+						latency = uint64((elapsed + rElapsed).Microseconds())
+
+						if retryErr == nil {
+							err = nil
+							statusCode = res.StatusCode()
+							_ = probeKind
+							probeKind = "warm_retry"
+							CASUpdate(p, func(mon *Monitor) {
+								mon.StaleSocketCount++
+								if mon.StaleSocketCount >= 3 {
+									mon.NoKeepAlive = true
+								}
+							})
+						} else {
+							err = fmt.Errorf("warm_err: %v | retry_err: %v", err, retryErr)
+							if res.StatusCode() > 0 {
+								statusCode = res.StatusCode()
+							}
+						}
+					}
+
+					CASUpdate(p, func(mon *Monitor) {
+						mon.CheckCounter++
+						if isFullPhase {
+							mon.FullPhaseCount++
+							mon.LastFullPhaseAt = time.Now()
+							mon.FullPhaseInterval = GetFullPhaseInterval(monKey, mon.FullPhaseCount)
+						}
+						if err == nil && reused && statusCode >= 200 && statusCode < 400 {
+							mon.StaleSocketCount = 0
+						}
+					})
 
 					dispatchLag := time.Since(m.NextCheckAt)
 					select {
@@ -635,6 +865,14 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 							br.Release()
 						}
 					}
+					
+					// MUST force close the connection and stream if we didn't fully consume it,
+					// otherwise fasthttp connection pool blocks forever.
+					if res.IsBodyStream() {
+						res.SetConnectionClose()
+						_ = res.CloseBodyStream()
+					}
+					
 					fasthttp.ReleaseRequest(req)
 					fasthttp.ReleaseResponse(res)
 
@@ -642,45 +880,78 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 					// Non-HTTP Protocols (Ping, Port, DNS, UDP, Heartbeat)
 					// Simulate network latency (20-100ms)
 					time.Sleep(2 * time.Millisecond) // loadtest: reduced from 50ms to free CPU
-					latency = uint64(time.Since(start).Milliseconds())
+					latency = uint64(time.Since(start).Microseconds())
 					
 					// For loadtest purposes, we consider them successful unless they are explicitly seeded as down.
 					// Since we don't have endpoints for these, we mock success here.
 					errClass = ErrNone
 				}
 
+				probeKindVal := uint8(0)
+				if m.ConsecutiveFails > 0 {
+					probeKindVal = 1
+				}
+
+				phaseKindVal := uint8(0)
+				if isFullPhase {
+					phaseKindVal = 1
+				} else if probeKind == "warm_retry" {
+					phaseKindVal = 2
+				}
+
+				attemptsVal := uint8(1)
+				if probeKind == "warm_retry" {
+					attemptsVal = 2
+				}
+
+				reusedVal := uint8(0)
+				if reused {
+					reusedVal = 1
+				}
+
+				meta := ProbeMeta{
+					ProbeKind:      probeKindVal,
+					PhaseKind:      phaseKindVal,
+					Attempts:       attemptsVal,
+					TotalLatencyUs: uint32(latency),
+					Reused:         reusedVal,
+					DidResume:      didResumeVal,
+					ReqMethod:      reqMethod,
+					ReqScheme:      reqScheme,
+				}
+
 				if errClass == ErrNone {
-						HandleSuccess(m.ID, p, latency)
-					} else {
-						if m.Keyword != "" {
-							ResetValidatorBaseline(MonitorKey(m.ID))
-						}
-						cause := "HTTP Check Failed"
-						msg := "Unknown error"
-						if customMsg != "" {
-							msg = customMsg
-						} else if err != nil {
-							msg = err.Error()
-						} else {
-							msg = fmt.Sprintf("HTTP %d", statusCode)
-						}
-						
-						// Debug: log first 20 HTTP errors
-						if atomic.AddInt32(&httpErrorCount, 1) <= 20 {
-							log.Printf("[DEBUG] HTTP Check Failed for %s: %s", m.URL, msg)
-						}
-						
-						HandleFailure(m.ID, p, errClass, cause, msg)
+					HandleSuccessDetailed(m.ID, p, uint32(latency), meta)
+				} else {
+					if m.Keyword != "" {
+						ResetValidatorBaseline(MonitorKey(m.ID))
 					}
+					cause := "HTTP Check Failed"
+					msg := "Unknown error"
+					if customMsg != "" {
+						msg = customMsg
+					} else if err != nil {
+						msg = err.Error()
+					} else {
+						msg = fmt.Sprintf("HTTP %d", statusCode)
+					}
+					
+					// Debug: log first 20 HTTP errors
+					if atomic.AddInt32(&httpErrorCount, 1) <= 20 {
+						log.Printf("[DEBUG] HTTP Check Failed for %s: %s", m.URL, msg)
+					}
+					
+					HandleFailureDetailed(m.ID, p, errClass, cause, msg, meta)
 				}
 			}
-		}()
-	}
+		}
+	}()
+}
 }
 
 var httpErrorCount int32
 
-func MasterDispatcher(ctx context.Context, wg *sync.WaitGroup, httpJobs chan<- DispatchJob) {
+func MasterDispatcher(ctx context.Context, wg *sync.WaitGroup, httpJobs chan<- DispatchJob, netJobs chan<- DispatchJob) {
 	defer wg.Done()
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -717,14 +988,25 @@ func MasterDispatcher(ctx context.Context, wg *sync.WaitGroup, httpJobs chan<- D
 					// If Engine B is disabled, let it fall through to Engine A (StartWorkers)
 				}
 
-				select {
-				case httpJobs <- item:
-				default:
-					// Queue saturated. Revert claim so we don't trigger a false timeout.
-					CASUpdate(item.ptr, func(mon *Monitor) {
-						mon.AwaitingResult = false
-					})
-					log.Printf("HTTP queue full, skipping %s this tick", item.m.ID)
+				if item.m.Type == "http" || item.m.Type == "keyword" || item.m.Type == "api" {
+					select {
+					case httpJobs <- item:
+					default:
+						// Queue saturated. Revert claim so we don't trigger a false timeout.
+						CASUpdate(item.ptr, func(mon *Monitor) {
+							mon.AwaitingResult = false
+						})
+						log.Printf("HTTP queue full, skipping %s this tick", item.m.ID)
+					}
+				} else {
+					select {
+					case netJobs <- item:
+					default:
+						CASUpdate(item.ptr, func(mon *Monitor) {
+							mon.AwaitingResult = false
+						})
+						log.Printf("Net queue full, skipping %s this tick", item.m.ID)
+					}
 				}
 			}
 		}

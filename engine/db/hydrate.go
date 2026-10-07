@@ -82,10 +82,10 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
         }
     }
 
-    // Before entering Lock(): identify new rows and allocate ports for them outside any Store.Mu lock.
+    // Before entering Lock(): identify new rows and allocate ports for ping/port monitors outside any Store.Mu lock.
     preAllocated := make(map[string]int)
     for _, r := range fresh {
-        if _, ok := existing[r.ID]; !ok && r.Type != "http" {
+        if _, ok := existing[r.ID]; !ok && (r.Type == "ping" || r.Type == "port") {
             if port, ok := core.PortAllocator.Allocate(r.ID); ok {
                 preAllocated[r.ID] = port
             } else {
@@ -148,12 +148,22 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
             offset := time.Duration(h.Sum32() % uint32(m.CurrentInterval)) * time.Second
             m.NextCheckAt = time.Now().Add(offset)
 
+            monKey := core.MonitorKey(r.ID)
+            interval := core.GetFullPhaseInterval(monKey, 0)
+            h64 := core.Splitmix64(monKey ^ 0x9e3779b97f4a7c15)
+            offsetSec := time.Duration(h64 % uint64(interval.Seconds())) * time.Second
+            m.LastFullPhaseAt = time.Now().Add(-offsetSec)
+            m.FullPhaseInterval = interval
+
             if port, ok := preAllocated[r.ID]; ok {
                 m.AssignedPort = port
             }
             ptr := new(atomic.Pointer[core.Monitor])
             ptr.Store(m)
             core.Store.Monitors[r.ID] = ptr
+            if m.Type != "http" && m.Type != "keyword" && m.Type != "api" {
+                go core.ResolveTargetIP(ptr)
+            }
         } else if port, ok := preAllocated[r.ID]; ok {
             core.PortAllocator.Deallocate(port)
         }

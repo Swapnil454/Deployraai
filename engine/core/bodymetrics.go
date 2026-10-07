@@ -123,6 +123,22 @@ func flushBodyStats() {
 			)
 		}
 	}
+	snap := SnapshotValidators(time.Now())
+	pairs := snap.StablePairs + snap.ChangedPairs
+	log.Printf("[BODY_STATS] validators n=%d | ETag %.1f%% (weak %.1f%%) | LM %.1f%% (usable %.1f%%) | stable-pairs %.1f%% (of %d pairs) | projected-byte-savings %.1f%% | eligible-monitors %d/%d | window %v | Stage4 gate: %s",
+		snap.Checked,
+		pct(snap.ETag, snap.Checked),
+		pct(snap.ETagWeak, snap.Checked),
+		pct(snap.LM, snap.Checked),
+		pct(snap.LMUsable, snap.Checked),
+		pct(snap.StablePairs, pairs),
+		pairs,
+		pct(snap.BytesSaveable, snap.Bytes),
+		snap.EligibleMonitors,
+		snap.Monitors,
+		snap.Window.Round(time.Second),
+		snap.Verdict(),
+	)
 }
 
 // StartAdminServer binds a hardened HTTP server on addr for runtime config.

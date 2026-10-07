@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"net"
 	"testing"
-	"time"
 )
 
 // btServeBody spins up a raw TCP server that serves a single response with the
@@ -39,7 +38,7 @@ func btServeBody(t *testing.T, encoding string, body []byte) string {
 // here because WireBytes (64 KB) < ContentLength (300 KB).
 func TestLargeIdentityBodyIsNotTruncated(t *testing.T) {
 	body := btRandom(300 << 10) // 300 KB > 64 KB window
-	res, err := btDo(btServeBody(t, "", body), 3*time.Second)
+	res, err := btDo(btServeBody(t, "", body))
 	if err != nil {
 		t.Fatalf("unexpected transport error: %v", err)
 	}
@@ -65,7 +64,7 @@ func TestLargeIdentityBodyIsNotTruncated(t *testing.T) {
 // intent explicitly.
 func TestLargeCompressedBodyIsNotTruncated(t *testing.T) {
 	wire := btCompress(t, "gzip", btRandom(300<<10))
-	res, err := btDo(btServeBody(t, "gzip", wire), 3*time.Second)
+	res, err := btDo(btServeBody(t, "gzip", wire))
 	if err != nil {
 		t.Fatalf("unexpected transport error: %v", err)
 	}
@@ -84,7 +83,7 @@ func TestLargeCompressedBodyIsNotTruncated(t *testing.T) {
 // sent in full should return no error and the complete body.
 func TestSmallIdentityBodyCompleteIsClean(t *testing.T) {
 	body := []byte("<html>HEALTHY</html>")
-	res, err := btDo(btServeBody(t, "", body), 3*time.Second)
+	res, err := btDo(btServeBody(t, "", body))
 	if err != nil {
 		t.Fatalf("unexpected transport error: %v", err)
 	}

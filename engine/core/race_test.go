@@ -71,9 +71,9 @@ func TestCoreRace(t *testing.T) {
 				})
 				
 				if j%2 == 0 {
-					HandleSuccess(id, uint64(j%100))
+					HandleSuccess(id, nil, uint32(j%100))
 				} else {
-					HandleFailure(id, ErrTimeout, "Test cause", "Test msg")
+					HandleFailure(id, nil, ErrTimeout, "Test cause", "Test msg")
 				}
 			}
 		}()

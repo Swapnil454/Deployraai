@@ -33,11 +33,15 @@ services:
       - DATABASE_URL_DIRECT=postgresql://engine:password@db:5432/engine_test?sslmode=disable
       - DATABASE_URL_POOLED=postgresql://engine:password@db:5432/engine_test?sslmode=disable
       - HTTP_WORKERS=1700
-      - ENABLE_ENGINE_B=true
+      - ENABLE_ENGINE_B=false
+      - COMPRESSION_PERCENT=0
+      - ADMIN_TOKEN=canary-secret-token-12345
+      - ADMIN_ADDR=0.0.0.0:9101
       - GOMEMLIMIT=900MiB
       - GOMAXPROCS=4
     ports:
       - "6060:6060"
+      - "9101:9101"
     privileged: true
     depends_on:
       db:

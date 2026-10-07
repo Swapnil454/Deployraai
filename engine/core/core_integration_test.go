@@ -11,11 +11,48 @@ func TestShutdownTimeoutSpoolDrain(t *testing.T) {
 	// Initialize subsystems properly
 	InitTLSConfig(100)
 	
+	// Drain any leftover events from previous tests
+	for {
+		select {
+		case <-IncidentQueue:
+		default:
+			goto DRAINED
+		}
+	}
+DRAINED:
+	incidentSpoolMu.Lock()
+	incidentSpool = incidentSpool[:0]
+	incidentSpoolMu.Unlock()
+
+	// Start background consumer for IncidentQueue so it never fills up
+	drainedEvts := make(chan IncidentEvent, 10000)
+	stopConsumer := make(chan struct{})
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		for {
+			select {
+			case <-stopConsumer:
+				for {
+					select {
+					case evt := <-IncidentQueue:
+						drainedEvts <- evt
+					default:
+						return
+					}
+				}
+			case evt := <-IncidentQueue:
+				drainedEvts <- evt
+			}
+		}
+	}()
+
 	// Create context that we will cancel to trigger shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	
-	// Start the confirmation dispatcher which owns the spool drain
+	// Reset & Start the confirmation dispatcher which owns the spool drain
+	ResetConfirmationDispatcherForTest()
 	StartConfirmationDispatcher(ctx, &wg, 4)
 	
 	// Temporarily redirect IncidentQueue to a test queue so we can observe spool drains
@@ -29,18 +66,21 @@ func TestShutdownTimeoutSpoolDrain(t *testing.T) {
 	
 	// Cancel context to trigger final flush
 	cancel()
-	
-	// Wait for shutdown to complete
 	wg.Wait()
-	
-	// The shutdown must have drained the spool into IncidentQueue
-	select {
-	case evt := <-IncidentQueue:
-		if evt.ID != "test-spool-shutdown" {
-			t.Errorf("expected test-spool-shutdown, got %s", evt.ID)
+	close(stopConsumer)
+	<-consumerDone
+
+	// Verify test-spool-shutdown was delivered to drainedEvts
+	found := false
+	for len(drainedEvts) > 0 {
+		evt := <-drainedEvts
+		if evt.ID == "test-spool-shutdown" {
+			found = true
+			break
 		}
-		default:
-		t.Error("spool was not flushed into IncidentQueue on shutdown")
+	}
+	if !found {
+		t.Error("spool event test-spool-shutdown was not found in drainedEvts on shutdown")
 	}
 }
 

@@ -35,7 +35,7 @@ func StartEBPFReader(ctx context.Context, wg *sync.WaitGroup) error {
 				core.Store.Mu.RUnlock()
 
 				for _, id := range due {
-					core.HandleSuccess(id, 20) // Simulate ~20ms latency
+					core.HandleSuccess(id, nil, 20) // Simulate ~20ms latency
 				}
 			}
 		}

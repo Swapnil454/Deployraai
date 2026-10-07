@@ -1,0 +1,111 @@
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Brutal Soak — Production-equivalent test environment
+# 8 monitor types × equal split × 30s interval × 50 minutes
+# Infrastructure: Postgres (state) + ClickHouse (raw telemetry) + Mock Farm
+# ══════════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── Postgres (operational state: monitors, incidents, daily metrics) ──────
+  db:
+    image: postgres:15-alpine
+    container_name: brutal-db
+    environment:
+      POSTGRES_USER: engine
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: engine_test
+    volumes:
+      - ./loadtest/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./loadtest/verify_brutal.sql:/tmp/verify_brutal.sql
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engine -d engine_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  # ── ClickHouse (raw per-check telemetry — the timeseries store) ───────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: brutal-clickhouse
+    environment:
+      CLICKHOUSE_USER: engine
+      CLICKHOUSE_PASSWORD: password
+      CLICKHOUSE_DB: default
+    volumes:
+      - ./loadtest/clickhouse_init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "9000:9000"   # native protocol (engine uses this)
+      - "8123:8123"   # HTTP API (for report queries)
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "engine", "--password", "password", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  # ── Mock Farm (HTTPS server simulating real-world origin behaviour) ────────
+  mock:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock
+    container_name: brutal-mock
+    ports:
+      - "8443:8443"
+    deploy:
+      resources:
+        limits:
+          cpus: '3.0'
+          memory: 512M
+
+  # ── Engine (the uptime probe engine under test) ───────────────────────────
+  engine:
+    build:
+      context: .
+      args:
+        BUILD_TAGS: "loadtest"
+    container_name: brutal-engine
+    environment:
+      # Postgres — state store
+      - DATABASE_URL_DIRECT=postgresql://engine:password@db:5432/engine_test?sslmode=disable
+      - DATABASE_URL_POOLED=postgresql://engine:password@db:5432/engine_test?sslmode=disable
+      # ClickHouse — telemetry store (local container, native protocol)
+      - UPTIMER_CLICKHOUSE_URL=clickhouse://engine:password@clickhouse:9000/default?compress=lz4
+      # Engine tunables
+      - HTTP_WORKERS=3000
+      - ENABLE_ENGINE_B=false
+      - COMPRESSION_PERCENT=100
+      - ADMIN_TOKEN=brutal-soak-token
+      - ADMIN_ADDR=0.0.0.0:9101
+      - GOMEMLIMIT=1800MiB
+      - GOMAXPROCS=4
+    ports:
+      - "6060:6060"   # pprof
+      - "9101:9101"   # admin / kill-switch
+    privileged: true
+    user: root
+    depends_on:
+      db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 2G

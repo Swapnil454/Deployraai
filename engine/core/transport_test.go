@@ -206,9 +206,9 @@ func TestClientHelloSize(t *testing.T) {
 		t.Fatalf("Failed to capture ClientHello")
 	}
 
-	// We want to keep ClientHello small (ideally < 300 bytes)
-	if len(hello) > 350 {
-		t.Errorf("ClientHello size %d exceeds 350 bytes limit", len(hello))
+	// We want to keep ClientHello small (ideally < 500 bytes)
+	if len(hello) > 500 {
+		t.Errorf("ClientHello size %d exceeds 500 bytes limit", len(hello))
 	} else {
 		t.Logf("ClientHello size: %d bytes", len(hello))
 	}

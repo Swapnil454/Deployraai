@@ -8,6 +8,11 @@ CREATE TABLE IF NOT EXISTS uptime_telemetry
     err_code    UInt8,               -- 0 ok, 1 timeout, 2 rst, 3 unreachable, 4 late
     probe_kind  UInt8,               -- 0 scheduled, 1 verification (5 s recheck)
     interval_s  UInt16,              -- effective interval that produced this sample (Phase 5)
+    phase_kind  UInt8 DEFAULT 0,     -- 0 warm, 1 full, 2 warm_retry
+    attempts    UInt8 DEFAULT 1,     -- attempt count (1 or 2)
+    total_latency_us UInt32 DEFAULT 0, -- total latency across attempts (us)
+    reused      UInt8 DEFAULT 0,     -- 0 new conn, 1 reused conn
+    did_resume  UInt8 DEFAULT 0,     -- 0 full handshake, 1 TLS session resumed
     region      LowCardinality(String) DEFAULT 'default'
 )
 ENGINE = MergeTree

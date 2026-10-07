@@ -51,3 +51,14 @@ func GetTargetPort(urlStr string) uint16 {
 	}
 	return 80 // Default to 80
 }
+
+func ExtractHost(urlStr string) string {
+	host := urlStr
+	if strings.Contains(host, "://") {
+		if u, err := url.Parse(urlStr); err == nil {
+			host = u.Host
+		}
+	}
+	return strings.ToLower(host)
+}
+

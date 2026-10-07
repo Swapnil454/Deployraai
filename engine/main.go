@@ -67,11 +67,10 @@ func main() {
 	// Channel must hold at least one slot per monitor so the first-tick
 	// burst (all 35k monitors due simultaneously after boot jitter) never
 	// causes the dispatcher to skip monitors and print "HTTP queue full".
-	channelSize := monitorCount + monitorCount/10 + 1000 // +10% headroom
-	if channelSize < 5000 {
-		channelSize = 5000
-	}
-	httpJobs := make(chan *core.Monitor, channelSize)
+	// We use separate channels to prevent HTTP workers blocked on DNS/tarpits from starving ping/port/dns monitors.
+	channelSize := 500000 // Hardcoded to 500k to support dynamic DB seeding without queue full drops
+	httpJobs := make(chan core.DispatchJob, channelSize)
+	netJobs := make(chan core.DispatchJob, channelSize)
 
 	// 10 Postgres incident workers to prevent connection stampedes
 	db.StartIncidentWorkers(ctx, &wg, pool, 10)
@@ -98,15 +97,12 @@ func main() {
 		log.Println("UPTIMER_CLICKHOUSE_URL not set, telemetry disabled")
 	}
 
-	// Default worker count: 1 worker per 20 monitors, capped at 5000.
-	// At 35k monitors this gives 1750 workers which is plenty to drain
-	// the queue within the 30s check interval.
+	// Default worker count: 1 worker per 20 monitors.
+	// We no longer cap this at 5000, ensuring we have enough concurrent workers
+	// to drain the queue even when thousands of real-world targets tarpit or timeout.
 	httpWorkers := monitorCount / 20
 	if httpWorkers < 500 {
 		httpWorkers = 500
-	}
-	if httpWorkers > 5000 {
-		httpWorkers = 5000
 	}
 	if hwStr := os.Getenv("HTTP_WORKERS"); hwStr != "" {
 		if hw, err := strconv.Atoi(hwStr); err == nil && hw > 0 {
@@ -116,6 +112,9 @@ func main() {
 
 	// Configurable FastHTTP workers
 	core.StartWorkers(ctx, &wg, httpWorkers, httpJobs)
+	
+	// Fast network workers for ping, port, dns
+	core.StartWorkers(ctx, &wg, 500, netJobs)
 
 	// Quorum State Machine Dispatcher (Shell)
 	core.StartConfirmationDispatcher(ctx, &wg, 10)
@@ -125,7 +124,7 @@ func main() {
 
 	// Master Dispatcher (evaluates NextCheckAt and AwaitingResult)
 	wg.Add(1)
-	go core.MasterDispatcher(ctx, &wg, httpJobs)
+	go core.MasterDispatcher(ctx, &wg, httpJobs, netJobs)
 
 	// Reaper (Safety net for missed timeouts)
 	wg.Add(1)

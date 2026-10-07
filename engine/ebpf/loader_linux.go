@@ -96,7 +96,11 @@ func StartEBPFReader(ctx context.Context, wg *sync.WaitGroup) error {
 						continue
 					}
 
-					m := core.Store.Get(id)
+					p := core.Store.GetPointer(id)
+					if p == nil {
+						continue
+					}
+					m := p.Load()
 					if m == nil {
 						continue
 					}
@@ -121,7 +125,7 @@ func StartEBPFReader(ctx context.Context, wg *sync.WaitGroup) error {
 						
 						core.SentNs[m.AssignedPort].Store(0)
 
-						core.HandleSuccess(id, latencyMs)
+						core.HandleSuccess(id, p, uint32(latencyMs))
 						
 						// NOTE: core.SendRST() was removed because xdp_hook.c now bounces 
 						// an RST natively via XDP_TX in zero CPU cost!

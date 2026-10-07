@@ -25,6 +25,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
@@ -142,7 +143,15 @@ func readUpTo(r io.Reader, pb *pooledBuf, limit int) (full bool, err error) {
 	}
 	buf := pb.b[:0]
 	empties := 0
+	start := time.Now()
+	timeout := 10 * time.Second
+
 	for len(buf) < limit {
+		if time.Since(start) > timeout {
+			pb.b = buf
+			return false, fmt.Errorf("read took longer than %v", timeout)
+		}
+		
 		n, rerr := r.Read(buf[len(buf):limit])
 		buf = buf[:len(buf)+n]
 		if rerr != nil {
@@ -197,6 +206,8 @@ func finishErr(err error, wr *wireReader) error {
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		return fmt.Errorf("%w: %v", errBodyTruncated, err)
 	}
+
+
 	return fmt.Errorf("%w: %v", errBodyDecode, err)
 }
 

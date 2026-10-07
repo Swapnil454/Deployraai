@@ -176,6 +176,16 @@ func SubmitVoteResult(monitorID string, ev EventVoteResult) {
 
 var startDispatcherOnce sync.Once
 
+// ResetConfirmationDispatcherForTest allows unit tests to re-initialize the dispatcher loop.
+func ResetConfirmationDispatcherForTest() {
+	startDispatcherOnce = sync.Once{}
+	for i := 0; i < numShards; i++ {
+		shardBuses[i] = make(chan monitorEvent, 1000)
+		persistBuses[i] = make(chan persistJob, 1000)
+	}
+}
+
+
 // StartConfirmationDispatcher runs the shell event loop.
 // It reads from confirmationBus and dispatches effects.
 // workerCount controls how many parallel monitor events can be processed;
@@ -315,6 +325,23 @@ func StartConfirmationDispatcher(ctx context.Context, wg *sync.WaitGroup, _ int)
 		}
 	}()
 	})
+}
+
+func DrainSpoolForTest() {
+	incidentSpoolMu.Lock()
+	defer incidentSpoolMu.Unlock()
+	if len(incidentSpool) == 0 {
+		return
+	}
+	remaining := incidentSpool[:0]
+	for _, evt := range incidentSpool {
+		select {
+		case IncidentQueue <- evt:
+		default:
+			remaining = append(remaining, evt)
+		}
+	}
+	incidentSpool = remaining
 }
 
 func processMonitorEvent(me monitorEvent, outbox *Outbox) {

@@ -48,6 +48,31 @@ type Monitor struct {
     KeywordMaxBytes    int64
     ExpectedStatus     []int
     ForceGET           bool
+    Headers            map[string]string
+
+    // Per-monitor randomized full-phase schedule & TLS cert tracking
+    CheckCounter       uint32
+    FullPhaseThreshold uint32
+    FullPhaseCount     uint64
+    FullPhaseInterval  time.Duration
+    StaleSocketCount   uint16
+    NoKeepAlive        bool
+    CertExpiry         time.Time
+    CertDaysRemaining  int
+    LastFullPhaseAt    time.Time
+}
+
+func Splitmix64(x uint64) uint64 {
+	x += 0x9e3779b97f4a7c15
+	x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9
+	x = (x ^ (x >> 27)) * 0x94d049bb133111eb
+	return x ^ (x >> 31)
+}
+
+func GetFullPhaseInterval(monKey uint64, phaseCount uint64) time.Duration {
+	h := Splitmix64(monKey ^ (phaseCount * 0x517cc1b727220a95))
+	jitterSec := int64(h % 360)                       // 0 to 359s jitter
+	return time.Duration(720+jitterSec) * time.Second // 12m to 18m wall-clock window
 }
 
 type MonitorStore struct {
@@ -68,6 +93,16 @@ func (s *MonitorStore) Get(id string) *Monitor {
         return nil
     }
     return p.Load()
+}
+
+func (s *MonitorStore) GetPointer(id string) *atomic.Pointer[Monitor] {
+    s.Mu.RLock()
+    p, ok := s.Monitors[id]
+    s.Mu.RUnlock()
+    if !ok {
+        return nil
+    }
+    return p
 }
 
 // CASUpdate is the unified mutation helper. Every writer must use this.
