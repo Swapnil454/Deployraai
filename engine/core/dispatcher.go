@@ -1496,7 +1496,7 @@ func executeFullPhaseProbe(ctx context.Context, p *atomic.Pointer[Monitor], m *M
 		Status:         statusVal,
 		Err:            errVal,
 		Kind:           typeToKind(m.Type),
-		ProbeKind:      1, // Diagnostic/verification probe
+		ProbeKind:      2, // Dedicated 2 = Full-phase cert probe (0=scheduled, 1=verification)
 		PhaseKind:      1, // Full-phase probe
 		Attempts:       3, // Dedicated attempt suffix 3 to keep mock join 1-to-1
 		TotalLatencyUs: uint32(elapsed.Microseconds()),

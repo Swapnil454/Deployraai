@@ -344,15 +344,16 @@ $chOK       = CH "SELECT countIf(status=1) FROM uptime_telemetry"
 $chSched    = CH "SELECT count() FROM uptime_telemetry WHERE monitor_type IN (1,2,7) AND probe_kind = 0 AND status != 3"
 $chWarmRows = CH "SELECT count() FROM uptime_telemetry WHERE monitor_type IN (1,2,7) AND probe_kind = 0 AND phase_kind = 2 AND status != 3"
 $chVerif    = CH "SELECT count() FROM uptime_telemetry WHERE monitor_type IN (1,2,7) AND probe_kind = 1 AND status != 3"
+$chFullPhase = CH "SELECT count() FROM uptime_telemetry WHERE monitor_type IN (1,2,7) AND probe_kind = 2 AND status != 3"
 # Use ActualRunSecs (wall clock from engine start to stop) not RunSeconds parameter
 $httpSchedExpected = [math]::Round([double]$MonitorCount / 30 * $ActualRunSecs)
 $schedGapPct = if ($httpSchedExpected -gt 0) { [math]::Round([math]::Abs($httpSchedExpected - [int]$chSched) / $httpSchedExpected * 100, 1) } else { 0 }
 
 # Duplicate detection:
-# 1. Scheduled lag detector (<25s apart on same monitor, filtering diagnostic phase_kind=1)
-$chLagUnder25s       = CH "SELECT count() FROM (SELECT monitor_id, ts, dateDiff('second', lagInFrame(ts) OVER (PARTITION BY monitor_id ORDER BY ts), ts) as diff FROM uptime_telemetry WHERE status != 3 AND probe_kind = 0 AND phase_kind != 1) WHERE diff > 0 AND diff < 25"
+# 1. Scheduled lag detector (<25,000 ms apart on same monitor with no lower bound, probe_kind=0 scheduled only)
+$chLagUnder25s       = CH "SELECT count() FROM (SELECT monitor_id, ts, dateDiff('millisecond', lagInFrame(ts) OVER (PARTITION BY monitor_id ORDER BY ts), ts) as diff_ms FROM uptime_telemetry WHERE status != 3 AND probe_kind = 0) WHERE diff_ms IS NOT NULL AND diff_ms < 25000"
 $chDupSchedBuckets   = if ($chLagUnder25s -match '^\d+$') { [int]$chLagUnder25s } else { 0 }
-$chMaxSchedPerBucket = CH "SELECT max(c) FROM (SELECT monitor_id, toStartOfInterval(ts,INTERVAL 30 SECOND) b, count() c FROM uptime_telemetry WHERE status != 3 AND probe_kind = 0 AND phase_kind != 1 GROUP BY monitor_id, b)"
+$chMaxSchedPerBucket = CH "SELECT max(c) FROM (SELECT monitor_id, toStartOfInterval(ts,INTERVAL 30 SECOND) b, count() c FROM uptime_telemetry WHERE status != 3 AND probe_kind = 0 GROUP BY monitor_id, b)"
 
 # 2. Overall duplicate buckets across all executed checks
 $chMaxTotalPerBucket = CH "SELECT max(c) FROM (SELECT monitor_id, toStartOfInterval(ts,INTERVAL 30 SECOND) b, count() c FROM uptime_telemetry WHERE status != 3 GROUP BY monitor_id, b)"
@@ -387,7 +388,7 @@ $gapEnqPct = if ([int64]$finalFlushed -gt 0) { [math]::Round($gapEnq / [int64]$f
 Log "Total rows: $chTotal  |  Uniq: $chUniq  |  Exec: $chExec  |  OK: $chOK  |  Reaped: $chReaped"
 Log "Scheduled checks (excl warm retry): $chSched vs $httpSchedExpected expected (ActualRun=${ActualRunSecs}s) → gap=$schedGapPct%"
 Log "Warm retry rows (phase_kind=2): $chWarmRows"
-Log "Verification checks (probe_kind=1): $chVerif"
+Log "Verification checks (probe_kind=1): $chVerif  |  Full-phase cert checks (probe_kind=2): $chFullPhase"
 Log "Dup check: max-sched-per-30s = $chMaxSchedPerBucket  |  sched-dup-buckets = $chDupSchedBuckets  |  total-dup-buckets = $chDupTotalBuckets  |  precise-dups = $chDupPrecise"
 Log "Post-stop CH count vs final flushed: CH=$chTotal, Flushed=$finalFlushed, Enqueued=$finalEnq, Dropped=$finalDropped, InFlight=$finalInFlight, Gap=$gapEnq ($gapEnqPct%)"
 
