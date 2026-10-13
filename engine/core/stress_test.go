@@ -155,7 +155,7 @@ func TestDecompressionChaosBombs(t *testing.T) {
 	_ = gw.Close()
 
 	// Feed bomb to Keyword Body Reader via readBody
-	br, wireErr := readBody(gzipStreamReader(bombBuf.Bytes()), "gzip", 65536)
+	br, wireErr := readBody(gzipStreamReader(bombBuf.Bytes()), "gzip", 65536, time.Now().Add(5*time.Second))
 	defer br.Release()
 
 	if wireErr != nil && wireErr != errBodyTruncated {
@@ -171,14 +171,14 @@ func TestDecompressionChaosBombs(t *testing.T) {
 	// Scenario 2: Corrupted header streams
 	corruptedPayloads := [][]byte{
 		{},
-		{0x1f, 0x8b}, // incomplete gzip header
-		{0x28, 0xb5, 0x2f, 0xfd, 0x00}, // malformed zstd frame
-		bytes.Repeat([]byte{0xFF}, 500),  // garbage data
+		{0x1f, 0x8b},                    // incomplete gzip header
+		{0x28, 0xb5, 0x2f, 0xfd, 0x00},  // malformed zstd frame
+		bytes.Repeat([]byte{0xFF}, 500), // garbage data
 	}
 
 	for idx, payload := range corruptedPayloads {
 		t.Run(fmt.Sprintf("Corrupted-%d", idx), func(t *testing.T) {
-			res, derr := readBody(bytes.NewReader(payload), "gzip", 65536)
+			res, derr := readBody(bytes.NewReader(payload), "gzip", 65536, time.Now().Add(5*time.Second))
 			defer res.Release()
 			_ = derr
 		})
@@ -253,10 +253,10 @@ func TestEngineRampCapability(t *testing.T) {
 		minExpect float64
 		maxExpect float64
 	}{
-		{1, 0.7, 1.3},     // 1% canary (expect ~0.7% to 1.3%)
-		{10, 9.0, 11.0},   // 10% canary (expect ~9.0% to 11.0%)
-		{100, 100.0, 100.0},// 100% full rollout (expect exactly 100%)
-		{0, 0.0, 0.0},     // 0% kill switch (expect exactly 0%)
+		{1, 0.7, 1.3},       // 1% canary (expect ~0.7% to 1.3%)
+		{10, 9.0, 11.0},     // 10% canary (expect ~9.0% to 11.0%)
+		{100, 100.0, 100.0}, // 100% full rollout (expect exactly 100%)
+		{0, 0.0, 0.0},       // 0% kill switch (expect exactly 0%)
 	}
 
 	const totalMonitors = 100000

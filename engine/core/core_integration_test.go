@@ -10,7 +10,7 @@ import (
 func TestShutdownTimeoutSpoolDrain(t *testing.T) {
 	// Initialize subsystems properly
 	InitTLSConfig(100)
-	
+
 	// Drain any leftover events from previous tests
 	for {
 		select {
@@ -50,20 +50,20 @@ DRAINED:
 	// Create context that we will cancel to trigger shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	
+
 	// Reset & Start the confirmation dispatcher which owns the spool drain
 	ResetConfirmationDispatcherForTest()
 	StartConfirmationDispatcher(ctx, &wg, 4)
-	
+
 	// Temporarily redirect IncidentQueue to a test queue so we can observe spool drains
 	origOnOverflow := OnIncidentOverflow
 	defer func() { OnIncidentOverflow = origOnOverflow }()
-	
+
 	// Add directly to spool (simulating overflow)
 	incidentSpoolMu.Lock()
 	incidentSpool = append(incidentSpool, IncidentEvent{ID: "test-spool-shutdown"})
 	incidentSpoolMu.Unlock()
-	
+
 	// Cancel context to trigger final flush
 	cancel()
 	wg.Wait()
@@ -90,11 +90,11 @@ func TestPersistRetryDoesNotResetState(t *testing.T) {
 	incidentSpoolMu.Lock()
 	incidentSpool = incidentSpool[:0]
 	incidentSpoolMu.Unlock()
-	
+
 	// Deliver events
 	evt1 := IncidentEvent{ID: "mon-1", NewStatus: "DOWN"}
 	evt2 := IncidentEvent{ID: "mon-1", NewStatus: "UP"}
-	
+
 	for i := 0; i < 5000; i++ {
 		// Fill IncidentQueue
 		select {
@@ -102,25 +102,29 @@ func TestPersistRetryDoesNotResetState(t *testing.T) {
 		default:
 		}
 	}
-	
+
 	deliverOrSpool(evt1)
 	deliverOrSpool(evt2)
-	
+
 	incidentSpoolMu.Lock()
 	defer incidentSpoolMu.Unlock()
-	
+
 	if len(incidentSpool) < 2 {
 		t.Fatalf("expected spool to hold at least 2 events, got %d", len(incidentSpool))
 	}
-	
+
 	// Check ordering
 	lastEvt1 := -1
 	lastEvt2 := -1
 	for i, e := range incidentSpool {
-		if e.ID == "mon-1" && e.NewStatus == "DOWN" { lastEvt1 = i }
-		if e.ID == "mon-1" && e.NewStatus == "UP" { lastEvt2 = i }
+		if e.ID == "mon-1" && e.NewStatus == "DOWN" {
+			lastEvt1 = i
+		}
+		if e.ID == "mon-1" && e.NewStatus == "UP" {
+			lastEvt2 = i
+		}
 	}
-	
+
 	if lastEvt1 == -1 || lastEvt2 == -1 {
 		t.Fatalf("events not found in spool")
 	}

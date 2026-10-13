@@ -135,7 +135,7 @@ func TestTelemetryConnUnusedAndIdempotentClose(t *testing.T) {
 
 	tConn2 := newTelemetryConn(clientConn2, 0)
 	tConn2.Write([]byte("GET / HTTP/1.1\r\n\r\n"))
-	
+
 	// Double Close
 	tConn2.Close()
 	tConn2.Close()
@@ -146,6 +146,7 @@ func TestTelemetryConnUnusedAndIdempotentClose(t *testing.T) {
 }
 
 type dummyConn struct{ net.Conn }
+
 func (dummyConn) Read(p []byte) (int, error)  { return len(p), nil }
 func (dummyConn) Write(p []byte) (int, error) { return len(p), nil }
 

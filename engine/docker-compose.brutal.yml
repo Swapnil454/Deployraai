@@ -70,16 +70,23 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '3.0'
           memory: 512M
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    sysctls:
+      - net.core.somaxconn=10240
 
   # ── Engine (the uptime probe engine under test) ───────────────────────────
   engine:
+
     build:
       context: .
       args:
         BUILD_TAGS: "loadtest"
     container_name: brutal-engine
+    command: ${ENGINE_BINARY:-./uptime-engine}
     environment:
       # Postgres — state store
       - DATABASE_URL_DIRECT=postgresql://engine:password@db:5432/engine_test?sslmode=disable
@@ -89,15 +96,25 @@ services:
       # Engine tunables
       - HTTP_WORKERS=3000
       - ENABLE_ENGINE_B=false
-      - COMPRESSION_PERCENT=100
+      - ENGINE_CONN_TELEMETRY=true
+      - MAX_IDLE_CONN_DURATION_S=${MAX_IDLE_CONN_DURATION_S:-90}
       - ADMIN_TOKEN=brutal-soak-token
       - ADMIN_ADDR=0.0.0.0:9101
       - GOMEMLIMIT=1800MiB
       - GOMAXPROCS=4
+      - DISABLE_SSRF_BLOCKER=true
+      - CHANNEL_SIZE=${CHANNEL_SIZE:-500000}
+      - TLS_CACHE_SIZE=${TLS_CACHE_SIZE:-110000}
     ports:
       - "6060:6060"   # pprof
       - "9101:9101"   # admin / kill-switch
     privileged: true
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    sysctls:
+      - net.core.somaxconn=10240
     user: root
     depends_on:
       db:
@@ -109,3 +126,6 @@ services:
         limits:
           cpus: '4.0'
           memory: 2G
+    # 15s gives the 8s final-flush budget + ~7s margin.
+    # Exit code 0 = clean; exit code 2 = bounded drain (see main.go); 137 = defect.
+    stop_grace_period: 15s

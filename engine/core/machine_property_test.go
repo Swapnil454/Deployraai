@@ -49,7 +49,7 @@ func TestPropertyHarness(t *testing.T) {
 			rng := rand.New(rand.NewSource(seed))
 
 			var countDOWN, countUP, countBLOCKED, countHedgeOpen, countForceClose, countCASFail, countStale int
-			
+
 			for i := 0; i < 5000; i++ {
 				metrics := runSequence(t, rng, i)
 				countDOWN += metrics.DOWN
@@ -60,16 +60,30 @@ func TestPropertyHarness(t *testing.T) {
 				countCASFail += metrics.CASFail
 				countStale += metrics.Stale
 			}
-			
+
 			// 1. Coverage counters
 			floor := 200
-			if countDOWN < floor { t.Errorf("Coverage: DOWN transitions %d < %d", countDOWN, floor) }
-			if countUP < floor { t.Errorf("Coverage: UP transitions %d < %d", countUP, floor) }
-			if countBLOCKED < floor { t.Errorf("Coverage: BLOCKED transitions %d < %d", countBLOCKED, floor) }
-			if countHedgeOpen < floor { t.Errorf("Coverage: Hedge-opened rounds %d < %d", countHedgeOpen, floor) }
-			if countForceClose < floor { t.Errorf("Coverage: Force-closes %d < %d", countForceClose, floor) }
-			if countCASFail < floor { t.Errorf("Coverage: CAS failures %d < %d", countCASFail, floor) }
-			if countStale < floor { t.Errorf("Coverage: Stale drops %d < %d", countStale, floor) }
+			if countDOWN < floor {
+				t.Errorf("Coverage: DOWN transitions %d < %d", countDOWN, floor)
+			}
+			if countUP < floor {
+				t.Errorf("Coverage: UP transitions %d < %d", countUP, floor)
+			}
+			if countBLOCKED < floor {
+				t.Errorf("Coverage: BLOCKED transitions %d < %d", countBLOCKED, floor)
+			}
+			if countHedgeOpen < floor {
+				t.Errorf("Coverage: Hedge-opened rounds %d < %d", countHedgeOpen, floor)
+			}
+			if countForceClose < floor {
+				t.Errorf("Coverage: Force-closes %d < %d", countForceClose, floor)
+			}
+			if countCASFail < floor {
+				t.Errorf("Coverage: CAS failures %d < %d", countCASFail, floor)
+			}
+			if countStale < floor {
+				t.Errorf("Coverage: Stale drops %d < %d", countStale, floor)
+			}
 		})
 	}
 }
@@ -81,27 +95,27 @@ type Metrics struct {
 func runSequence(t *testing.T, rng *rand.Rand, seqID int) Metrics {
 	s1 := MonitorState{ID: fmt.Sprintf("mon-%d", seqID), Status: StatusUp, Epoch: 1, Votes: make(map[string]Vote)}
 	s2 := MonitorState{ID: s1.ID, Status: s1.Status, Epoch: s1.Epoch, Votes: make(map[string]Vote)} // For determinism check
-	
+
 	now := t0
 	var metrics Metrics
-	
+
 	// 2. Fan-out cap
 	fanOutReqs := make(map[string]int)
 
 	for j := 0; j < 40; j++ {
 		ev := genEvent(rng, s1)
 		sOriginal := deepCopy(s1)
-		
+
 		// Mix in occasional gaps of 15s or more so force-close happens
 		stepTime := time.Duration(rng.Intn(10)) * time.Second
 		if rng.Float32() < 0.10 {
-			stepTime = time.Duration(15 + rng.Intn(30)) * time.Second
+			stepTime = time.Duration(15+rng.Intn(30)) * time.Second
 		}
 		now = now.Add(stepTime)
-		
+
 		s1New, fx1 := Step(s1, ev, now, cfg())
 		s2New, fx2 := Step(s2, ev, now, cfg()) // Second run for determinism
-		
+
 		// 1. Determinism
 		if !reflect.DeepEqual(s1New, s2New) {
 			t.Fatalf("Non-deterministic state output")
@@ -109,14 +123,14 @@ func runSequence(t *testing.T, rng *rand.Rand, seqID int) Metrics {
 		if !reflect.DeepEqual(fx1, fx2) {
 			t.Fatalf("Non-deterministic effects output")
 		}
-		
+
 		// 2. No input mutation
 		if !reflect.DeepEqual(s1, sOriginal) {
 			t.Fatalf("Step mutated input state")
 		}
-		
+
 		checkTransitionInvariants(t, s1, s1New, fx1, ev, &metrics)
-		
+
 		// Track Fan-out
 		for _, f := range fx1 {
 			if req, ok := f.(EffectRequestVotes); ok {
@@ -129,7 +143,7 @@ func runSequence(t *testing.T, rng *rand.Rand, seqID int) Metrics {
 		}
 
 		// 3. Duplicate idempotence
-		// Apply the same event twice. 
+		// Apply the same event twice.
 		// The second call must return an identical state and no effects (excluding age force close).
 		if _, isVote := ev.(EventVoteResult); isVote {
 			// Apply again on s1New
@@ -147,34 +161,54 @@ func runSequence(t *testing.T, rng *rand.Rand, seqID int) Metrics {
 		s1 = s1New
 		s2 = s2New
 	}
-	
+
 	return metrics
 }
 
 func checkTransitionInvariants(t *testing.T, old, new MonitorState, fx []Effect, ev Event, metrics *Metrics) {
 	// Track metrics
-	if new.Status == StatusDown && old.Status != StatusDown { metrics.DOWN++ }
-	if new.Status == StatusUp && old.Status != StatusUp { metrics.UP++ }
-	if new.Status == StatusBlocked && old.Status != StatusBlocked { metrics.BLOCKED++ }
-	
-	for _, f := range fx {
-		if _, ok := f.(EffectReloadState); ok { metrics.CASFail++ }
-		if log, ok := f.(EffectLog); ok && log.Message == "round force-closed due to age" { metrics.ForceClose++ }
+	if new.Status == StatusDown && old.Status != StatusDown {
+		metrics.DOWN++
 	}
-	if !old.HedgeInFlight && new.HedgeInFlight { metrics.HedgeOpen++ }
+	if new.Status == StatusUp && old.Status != StatusUp {
+		metrics.UP++
+	}
+	if new.Status == StatusBlocked && old.Status != StatusBlocked {
+		metrics.BLOCKED++
+	}
+
+	for _, f := range fx {
+		if _, ok := f.(EffectReloadState); ok {
+			metrics.CASFail++
+		}
+		if log, ok := f.(EffectLog); ok && log.Message == "round force-closed due to age" {
+			metrics.ForceClose++
+		}
+	}
+	if !old.HedgeInFlight && new.HedgeInFlight {
+		metrics.HedgeOpen++
+	}
 
 	// 5. Complete stale-event invariant
 	isStale := false
 	switch e := ev.(type) {
 	case EventVoteResult:
-		if e.Epoch != old.Epoch || e.Round != old.Round { isStale = true }
+		if e.Epoch != old.Epoch || e.Round != old.Round {
+			isStale = true
+		}
 	case EventVoteDeadline:
-		if e.Epoch != old.Epoch || e.Round != old.Round { isStale = true }
+		if e.Epoch != old.Epoch || e.Round != old.Round {
+			isStale = true
+		}
 	case EventHedgeTimerFired:
-		if e.Epoch != old.Epoch { isStale = true }
+		if e.Epoch != old.Epoch {
+			isStale = true
+		}
 		// A timer for Round+1 is NOT stale if it opens the round.
 		// If it's for an older round, it's stale.
-		if e.Round <= old.Round { isStale = true }
+		if e.Round <= old.Round {
+			isStale = true
+		}
 	}
 
 	if isStale {
@@ -217,7 +251,7 @@ func checkTransitionInvariants(t *testing.T, old, new MonitorState, fx []Effect,
 
 	// 7. Closed incident never reopens
 	// A DOWN transition must carry only votes from a round opened after the last UP.
-	// Since IncidentStart is FirstFailAt, and FirstFailAt is reset on UP, 
+	// Since IncidentStart is FirstFailAt, and FirstFailAt is reset on UP,
 	// IncidentStart must be >= the last UP time (which is not stored, but FirstFailAt cannot be before FirstPassAt if FirstPassAt is cleared).
 	// Let's assert IncidentStart is not zero while UP.
 	if old.Status == StatusUp && !old.IncidentStart.IsZero() {
@@ -234,7 +268,7 @@ func checkTransitionInvariants(t *testing.T, old, new MonitorState, fx []Effect,
 			t.Fatalf("IncidentStart %v is not FirstFailAt %v", new.IncidentStart, old.FirstFailAt)
 		}
 	}
-	
+
 	// 8. Incident end is the first pass
 	if new.Status == StatusUp && old.Status == StatusDown {
 		for _, f := range fx {
@@ -265,7 +299,7 @@ func checkTransitionInvariants(t *testing.T, old, new MonitorState, fx []Effect,
 				failingASNs[v.ASN] = true
 			}
 		}
-		
+
 		switch e := ev.(type) {
 		case EventVoteResult:
 			if e.Epoch == old.Epoch && e.Round == old.Round {
@@ -288,7 +322,7 @@ func checkTransitionInvariants(t *testing.T, old, new MonitorState, fx []Effect,
 				}
 			}
 		}
-		
+
 		for asn := range passingASNs {
 			delete(failingASNs, asn)
 		}

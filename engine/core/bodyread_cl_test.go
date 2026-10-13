@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net"
 	"testing"
+	"time"
 )
 
 // btServeBody spins up a raw TCP server that serves a single response with the
@@ -44,7 +45,7 @@ func TestLargeIdentityBodyIsNotTruncated(t *testing.T) {
 	}
 	defer res.Body() // ensure fasthttp flushes the response
 
-	br, rerr := ReadKeywordBody(res, 64<<10)
+	br, rerr := ReadKeywordBody(res, 64<<10, time.Now().Add(5*time.Second))
 	defer br.Release()
 	if rerr != nil {
 		t.Fatalf("large identity body (window-capped) was incorrectly flagged as error: %v", rerr)
@@ -69,7 +70,7 @@ func TestLargeCompressedBodyIsNotTruncated(t *testing.T) {
 		t.Fatalf("unexpected transport error: %v", err)
 	}
 
-	br, rerr := ReadKeywordBody(res, 64<<10)
+	br, rerr := ReadKeywordBody(res, 64<<10, time.Now().Add(5*time.Second))
 	defer br.Release()
 	if rerr != nil {
 		t.Fatalf("compressed large body flagged as error: %v", rerr)
@@ -88,7 +89,7 @@ func TestSmallIdentityBodyCompleteIsClean(t *testing.T) {
 		t.Fatalf("unexpected transport error: %v", err)
 	}
 
-	br, rerr := ReadKeywordBody(res, 64<<10)
+	br, rerr := ReadKeywordBody(res, 64<<10, time.Now().Add(5*time.Second))
 	defer br.Release()
 	if rerr != nil {
 		t.Fatalf("small complete body returned error: %v", rerr)

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"testing/iotest"
 	"time"
+
+	"github.com/your-org/uptime-engine/netsec"
 )
 
 // Helper to provide NewTestExecutor inline for tests
@@ -58,7 +60,7 @@ func TestProbePhase3Constraints(t *testing.T) {
 
 		mon := &Monitor{URL: srv.URL, TimeoutMs: 3000, Keyword: "keyword"}
 		res := ex.RunCheck(context.Background(), mon, ModeSteady, RolePrimary, 0)
-		
+
 		if res.ErrClass != ErrNone {
 			t.Errorf("Expected keyword to be found, got %s", res.ErrClass)
 		}
@@ -76,7 +78,7 @@ func TestProbePhase3Constraints(t *testing.T) {
 
 		mon := &Monitor{URL: srv.URL, TimeoutMs: 3000, ExpectedStatus: []int{200}}
 		res := ex.RunCheck(context.Background(), mon, ModeCold, RolePrimary, 0)
-		
+
 		if res.ErrClass != ErrNone {
 			t.Errorf("Expected pass even with ExpectedStatus:200, got %s", res.ErrClass)
 		}
@@ -94,14 +96,14 @@ func TestProbePhase3Constraints(t *testing.T) {
 
 		mon := &Monitor{URL: srv.URL, TimeoutMs: 3000}
 		res := ex.RunCheck(context.Background(), mon, ModeSteady, RolePrimary, 0)
-		
+
 		if res.ErrClass != ErrBlocked {
 			t.Errorf("Expected ErrBlocked, got %s", res.ErrClass)
 		}
 
 		monExpected := &Monitor{URL: srv.URL, TimeoutMs: 3000, ExpectedStatus: []int{429}}
 		resExpected := ex.RunCheck(context.Background(), monExpected, ModeSteady, RolePrimary, 0)
-		
+
 		if resExpected.ErrClass != ErrNone {
 			t.Errorf("Expected ErrNone (status 429 expected), got %s", resExpected.ErrClass)
 		}
@@ -124,7 +126,7 @@ func TestProbePhase3Constraints(t *testing.T) {
 		_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
 		mon := &Monitor{URL: "http://localhost:" + port, TimeoutMs: 3000}
 		res := ex.RunCheck(context.Background(), mon, ModeSteady, RolePrimary, 0)
-		
+
 		if res.ErrClass != ErrDegraded {
 			t.Errorf("Expected ErrDegraded due to IPv6 fallback, got %s", res.ErrClass)
 		}
@@ -135,9 +137,9 @@ func TestProbePhase3Constraints(t *testing.T) {
 		chain := func(n int) *httptest.Server {
 			return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				i, _ := strconv.Atoi(r.URL.Query().Get("i"))
-				if i < n { 
+				if i < n {
 					http.Redirect(w, r, "/?i="+strconv.Itoa(i+1), 302)
-					return 
+					return
 				}
 				w.WriteHeader(200)
 			}))
@@ -196,6 +198,9 @@ func TestProbePhase3Constraints(t *testing.T) {
 
 	// S8 SSRF Zone & Loopback
 	t.Run("S8-SSRF-Protection", func(t *testing.T) {
+		netsec.DisableSSRFBlocker = false
+		defer func() { netsec.DisableSSRFBlocker = true }()
+
 		prodEx := NewExecutor(nil, "pop1")
 		mon := &Monitor{URL: "http://127.0.0.1:22", TimeoutMs: 3000}
 		res := prodEx.RunCheck(context.Background(), mon, ModeSteady, RolePrimary, 0)
@@ -223,11 +228,11 @@ func TestProbePhase3Constraints(t *testing.T) {
 
 		t.Setenv("HTTP_PROXY", "http://"+listener.Addr().String())
 		prodEx := NewTestExecutor() // uses NewTransports which should ignore HTTP_PROXY
-		
+
 		// Attempt to request an invalid host
 		mon := &Monitor{URL: "http://target.invalid", TimeoutMs: 1000}
 		prodEx.RunCheck(context.Background(), mon, ModeSteady, RolePrimary, 0)
-		
+
 		select {
 		case <-accepted:
 			t.Errorf("Expected proxy listener to never accept connection, but it did")
@@ -235,7 +240,7 @@ func TestProbePhase3Constraints(t *testing.T) {
 			// Passed
 		}
 	})
-	
+
 	// S5: ICMP pre-check
 	// Checked via netsec blocklist in RunCheck ICMP mode.
 	t.Run("S5-ICMP-Blocked", func(t *testing.T) {

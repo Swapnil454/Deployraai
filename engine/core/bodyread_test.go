@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
@@ -77,7 +78,7 @@ func btWire(t *testing.T, kind string, data []byte) []byte {
 func TestRoundTrip(t *testing.T) {
 	for _, k := range append([]string{"identity"}, btKinds...) {
 		t.Run(k, func(t *testing.T) {
-			res, err := readBody(bytes.NewReader(btWire(t, k, btPage())), btHdr(k), btLimit)
+			res, err := readBody(bytes.NewReader(btWire(t, k, btPage())), btHdr(k), btLimit, time.Now().Add(5*time.Second))
 			defer res.Release()
 			if err != nil {
 				t.Fatal(err)
@@ -95,7 +96,7 @@ func TestTruncatedIsNeverComplete(t *testing.T) {
 	for _, k := range btKinds {
 		t.Run(k, func(t *testing.T) {
 			wire := btCompress(t, k, data)
-			res, err := readBody(bytes.NewReader(wire[:len(wire)/2-1]), btHdr(k), 1<<20)
+			res, err := readBody(bytes.NewReader(wire[:len(wire)/2-1]), btHdr(k), 1<<20, time.Now().Add(5*time.Second))
 			res.Release()
 			if k == "br" && err == nil {
 				t.Log("Note: Brotli cut at metablock boundary returns io.EOF (RFC 7932 lacks mandatory stream footer)")
@@ -128,7 +129,7 @@ func TestWireErrorPassesThrough(t *testing.T) {
 		t.Run(k, func(t *testing.T) {
 			wire := btWire(t, k, btPage())
 			src := &btFailReader{data: wire[:len(wire)/2], err: boom}
-			res, err := readBody(src, btHdr(k), 1<<20)
+			res, err := readBody(src, btHdr(k), 1<<20, time.Now().Add(5*time.Second))
 			res.Release()
 			if !errors.Is(err, boom) {
 				t.Fatalf("want the network error, got %v", err)
@@ -143,7 +144,7 @@ func TestPrefixSurvivesLaterTruncation(t *testing.T) {
 	for _, k := range []string{"gzip", "zstd"} {
 		t.Run(k, func(t *testing.T) {
 			wire := btCompress(t, k, data)
-			res, err := readBody(bytes.NewReader(wire[:len(wire)*3/4]), k, 1<<20)
+			res, err := readBody(bytes.NewReader(wire[:len(wire)*3/4]), k, 1<<20, time.Now().Add(5*time.Second))
 			defer res.Release()
 			if err == nil {
 				t.Fatal("expected an error for a truncated stream")
@@ -159,7 +160,7 @@ func TestBombStopsAtWindow(t *testing.T) {
 	zeros := make([]byte, 50<<20)
 	for _, k := range []string{"gzip", "br", "zstd"} {
 		t.Run(k, func(t *testing.T) {
-			res, err := readBody(bytes.NewReader(btCompress(t, k, zeros)), k, btLimit)
+			res, err := readBody(bytes.NewReader(btCompress(t, k, zeros)), k, btLimit, time.Now().Add(5*time.Second))
 			defer res.Release()
 			if err != nil {
 				t.Fatal(err)
@@ -176,7 +177,7 @@ func TestBombStopsAtWindow(t *testing.T) {
 
 func TestUnsupportedEncodings(t *testing.T) {
 	for _, h := range []string{"gzip, br", "br, gzip", "compress", "dcb"} {
-		res, err := readBody(strings.NewReader("x"), h, btLimit)
+		res, err := readBody(strings.NewReader("x"), h, btLimit, time.Now().Add(5*time.Second))
 		res.Release()
 		if !errors.Is(err, errUnsupportedEncoding) {
 			t.Errorf("%q: want errUnsupportedEncoding, got %v", h, err)
@@ -185,7 +186,7 @@ func TestUnsupportedEncodings(t *testing.T) {
 }
 
 func TestServerLiesAboutEncoding(t *testing.T) {
-	res, err := readBody(strings.NewReader("<html>plain</html>"), "gzip", btLimit)
+	res, err := readBody(strings.NewReader("<html>plain</html>"), "gzip", btLimit, time.Now().Add(5*time.Second))
 	res.Release()
 	if !errors.Is(err, errBodyDecode) {
 		t.Fatalf("want errBodyDecode, got %v", err)
@@ -195,7 +196,7 @@ func TestServerLiesAboutEncoding(t *testing.T) {
 func TestEmptyBodyIsNotAnError(t *testing.T) {
 	for _, k := range append([]string{"identity"}, btKinds...) {
 		t.Run(k, func(t *testing.T) {
-			res, err := readBody(bytes.NewReader(nil), btHdr(k), btLimit)
+			res, err := readBody(bytes.NewReader(nil), btHdr(k), btLimit, time.Now().Add(5*time.Second))
 			defer res.Release()
 			if err != nil || len(res.Body) != 0 {
 				t.Fatalf("err=%v len=%d", err, len(res.Body))
@@ -217,7 +218,7 @@ func (s *btSkipFrames) Read(p []byte) (int, error) {
 }
 
 func TestWireCapStopsOutputlessStreams(t *testing.T) {
-	res, err := readBody(&btSkipFrames{}, "zstd", btLimit)
+	res, err := readBody(&btSkipFrames{}, "zstd", btLimit, time.Now().Add(5*time.Second))
 	res.Release()
 	if !errors.Is(err, errBodyTooLarge) {
 		t.Fatalf("want errBodyTooLarge, got %v", err)

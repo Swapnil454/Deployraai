@@ -129,17 +129,15 @@ func main() {
 	}
 	defer pool.Close()
 
-	count := 8000 // default: 8000 total = 1000 per type
+	count := 3000 // default: 3000 HTTP-class monitors (Goal 2)
 	if len(os.Args) > 1 {
 		fmt.Sscanf(os.Args[1], "%d", &count)
 	}
-	// Enforce divisibility by 8 for equal splits
-	count = (count / 8) * 8
-	if count < 8 {
-		count = 8
-	}
-	perType := count / 8
-	log.Printf("Brutal soak seed: %d monitors total, %d per type, all at 30s interval", count, perType)
+	// Benchmark HTTP-class monitors only: http, keyword, api (Goal 2)
+	monitorTypes := []string{"http", "keyword", "api"}
+	perType := count / len(monitorTypes)
+	count = perType * len(monitorTypes)
+	log.Printf("Brutal soak seed: %d HTTP-class monitors total, %d per type across %v, all at 30s interval", count, perType, monitorTypes)
 
 	log.Println("Truncating existing monitors and incidents...")
 	_, err = pool.Exec(ctx, "TRUNCATE uptime_monitors CASCADE")
@@ -150,9 +148,6 @@ func main() {
 	rng := rand.New(rand.NewSource(42))
 	var rows [][]interface{}
 	tagCounts := map[string]int{}
-
-	// The 8 monitor types to generate equally:
-	monitorTypes := []string{"http", "keyword", "ping", "port", "heartbeat", "dns", "api", "udp"}
 
 	for typeIdx, mType := range monitorTypes {
 		for i := 0; i < perType; i++ {
@@ -166,11 +161,11 @@ func main() {
 			)
 
 			// ~2% of http monitors are forced-down, ~0.5% forced-timeout, rest healthy
-			isDown    := (i % 50) == 0   // 2%
-			isTimeout := (i % 200) == 1  // 0.5%
+			isDown := (i % 50) == 0     // 2%
+			isTimeout := (i % 200) == 1 // 0.5%
 
-			// Enable real public internet URLs across 50+ unique domains
-			useReal := true
+			// Disable real public internet URLs, use controlled mock targets for the benchmark
+			useReal := false
 
 			switch mType {
 			case "http":
@@ -202,7 +197,12 @@ func main() {
 					keyword = "HEALTHY"
 				} else if useReal {
 					// Pick a real keyword site
-					sites := []struct{ url string; keyword string; tag string; mType string }{}
+					sites := []struct {
+						url     string
+						keyword string
+						tag     string
+						mType   string
+					}{}
 					for _, s := range realHTTPSites {
 						if s.mType == "keyword" {
 							sites = append(sites, s)
@@ -282,7 +282,12 @@ func main() {
 					tag = "timeout"
 					timeout = 5
 				} else if useReal {
-					sites := []struct{ url string; keyword string; tag string; mType string }{}
+					sites := []struct {
+						url     string
+						keyword string
+						tag     string
+						mType   string
+					}{}
 					for _, s := range realHTTPSites {
 						if s.mType == "api" {
 							sites = append(sites, s)
@@ -348,14 +353,14 @@ func main() {
 	log.Printf("%-20s  %6s  %5s", "TAG", "COUNT", "PCT")
 	total := 0
 	for _, tag := range []string{
-		"up_http","real_http","down","timeout",
-		"up_keyword","real_keyword",
-		"up_ping","real_ping",
-		"up_port","real_port",
+		"up_http", "real_http", "down", "timeout",
+		"up_keyword", "real_keyword",
+		"up_ping", "real_ping",
+		"up_port", "real_port",
 		"up_heartbeat",
-		"up_dns","real_dns",
-		"up_api","real_api",
-		"up_udp","real_udp",
+		"up_dns", "real_dns",
+		"up_api", "real_api",
+		"up_udp", "real_udp",
 	} {
 		if n, ok := tagCounts[tag]; ok {
 			log.Printf("  %-20s  %6d  %5.1f%%", tag, n, float64(n)*100/float64(count))
@@ -365,8 +370,11 @@ func main() {
 	// Any remaining tags
 	for tag, n := range tagCounts {
 		found := false
-		for _, known := range []string{"up_http","real_http","down","timeout","up_keyword","real_keyword","up_ping","real_ping","up_port","real_port","up_heartbeat","up_dns","real_dns","up_api","real_api","up_udp","real_udp"} {
-			if tag == known { found = true; break }
+		for _, known := range []string{"up_http", "real_http", "down", "timeout", "up_keyword", "real_keyword", "up_ping", "real_ping", "up_port", "real_port", "up_heartbeat", "up_dns", "real_dns", "up_api", "real_api", "up_udp", "real_udp"} {
+			if tag == known {
+				found = true
+				break
+			}
 		}
 		if !found {
 			log.Printf("  %-20s  %6d  %5.1f%%", tag, n, float64(n)*100/float64(count))

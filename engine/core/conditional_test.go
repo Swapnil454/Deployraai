@@ -74,7 +74,7 @@ func TestConditionalGET304BypassesExpectedStatus(t *testing.T) {
 	req1.SetRequestURI(ts.URL)
 	req1.Header.SetMethod("GET")
 	res1 := fasthttp.AcquireResponse()
-	
+
 	client := GetHTTPClient(mon, monKey)
 	err := client.DoTimeout(req1, res1, 5*time.Second)
 	if err != nil {
@@ -113,7 +113,10 @@ func TestConditionalGET304BypassesExpectedStatus(t *testing.T) {
 		statusOK = true
 	} else if len(mon.ExpectedStatus) > 0 {
 		for _, s := range mon.ExpectedStatus {
-			if res2.StatusCode() == s { statusOK = true; break }
+			if res2.StatusCode() == s {
+				statusOK = true
+				break
+			}
 		}
 	}
 	if !statusOK {

@@ -34,9 +34,9 @@ type EvidenceKey struct {
 }
 
 type evidenceEntry struct {
-	PoP      string    // Which PoP observed the failure
-	ASN      string    // Which ASN it belongs to
-	ErrClass ErrClass  // Must be a connect-level error
+	PoP        string   // Which PoP observed the failure
+	ASN        string   // Which ASN it belongs to
+	ErrClass   ErrClass // Must be a connect-level error
 	ObservedAt time.Time
 }
 
@@ -88,11 +88,11 @@ func (c *EvidenceCache) Record(ip, port, pop, asn string, errClass ErrClass) {
 		return
 	}
 	key := EvidenceKey{IP: ip, Port: port}
-	
+
 	for {
 		val, _ := c.m.LoadOrStore(key, &evidenceSet{entries: make(map[string]evidenceEntry)})
 		set := val.(*evidenceSet)
-		
+
 		set.mu.Lock()
 		if set.dead {
 			set.mu.Unlock()
@@ -110,7 +110,7 @@ func (c *EvidenceCache) Record(ip, port, pop, asn string, errClass ErrClass) {
 }
 
 // Lookup returns corroborating evidence for a (ip, port) failure if one exists
-// within the TTL window, AND newer than the round open time, AND the observing 
+// within the TTL window, AND newer than the round open time, AND the observing
 // PoP/ASN is different from the caller.
 // Returns (entry, true) if usable evidence is found.
 func (c *EvidenceCache) Lookup(ip, port, callerPoP, callerASN string, roundOpenedAt time.Time) (evidenceEntry, bool) {
@@ -119,10 +119,10 @@ func (c *EvidenceCache) Lookup(ip, port, callerPoP, callerASN string, roundOpene
 		return evidenceEntry{}, false
 	}
 	set := val.(*evidenceSet)
-	
+
 	set.mu.Lock()
 	defer set.mu.Unlock()
-	
+
 	for asn, e := range set.entries {
 		// Evidence must be fresh
 		if time.Since(e.ObservedAt) > evidenceTTL {
@@ -139,7 +139,7 @@ func (c *EvidenceCache) Lookup(ip, port, callerPoP, callerASN string, roundOpene
 		}
 		return e, true
 	}
-	
+
 	return evidenceEntry{}, false
 }
 
@@ -174,7 +174,7 @@ func (c *EvidenceCache) StartEvictionLoop(ctx interface{ Done() <-chan struct{} 
 						set.dead = true
 					}
 					set.mu.Unlock()
-					
+
 					if empty {
 						c.m.CompareAndDelete(key, val)
 					}

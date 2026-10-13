@@ -24,14 +24,14 @@ func TestCoreRace(t *testing.T) {
 		m := &Monitor{
 			ID:          id,
 			Interval:    30,
-			TimeoutMs:     5,
+			TimeoutMs:   5,
 			Type:        "http",
 			LastStatus:  "UP",
 			NextCheckAt: time.Now(),
 		}
 		ptr := new(atomic.Pointer[Monitor])
 		ptr.Store(m)
-		
+
 		Store.Mu.Lock()
 		Store.Monitors[id] = ptr
 		Store.Mu.Unlock()
@@ -44,7 +44,7 @@ func TestCoreRace(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 1000; j++ {
 				id := strconv.Itoa(j % numMonitors)
-				
+
 				Store.Mu.RLock()
 				p, exists := Store.Monitors[id]
 				Store.Mu.RUnlock()
@@ -69,7 +69,7 @@ func TestCoreRace(t *testing.T) {
 				Store.UpdateRuntime(id, func(m *Monitor) {
 					m.AwaitingResult = true
 				})
-				
+
 				if j%2 == 0 {
 					HandleSuccess(id, nil, uint32(j%100))
 				} else {

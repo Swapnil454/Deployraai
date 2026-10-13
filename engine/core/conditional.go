@@ -28,8 +28,8 @@ var condShards = func() (s [64]condShard) {
 }()
 
 var (
-	conditionalHits        atomic.Int64
-	conditionalBypasses    atomic.Int64
+	conditionalHits          atomic.Int64
+	conditionalBypasses      atomic.Int64
 	conditionalDisagreements atomic.Int64
 )
 

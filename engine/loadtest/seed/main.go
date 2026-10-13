@@ -68,10 +68,10 @@ func main() {
 	// Behaviour buckets (per 1000):
 	// 960 up, 10 down, 5 timeout, 10 405, 15 keyword
 	type monitorSpec struct {
-		path     string
-		tag      string
-		keyword  string
-		mType    string
+		path    string
+		tag     string
+		keyword string
+		mType   string
 	}
 
 	rng := rand.New(rand.NewSource(42)) // deterministic seed for reproducibility
@@ -104,13 +104,20 @@ func main() {
 		default: // 96.0% plain up, split across types
 			rem := (v - 40) % 7
 			switch rem {
-			case 0: return monitorSpec{path: "/mock/up", tag: "up_http", mType: "http"}
-			case 1: return monitorSpec{path: "/mock/up", tag: "up_ping", mType: "ping"}
-			case 2: return monitorSpec{path: "/mock/up", tag: "up_port", mType: "port"}
-			case 3: return monitorSpec{path: "/mock/up", tag: "up_heartbeat", mType: "heartbeat"}
-			case 4: return monitorSpec{path: "/mock/up", tag: "up_dns", mType: "dns"}
-			case 5: return monitorSpec{path: "/mock/up", tag: "up_api", mType: "api"}
-			case 6: return monitorSpec{path: "/mock/up", tag: "up_udp", mType: "udp"}
+			case 0:
+				return monitorSpec{path: "/mock/up", tag: "up_http", mType: "http"}
+			case 1:
+				return monitorSpec{path: "/mock/up", tag: "up_ping", mType: "ping"}
+			case 2:
+				return monitorSpec{path: "/mock/up", tag: "up_port", mType: "port"}
+			case 3:
+				return monitorSpec{path: "/mock/up", tag: "up_heartbeat", mType: "heartbeat"}
+			case 4:
+				return monitorSpec{path: "/mock/up", tag: "up_dns", mType: "dns"}
+			case 5:
+				return monitorSpec{path: "/mock/up", tag: "up_api", mType: "api"}
+			case 6:
+				return monitorSpec{path: "/mock/up", tag: "up_udp", mType: "udp"}
 			}
 			return monitorSpec{path: "/mock/up", tag: "up_http", mType: "http"}
 		}

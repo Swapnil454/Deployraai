@@ -745,10 +745,10 @@ export async function getMonitorLatency(req, res) {
 
     const query = p.kind === 'raw'
       ? `SELECT ${p.step} AS time,
-                round(avgIf(latency_us, status != 0) / 1000, 3)               AS avg_ms,
-                round(quantileTDigestIf(0.95)(latency_us, status != 0) / 1000, 3) AS p95_ms,
-                round(maxIf(latency_us, status != 0) / 1000, 3)               AS max_ms,
-                round(100 * sumIf(interval_s, status != 0) / sum(interval_s), 3)  AS uptime_pct
+                round(avgIf(latency_us, status IN (1, 2)) / 1000, 3)               AS avg_ms,
+                round(quantileTDigestIf(0.95)(latency_us, status IN (1, 2)) / 1000, 3) AS p95_ms,
+                round(maxIf(latency_us, status IN (1, 2)) / 1000, 3)               AS max_ms,
+                round(100 * sumIf(interval_s, status IN (1, 2)) / nullIf(sumIf(interval_s, status != 3), 0), 3)  AS uptime_pct
          FROM uptime_telemetry
          WHERE monitor_id = {id:UUID} AND ts >= now() - INTERVAL {h:UInt32} HOUR
          GROUP BY time ORDER BY time ASC

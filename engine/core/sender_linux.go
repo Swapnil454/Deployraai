@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -31,21 +32,30 @@ func checksum(data []byte) uint16 {
 func sendRawSocket(m *Monitor, ptr *atomic.Pointer[Monitor], nonce uint64, hash uint32) {
 	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, syscall.IPPROTO_RAW)
 	if err != nil {
-		CASUpdate(ptr, func(mon *Monitor) { mon.AwaitingResult = false })
+		CASUpdate(ptr, func(mon *Monitor) {
+			mon.AwaitingResult = false
+			mon.NextCheckAt = time.Now().Add(time.Duration(mon.CurrentInterval) * time.Second)
+		})
 		log.Printf("Local send error (socket): %v", err)
 		return
 	}
 	defer syscall.Close(fd)
 
 	if err := syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, syscall.IP_HDRINCL, 1); err != nil {
-		CASUpdate(ptr, func(mon *Monitor) { mon.AwaitingResult = false })
+		CASUpdate(ptr, func(mon *Monitor) {
+			mon.AwaitingResult = false
+			mon.NextCheckAt = time.Now().Add(time.Duration(mon.CurrentInterval) * time.Second)
+		})
 		log.Printf("Local send error (setsockopt): %v", err)
 		return
 	}
 
 	ipBytes := net.ParseIP(m.TargetIP).To4()
 	if ipBytes == nil {
-		CASUpdate(ptr, func(mon *Monitor) { mon.AwaitingResult = false })
+		CASUpdate(ptr, func(mon *Monitor) {
+			mon.AwaitingResult = false
+			mon.NextCheckAt = time.Now().Add(time.Duration(mon.CurrentInterval) * time.Second)
+		})
 		log.Printf("Invalid TargetIP for raw socket: %s", m.TargetIP)
 		return
 	}
@@ -65,7 +75,7 @@ func sendRawSocket(m *Monitor, ptr *atomic.Pointer[Monitor], nonce uint64, hash 
 	binary.BigEndian.PutUint16(packet[2:4], uint16(len(packet)))
 	binary.BigEndian.PutUint16(packet[4:6], 0)
 	binary.BigEndian.PutUint16(packet[6:8], 0x4000) // DF flag
-	packet[8] = 64 // TTL
+	packet[8] = 64                                  // TTL
 	if isTCP {
 		packet[9] = syscall.IPPROTO_TCP
 	} else {
@@ -82,10 +92,10 @@ func sendRawSocket(m *Monitor, ptr *atomic.Pointer[Monitor], nonce uint64, hash 
 		tcpStart := 20
 		binary.BigEndian.PutUint16(packet[tcpStart:tcpStart+2], uint16(m.AssignedPort))
 		binary.BigEndian.PutUint16(packet[tcpStart+2:tcpStart+4], GetTargetPort(m.URL))
-		binary.BigEndian.PutUint32(packet[tcpStart+4:tcpStart+8], hash) // Seq Number = Hash
-		binary.BigEndian.PutUint32(packet[tcpStart+8:tcpStart+12], 0) // Ack = 0
-		packet[tcpStart+12] = 0x50 // Data offset (5 * 4 = 20)
-		packet[tcpStart+13] = 0x02 // SYN flag
+		binary.BigEndian.PutUint32(packet[tcpStart+4:tcpStart+8], hash)    // Seq Number = Hash
+		binary.BigEndian.PutUint32(packet[tcpStart+8:tcpStart+12], 0)      // Ack = 0
+		packet[tcpStart+12] = 0x50                                         // Data offset (5 * 4 = 20)
+		packet[tcpStart+13] = 0x02                                         // SYN flag
 		binary.BigEndian.PutUint16(packet[tcpStart+14:tcpStart+16], 64240) // Window
 
 		pseudo := make([]byte, 32)
@@ -94,20 +104,20 @@ func sendRawSocket(m *Monitor, ptr *atomic.Pointer[Monitor], nonce uint64, hash 
 		pseudo[9] = syscall.IPPROTO_TCP
 		binary.BigEndian.PutUint16(pseudo[10:12], 20) // TCP length
 		copy(pseudo[12:], packet[tcpStart:tcpStart+20])
-		
+
 		tcpChecksum := checksum(pseudo)
 		binary.BigEndian.PutUint16(packet[tcpStart+16:tcpStart+18], tcpChecksum)
 	} else {
 		// ICMP Header (Echo Request)
 		icmpStart := 20
-		packet[icmpStart] = 8 // Type = 8 (Echo Request)
+		packet[icmpStart] = 8   // Type = 8 (Echo Request)
 		packet[icmpStart+1] = 0 // Code = 0
-		
+
 		// Map index to ICMP ID, hash (16 bits) to Sequence
 		binary.BigEndian.PutUint16(packet[icmpStart+4:icmpStart+6], uint16(m.AssignedPort))
-		binary.BigEndian.PutUint16(packet[icmpStart+6:icmpStart+8], uint16(hash)) 
-		
-		icmpChecksum := checksum(packet[icmpStart:icmpStart+8])
+		binary.BigEndian.PutUint16(packet[icmpStart+6:icmpStart+8], uint16(hash))
+
+		icmpChecksum := checksum(packet[icmpStart : icmpStart+8])
 		binary.BigEndian.PutUint16(packet[icmpStart+2:icmpStart+4], icmpChecksum)
 	}
 
@@ -119,7 +129,10 @@ func sendRawSocket(m *Monitor, ptr *atomic.Pointer[Monitor], nonce uint64, hash 
 	SentNs[m.AssignedPort].Store(uint64(ts.Sec)*1e9 + uint64(ts.Nsec))
 
 	if err := syscall.Sendto(fd, packet, 0, &addr); err != nil {
-		CASUpdate(ptr, func(mon *Monitor) { mon.AwaitingResult = false })
+		CASUpdate(ptr, func(mon *Monitor) {
+			mon.AwaitingResult = false
+			mon.NextCheckAt = time.Now().Add(time.Duration(mon.CurrentInterval) * time.Second)
+		})
 		log.Printf("Local send error (sendto): %v", err)
 		return
 	}
@@ -161,8 +174,8 @@ func SendRST(targetIP string, sourcePort uint16, destPort uint16, hash uint32) {
 	binary.BigEndian.PutUint16(packet[tcpStart+2:tcpStart+4], destPort)
 	binary.BigEndian.PutUint32(packet[tcpStart+4:tcpStart+8], hash+1) // RST seq = original seq + 1 (the server's ACK expectation)
 	binary.BigEndian.PutUint32(packet[tcpStart+8:tcpStart+12], 0)
-	packet[tcpStart+12] = 0x50 // 20 bytes
-	packet[tcpStart+13] = 0x04 // RST flag
+	packet[tcpStart+12] = 0x50                                     // 20 bytes
+	packet[tcpStart+13] = 0x04                                     // RST flag
 	binary.BigEndian.PutUint16(packet[tcpStart+14:tcpStart+16], 0) // Window 0
 
 	pseudo := make([]byte, 32)
@@ -171,7 +184,7 @@ func SendRST(targetIP string, sourcePort uint16, destPort uint16, hash uint32) {
 	pseudo[9] = syscall.IPPROTO_TCP
 	binary.BigEndian.PutUint16(pseudo[10:12], 20)
 	copy(pseudo[12:], packet[tcpStart:tcpStart+20])
-	
+
 	tcpChecksum := checksum(pseudo)
 	binary.BigEndian.PutUint16(packet[tcpStart+16:tcpStart+18], tcpChecksum)
 

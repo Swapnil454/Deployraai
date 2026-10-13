@@ -37,11 +37,12 @@ import (
 const AcceptEncoding = "gzip, deflate, br"
 
 const (
-	wireFactor   = 4         // wire cap = limit*wireFactor + wireSlack
-	wireSlack    = 256 << 10 // headroom for small/incompressible bodies
-	maxPooledBuf = 1 << 20   // don't pin huge buffers in the pool
-	zstdMaxWin   = 2 << 20   // Capped at 2 MB to prevent memory bloat from hostile 8 MB zstd windows
-	zstdPoolSize = 16        // Reduced idle retention cap to ~40 MB
+	wireFactor      = 4         // wire cap = limit*wireFactor + wireSlack
+	wireSlack       = 256 << 10 // headroom for small/incompressible bodies
+	maxPooledBuf    = 1 << 20   // don't pin huge buffers in the pool
+	zstdMaxWin      = 2 << 20   // Capped at 2 MB to prevent memory bloat from hostile 8 MB zstd windows
+	zstdPoolSize    = 16        // Reduced idle retention cap to ~40 MB
+	bodyReadTimeout = 10 * time.Second
 )
 
 var (
@@ -86,7 +87,7 @@ var (
 // ReadKeywordBody reads up to `limit` decoded bytes from a fasthttp response.
 // It always returns a usable BodyResult (call Release); on error, Body holds
 // the valid decoded prefix, if any.
-func ReadKeywordBody(res *fasthttp.Response, limit int) (BodyResult, error) {
+func ReadKeywordBody(res *fasthttp.Response, limit int, deadline time.Time) (BodyResult, error) {
 	enc := string(res.Header.Peek(fasthttp.HeaderContentEncoding))
 	var src io.Reader
 	if stream := res.BodyStream(); stream != nil {
@@ -94,7 +95,7 @@ func ReadKeywordBody(res *fasthttp.Response, limit int) (BodyResult, error) {
 	} else {
 		src = bytes.NewReader(res.Body())
 	}
-	br, err := readBody(src, enc, limit)
+	br, err := readBody(src, enc, limit, deadline)
 	if err == nil && !br.WindowFull && br.Encoding == "identity" {
 		if cl := res.Header.ContentLength(); cl > 0 && br.WireBytes < int64(cl) {
 			err = fmt.Errorf("%w: got %d of %d bytes", errBodyTruncated, br.WireBytes, cl)
@@ -103,7 +104,7 @@ func ReadKeywordBody(res *fasthttp.Response, limit int) (BodyResult, error) {
 	return br, err
 }
 
-func readBody(src io.Reader, header string, limit int) (BodyResult, error) {
+func readBody(src io.Reader, header string, limit int, deadline time.Time) (BodyResult, error) {
 	res := BodyResult{pb: bufPool.Get().(*pooledBuf)}
 
 	enc, err := normalizeEncoding(header)
@@ -127,7 +128,8 @@ func readBody(src io.Reader, header string, limit int) (BodyResult, error) {
 		dec = d
 	}
 
-	full, rerr := readUpTo(dec, res.pb, limit)
+	// Pass src as the closer so the deadline timer can close the connection (Fix 5).
+	full, rerr := readUpTo(dec, res.pb, limit, deadline, src)
 	res.Body, res.WindowFull, res.WireBytes = res.pb.b, full, wr.n
 	if rerr != nil {
 		return res, finishErr(rerr, wr)
@@ -135,29 +137,82 @@ func readBody(src io.Reader, header string, limit int) (BodyResult, error) {
 	return res, nil
 }
 
+// deadlineReader wraps an io.Reader and interrupts blocking reads when the
+// absolute deadline passes (Fix 5: body reads share the check's own timeout).
+//
+// Strategy (in priority order):
+//  1. If the reader implements SetReadDeadline (net.Conn, tls.Conn, etc.),
+//     call it before each read — the OS kernel interrupts the blocking syscall.
+//  2. Otherwise, schedule a time.AfterFunc that closes an io.Closer after
+//     the deadline; the broken pipe causes r.Read() to return an error.
+//     The timer is always stopped after r.Read() returns to prevent leaks.
+type deadlineReader struct {
+	r        io.Reader
+	deadline time.Time
+}
+
+type deadliner interface {
+	SetReadDeadline(time.Time) error
+}
+
+func newDeadlineReader(r io.Reader, deadline time.Time, closer io.Reader) (*deadlineReader, func()) {
+	dr := &deadlineReader{r: r, deadline: deadline}
+	stop := func() {} // no-op unless we started a timer
+
+	if !deadline.IsZero() {
+		if dl, ok := closer.(deadliner); ok {
+			_ = dl.SetReadDeadline(deadline)
+		} else if rc, ok := closer.(io.ReadCloser); ok {
+			timer := time.AfterFunc(time.Until(deadline), func() { rc.Close() })
+			stop = func() { timer.Stop() }
+		}
+	}
+	return dr, stop
+}
+
+func (d *deadlineReader) Read(p []byte) (int, error) {
+	if !d.deadline.IsZero() {
+		rem := time.Until(d.deadline)
+		if rem <= 0 {
+			return 0, fmt.Errorf("read exceeded absolute deadline")
+		}
+		if dl, ok := d.r.(deadliner); ok {
+			_ = dl.SetReadDeadline(d.deadline)
+		}
+	}
+	return d.r.Read(p)
+}
+
 // readUpTo fills pb.b with up to limit bytes. It returns full=true if the
 // window filled, nil error on clean EOF, and the raw error otherwise.
-func readUpTo(r io.Reader, pb *pooledBuf, limit int) (full bool, err error) {
+// The deadline is enforced via deadlineReader so blocking reads are interrupted
+// when the per-check timeout expires (Fix 5: one deadline per check).
+func readUpTo(r io.Reader, pb *pooledBuf, limit int, deadline time.Time, closer io.Reader) (full bool, err error) {
 	if cap(pb.b) < limit {
 		pb.b = make([]byte, 0, limit)
 	}
 	buf := pb.b[:0]
 	empties := 0
-	start := time.Now()
-	timeout := 10 * time.Second
+
+	dr, stop := newDeadlineReader(r, deadline, closer)
+	defer stop()
 
 	for len(buf) < limit {
-		if time.Since(start) > timeout {
+		if !deadline.IsZero() && time.Now().After(deadline) {
 			pb.b = buf
-			return false, fmt.Errorf("read took longer than %v", timeout)
+			return false, fmt.Errorf("read exceeded absolute deadline")
 		}
-		
-		n, rerr := r.Read(buf[len(buf):limit])
+
+		n, rerr := dr.Read(buf[len(buf):limit])
 		buf = buf[:len(buf)+n]
 		if rerr != nil {
 			pb.b = buf
 			if errors.Is(rerr, io.EOF) {
 				return false, nil
+			}
+			// If deadline fired, classify as deadline error.
+			if !deadline.IsZero() && time.Now().After(deadline) {
+				return false, fmt.Errorf("read exceeded absolute deadline")
 			}
 			return false, rerr
 		}
@@ -206,7 +261,6 @@ func finishErr(err error, wr *wireReader) error {
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		return fmt.Errorf("%w: %v", errBodyTruncated, err)
 	}
-
 
 	return fmt.Errorf("%w: %v", errBodyDecode, err)
 }

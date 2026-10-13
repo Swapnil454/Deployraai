@@ -16,7 +16,7 @@ func (m *mockDB) FetchGroundTruth(monitorID string) MonitorState {
 func TestShellStateStore(t *testing.T) {
 	store := NewStateStore()
 	outbox, _ := NewOutbox(t.TempDir())
-defer outbox.Close()
+	defer outbox.Close()
 	cfg := MachineConfig{
 		RecoveryN:      2,
 		VoteDeadline:   10 * time.Second,

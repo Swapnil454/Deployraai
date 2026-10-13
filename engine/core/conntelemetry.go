@@ -51,15 +51,33 @@ type telemetryConn struct {
 	opened time.Time
 }
 
+type tlsBugfixConn struct {
+	net.Conn
+}
+
+func (c *tlsBugfixConn) SetWriteDeadline(t time.Time) error {
+	c.Conn.SetReadDeadline(t)
+	return c.Conn.SetWriteDeadline(t)
+}
+
 func newTelemetryConn(c net.Conn, cohort int) net.Conn {
 	if !EnableConnTelemetry {
-		return c
+		return &tlsBugfixConn{Conn: c}
 	}
 	return &telemetryConn{
 		Conn:   c,
 		cohort: cohort,
 		opened: time.Now(),
 	}
+}
+
+// SetWriteDeadline intercepts write deadlines and applies them to the read deadline as well.
+// This is a workaround for a bug in fasthttp where it creates a tls.Conn, sets the WriteDeadline,
+// and calls Write() without setting a ReadDeadline. If the Write() triggers a TLS handshake,
+// the handshake will block forever on Read() if the server doesn't respond.
+func (c *telemetryConn) SetWriteDeadline(t time.Time) error {
+	c.Conn.SetReadDeadline(t)
+	return c.Conn.SetWriteDeadline(t)
 }
 
 func (c *telemetryConn) Read(p []byte) (int, error) {

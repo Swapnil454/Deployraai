@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS uptime_telemetry
     monitor_id  UUID,
     ts          DateTime64(3, 'UTC') CODEC(DoubleDelta, ZSTD(1)),
     latency_us  UInt32               CODEC(T64, ZSTD(1)),  -- 0 when status = 0
-    status      UInt8,               -- 1 = UP, 0 = DOWN, 2 = DEGRADED
+    status      UInt8,               -- 1 = UP, 0 = DOWN, 2 = DEGRADED, 3 = NOT_EXECUTED (reaped; excluded from uptime and incidents)
     err_code    UInt8,               -- 0 ok, 1 timeout, 2 rst, 3 unreachable, 4 late
     probe_kind  UInt8,               -- 0 scheduled, 1 verification (5 s recheck)
     interval_s  UInt16,              -- effective interval that produced this sample (Phase 5)
@@ -46,13 +46,13 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_5m_mv TO telemetry_5m AS
 SELECT
     monitor_id,
     toStartOfFiveMinutes(toDateTime(ts))               AS bucket,
-    count()                                            AS probes,
-    countIf(status != 0)                               AS up_probes,
-    sum(interval_s)                                    AS total_s,
-    sumIf(interval_s, status != 0)                     AS up_s,
-    sumIf(latency_us, status != 0)                     AS lat_sum_us,
-    minIf(latency_us, status != 0)                     AS lat_min_us,
-    maxIf(latency_us, status != 0)                     AS lat_max_us,
-    quantilesTDigestIfState(0.5, 0.95, 0.99)(latency_us, status != 0) AS lat_q
+    countIf(status != 3)                               AS probes,
+    countIf(status IN (1, 2))                          AS up_probes,
+    sumIf(interval_s, status != 3)                     AS total_s,
+    sumIf(interval_s, status IN (1, 2))                AS up_s,
+    sumIf(latency_us, status IN (1, 2))                AS lat_sum_us,
+    minIf(latency_us, status IN (1, 2))                AS lat_min_us,
+    maxIf(latency_us, status IN (1, 2))                AS lat_max_us,
+    quantilesTDigestIfState(0.5, 0.95, 0.99)(latency_us, status IN (1, 2)) AS lat_q
 FROM uptime_telemetry
 GROUP BY monitor_id, bucket;

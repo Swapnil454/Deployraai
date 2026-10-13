@@ -54,12 +54,14 @@ type monitorEvent struct {
 }
 
 const numShards = 128
+
 var shardBuses [numShards]chan monitorEvent
 
 type persistJob struct {
 	monitorID string
 	effect    Effect
 }
+
 var persistBuses [numShards]chan persistJob
 
 // incidentSpool holds incidents that couldn't be delivered to IncidentQueue
@@ -74,13 +76,14 @@ var persistBuses [numShards]chan persistJob
 // OnIncidentOverflow (dead-letter). This prevents unbounded growth during a
 // sustained IncidentQueue consumer outage.
 const maxSpoolSize = 50_000
-var incidentSpool   []IncidentEvent
+
+var incidentSpool []IncidentEvent
 var incidentSpoolMu sync.Mutex
 
 func init() {
 	for i := 0; i < numShards; i++ {
-		shardBuses[i] = make(chan monitorEvent, 1000)
-		persistBuses[i] = make(chan persistJob, 1000)
+		shardBuses[i] = make(chan monitorEvent, 10000)
+		persistBuses[i] = make(chan persistJob, 10000)
 	}
 }
 
@@ -108,6 +111,7 @@ var States = NewStateStore()
 // noopDB is a stub for the DatabaseStub interface.
 // In production, EffectReloadState will be wired to db.FetchGroundTruth.
 type noopDB struct{}
+
 func (noopDB) FetchGroundTruth(monitorID string) MonitorState {
 	// Fallback: return a fresh UP state. The next reconciliation loop will fix it.
 	log.Printf("[WARN] EffectReloadState fired for %s but no DB stub is wired — using fresh UP state", monitorID)
@@ -157,7 +161,7 @@ func SubmitCheckResult(monitorID string, ev EventCheckResult) {
 func SubmitVoteResult(monitorID string, ev EventVoteResult) {
 	shard := getShard(monitorID)
 	me := monitorEvent{monitorID: monitorID, event: ev}
-	
+
 	select {
 	case shardBuses[shard] <- me:
 		return
@@ -180,11 +184,10 @@ var startDispatcherOnce sync.Once
 func ResetConfirmationDispatcherForTest() {
 	startDispatcherOnce = sync.Once{}
 	for i := 0; i < numShards; i++ {
-		shardBuses[i] = make(chan monitorEvent, 1000)
-		persistBuses[i] = make(chan persistJob, 1000)
+		shardBuses[i] = make(chan monitorEvent, 10000)
+		persistBuses[i] = make(chan persistJob, 10000)
 	}
 }
-
 
 // StartConfirmationDispatcher runs the shell event loop.
 // It reads from confirmationBus and dispatches effects.
@@ -200,7 +203,7 @@ func StartConfirmationDispatcher(ctx context.Context, wg *sync.WaitGroup, _ int)
 			wg.Add(2) // 1 for state worker, 1 for persist worker
 			stateWg.Add(1)
 			shardID := i
-			
+
 			// Persist Outbox Worker
 			go func() {
 				defer wg.Done()
@@ -240,90 +243,91 @@ func StartConfirmationDispatcher(ctx context.Context, wg *sync.WaitGroup, _ int)
 				for {
 					select {
 					case <-ctx.Done():
-						// Drain remaining events before exiting
-						for {
-							select {
-							case me := <-shardBuses[shardID]:
-								processMonitorEvent(me, outbox)
-							default:
-								return
-							}
-						}
+						return
 					case me := <-shardBuses[shardID]:
+						if ctx.Err() != nil {
+							return
+						}
 						processMonitorEvent(me, outbox)
 					}
 				}
 			}()
 		}
-	
-	// Start the global stale round sweeper (fixes dropped EventVoteDeadline bugs)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				States.GarbageCollectAndSweep(5*time.Minute, func(monID string) {
-					shard := getShard(monID)
-					select {
-					case shardBuses[shard] <- monitorEvent{monitorID: monID, event: EventSweep{}}:
-					default:
-					}
-				})
-			}
-		}
-	}()
-	// Spool drain goroutine: retries spooled incidents every 500 ms.
-	// Started here (not in init) so it has a ctx for clean shutdown.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-		drainSpool := func() {
-			incidentSpoolMu.Lock()
-			defer incidentSpoolMu.Unlock()
-			if len(incidentSpool) == 0 {
-				return
-			}
-			remaining := incidentSpool[:0]
-			for _, evt := range incidentSpool {
+
+		// Start the global stale round sweeper (fixes dropped EventVoteDeadline bugs)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			for {
 				select {
-				case IncidentQueue <- evt:
-					// delivered
-				default:
-					remaining = append(remaining, evt)
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if ctx.Err() != nil {
+						return
+					}
+					States.GarbageCollectAndSweep(5*time.Minute, func(monID string) {
+						if ctx.Err() != nil {
+							return
+						}
+						shard := getShard(monID)
+						select {
+						case shardBuses[shard] <- monitorEvent{monitorID: monID, event: EventSweep{}}:
+						default:
+						}
+					})
 				}
 			}
-			incidentSpool = remaining
-			if len(incidentSpool) > 0 {
-				log.Printf("[WARN] incident spool still has %d undelivered events", len(incidentSpool))
+		}()
+		// Spool drain goroutine: retries spooled incidents every 500 ms.
+		// Started here (not in init) so it has a ctx for clean shutdown.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ticker := time.NewTicker(500 * time.Millisecond)
+			defer ticker.Stop()
+			drainSpool := func() {
+				incidentSpoolMu.Lock()
+				defer incidentSpoolMu.Unlock()
+				if len(incidentSpool) == 0 {
+					return
+				}
+				remaining := incidentSpool[:0]
+				for _, evt := range incidentSpool {
+					select {
+					case IncidentQueue <- evt:
+						// delivered
+					default:
+						remaining = append(remaining, evt)
+					}
+				}
+				incidentSpool = remaining
+				if len(incidentSpool) > 0 {
+					log.Printf("[WARN] incident spool still has %d undelivered events", len(incidentSpool))
+				}
 			}
-		}
-		for {
-			select {
-			case <-ctx.Done():
-				// Final flush: drain whatever is left before this goroutine exits.
-				drainSpool()
-				return
-			case <-ticker.C:
-				drainSpool()
+			for {
+				select {
+				case <-ctx.Done():
+					// Final flush: drain whatever is left before this goroutine exits.
+					drainSpool()
+					return
+				case <-ticker.C:
+					drainSpool()
+				}
 			}
-		}
-	}()
-	// Closer: wait for state workers to drain, then close persistBuses so
-	// persist workers can exit cleanly.
-	go func() {
-		<-ctx.Done()
-		stateWg.Wait()
-		for i := 0; i < numShards; i++ {
-			close(persistBuses[i])
-		}
-	}()
+		}()
+		// Closer: wait for state workers to drain, then close persistBuses so
+		// persist workers can exit cleanly.
+		go func() {
+			<-ctx.Done()
+			stateWg.Wait()
+			for i := 0; i < numShards; i++ {
+				close(persistBuses[i])
+			}
+		}()
 	})
 }
 
@@ -349,7 +353,7 @@ func processMonitorEvent(me monitorEvent, outbox *Outbox) {
 	for len(events) > 0 {
 		ev := events[0]
 		events = events[1:]
-		
+
 		switch evTyped := ev.(type) {
 		case EventCheckResult:
 			if !evTyped.Ok && isConnectLevelError(evTyped.ErrClass) {

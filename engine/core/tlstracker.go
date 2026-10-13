@@ -18,12 +18,12 @@ type TLSStats struct {
 // tlsStats[0] = default cohort, tlsStats[1] = classical key-share cohort
 var tlsStats [2]TLSStats
 
-func GetTLSStats(cohort int) TLSStats {
+func GetTLSStats(cohort int) *TLSStats {
 	if cohort < 0 || cohort >= len(tlsStats) {
-		return TLSStats{}
+		return &TLSStats{}
 	}
 	s := &tlsStats[cohort]
-	var snapshot TLSStats
+	snapshot := new(TLSStats)
 	snapshot.Total.Store(s.Total.Load())
 	snapshot.Resumed.Store(s.Resumed.Load())
 	snapshot.Full.Store(s.Full.Load())
@@ -58,6 +58,7 @@ func installTLSObserver(cfg *tls.Config, cohort int) {
 	s := &tlsStats[cohort]
 	cfg.VerifyConnection = func(cs tls.ConnectionState) error {
 		s.observe(&cs)
+		recordGoroutineTLSResume(cs.DidResume)
 		if prev != nil {
 			return prev(cs)
 		}

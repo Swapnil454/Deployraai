@@ -17,6 +17,7 @@ var (
 const MaxRedirects = 5
 
 var blockedNetworks []netip.Prefix
+var DisableSSRFBlocker bool
 
 var engineHeaders = map[string]bool{
 	"User-Agent":      true,
@@ -27,28 +28,28 @@ var engineHeaders = map[string]bool{
 
 func init() {
 	cidrs := []string{
-		"169.254.0.0/16", // Link-local / AWS metadata
-		"10.0.0.0/8",     // RFC1918
-		"172.16.0.0/12",  // RFC1918
-		"192.168.0.0/16", // RFC1918
-		"127.0.0.0/8",    // Loopback
-		"100.64.0.0/10",  // CGNAT
-		"0.0.0.0/8",      // Zero
-		"192.0.0.0/24",   // IETF Protocol Assignments
-		"198.18.0.0/15",  // Benchmarking
-		"240.0.0.0/4",    // Reserved
-		"fc00::/7",       // ULA IPv6
-		"fe80::/10",      // Link-local IPv6
-		"64:ff9b::/96",   // NAT64
-		"2002::/16",      // 6to4
-		"::ffff:0:0/96",  // IPv4-mapped IPv6
-		"192.0.2.0/24",   // TEST-NET-1
-		"198.51.100.0/24",// TEST-NET-2
-		"203.0.113.0/24", // TEST-NET-3
-		"2001:db8::/32",  // Documentation
-		"2001::/32",      // Teredo
-		"64:ff9b:1::/48", // NAT64 Local
-		"100::/64",       // Discard-Only
+		"169.254.0.0/16",  // Link-local / AWS metadata
+		"10.0.0.0/8",      // RFC1918
+		"172.16.0.0/12",   // RFC1918
+		"192.168.0.0/16",  // RFC1918
+		"127.0.0.0/8",     // Loopback
+		"100.64.0.0/10",   // CGNAT
+		"0.0.0.0/8",       // Zero
+		"192.0.0.0/24",    // IETF Protocol Assignments
+		"198.18.0.0/15",   // Benchmarking
+		"240.0.0.0/4",     // Reserved
+		"fc00::/7",        // ULA IPv6
+		"fe80::/10",       // Link-local IPv6
+		"64:ff9b::/96",    // NAT64
+		"2002::/16",       // 6to4
+		"::ffff:0:0/96",   // IPv4-mapped IPv6
+		"192.0.2.0/24",    // TEST-NET-1
+		"198.51.100.0/24", // TEST-NET-2
+		"203.0.113.0/24",  // TEST-NET-3
+		"2001:db8::/32",   // Documentation
+		"2001::/32",       // Teredo
+		"64:ff9b:1::/48",  // NAT64 Local
+		"100::/64",        // Discard-Only
 	}
 
 	for _, cidr := range cidrs {
@@ -58,6 +59,9 @@ func init() {
 
 // IsBlocked returns true if the IP address is prohibited.
 func IsBlocked(ip netip.Addr) bool {
+	if DisableSSRFBlocker {
+		return false
+	}
 	if !ip.IsValid() {
 		return true // fail closed
 	}
@@ -107,12 +111,12 @@ func SafeRedirectPolicy(req *http.Request, via []*http.Request) error {
 	if len(via) == 0 {
 		return nil
 	}
-	
+
 	origin := via[0].URL
 	crossBoundary := !strings.EqualFold(req.URL.Hostname(), origin.Hostname()) ||
 		req.URL.Port() != origin.Port() ||
 		(origin.Scheme == "https" && req.URL.Scheme == "http")
-		
+
 	if crossBoundary {
 		for k := range req.Header {
 			if !engineHeaders[http.CanonicalHeaderKey(k)] {

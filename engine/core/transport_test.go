@@ -27,7 +27,7 @@ func TestTransportsA2(t *testing.T) {
 	}
 	server11.StartTLS()
 	defer server11.Close()
-	
+
 	// Create opts with certs for testing
 	certpool := x509.NewCertPool()
 	certpool.AddCert(server11.Certificate())
@@ -45,10 +45,10 @@ func TestTransportsA2(t *testing.T) {
 		t.Fatalf("Control client failed to connect to TLS 1.1 server: %v", err)
 	}
 	respCtrl.Body.Close()
-	
+
 	// 2. Strict tests
 	steady, cold := NewTransports(dialer, &TransportOptions{RootCAs: &tls.Config{RootCAs: certpool}})
-	
+
 	if steady.DisableKeepAlives {
 		t.Errorf("Steady transport must have DisableKeepAlives=false to allow TLS session resumption")
 	}
@@ -78,13 +78,12 @@ func TestTransportsA2(t *testing.T) {
 		t.Errorf("Cold transport failed on TLS 1.2 server: %v", err)
 	}
 
-	
 	clientSteady := &http.Client{Transport: steady}
 	_, err = clientSteady.Get(server11.URL)
 	if err == nil || !strings.Contains(err.Error(), "protocol version not supported") {
 		t.Errorf("Steady transport connected to TLS 1.1 server or returned wrong error: %v", err)
 	}
-	
+
 	clientCold := &http.Client{Transport: cold}
 	_, err = clientCold.Get(server11.URL)
 	if err == nil || !strings.Contains(err.Error(), "protocol version not supported") {
@@ -101,10 +100,10 @@ func TestTransportsA2(t *testing.T) {
 	}
 	server13.StartTLS()
 	defer server13.Close()
-	
+
 	certpool13 := x509.NewCertPool()
 	certpool13.AddCert(server13.Certificate())
-	
+
 	steady13, cold13 := NewTransports(dialer, &TransportOptions{RootCAs: &tls.Config{RootCAs: certpool13}})
 	clientSteady13 := &http.Client{Transport: steady13}
 	clientCold13 := &http.Client{Transport: cold13}
@@ -127,7 +126,7 @@ func TestTransportsA2(t *testing.T) {
 		defer resp.Body.Close()
 		return reusedConn, resp.TLS.DidResume
 	}
-	
+
 	// Test Steady (Should Not Reuse Conn, Should Resume TLS)
 	reused, resumed := doReq(clientSteady13) // first req
 	if reused || resumed {
@@ -143,7 +142,7 @@ func TestTransportsA2(t *testing.T) {
 		// is non-deterministic in unit tests. In production with a stable server this will resume.
 		t.Logf("Note: TLS session resumption not observed (httptest key rotation). TCP conn reuse verified.")
 	}
-	
+
 	// Test Cold (Should Not Reuse Conn, Should Not Resume TLS)
 	reused, resumed = doReq(clientCold13) // first req
 	if reused || resumed {
@@ -178,7 +177,7 @@ func TestClientHelloSize(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		
+
 		// TLS record header is 5 bytes.
 		hdr := make([]byte, 5)
 		_, err = io.ReadFull(conn, hdr)
@@ -193,7 +192,7 @@ func TestClientHelloSize(t *testing.T) {
 			close(done)
 			return
 		}
-		
+
 		done <- append(hdr, body...)
 	}()
 

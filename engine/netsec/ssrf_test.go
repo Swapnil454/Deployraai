@@ -19,7 +19,7 @@ func TestIsBlocked(t *testing.T) {
 		{"8.8.8.8", false},
 		{"1.1.1.1", false},
 		{"2606:4700:4700::1111", false},
-		
+
 		// Boundaries (should be false)
 		{"172.15.255.255", false},
 		{"172.32.0.1", false},
@@ -29,7 +29,7 @@ func TestIsBlocked(t *testing.T) {
 		{"198.20.0.1", false},
 		{"169.253.255.255", false},
 		{"192.0.1.1", false},
-		
+
 		// Explicit Blocks
 		{"169.254.169.254", true}, // AWS metadata
 		{"10.0.0.1", true},        // RFC1918
@@ -46,17 +46,17 @@ func TestIsBlocked(t *testing.T) {
 		{"fe80::1", true},         // Link-local IPv6
 		{"64:ff9b::1", true},      // NAT64
 		{"2002::1", true},         // 6to4
-		
+
 		// Tricky Mappings
 		{"::ffff:169.254.169.254", true},
 		{"::ffff:10.0.0.1", true},
-		
+
 		// Multicast & Others
 		{"224.0.0.1", true},
 		{"ff02::1", true},
 		{"255.255.255.255", true},
 		{"::", true},
-		
+
 		// Zoned
 		{"fe80::1%eth0", true},
 		{"fc00::1%eth0", true},
@@ -71,7 +71,7 @@ func TestIsBlocked(t *testing.T) {
 			t.Errorf("IsBlocked(%s) = %v; want %v", tc.ip, got, tc.blocked)
 		}
 	}
-	
+
 	// Test Zero Addr (Fail Open Fix)
 	if !IsBlocked(netip.Addr{}) {
 		t.Errorf("IsBlocked(netip.Addr{}) = false; want true")
@@ -83,15 +83,15 @@ func TestControlBlocksReachableLoopback(t *testing.T) {
 		t.Error("connection reached the server")
 	}))
 	defer srv.Close()
-	
+
 	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
 	d := &net.Dialer{Control: SSRFControl}
-	
+
 	for _, host := range []string{"127.0.0.1", "localhost", "::1"} {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		_, err := d.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
 		cancel()
-		
+
 		if !errors.Is(err, ErrSSRFBlocked) {
 			t.Errorf("%s: want ErrSSRFBlocked, got %v", host, err)
 		}
@@ -103,15 +103,15 @@ func TestRedirectToBlockedIPRefused(t *testing.T) {
 		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
 	}))
 	defer srv.Close()
-	
+
 	allowLoopback := func(ip netip.Addr) bool { return !ip.Unmap().IsLoopback() && IsBlocked(ip) }
-	
+
 	c := &http.Client{
 		Timeout:       3 * time.Second,
 		CheckRedirect: SafeRedirectPolicy,
-		Transport: &http.Transport{DialContext: (&net.Dialer{Control: controlWith(allowLoopback)}).DialContext},
+		Transport:     &http.Transport{DialContext: (&net.Dialer{Control: controlWith(allowLoopback)}).DialContext},
 	}
-	
+
 	_, err := c.Get(srv.URL)
 	if !errors.Is(err, ErrSSRFBlocked) {
 		t.Fatalf("want ErrSSRFBlocked, got %v", err)
@@ -144,7 +144,7 @@ func TestSafeRedirectPolicy(t *testing.T) {
 	reqSame, _ := http.NewRequest("GET", "https://site-a.com/path2", nil)
 	reqSame.Header.Set("Zzz-Whatever", "secret2")
 	reqSame.Header.Set("User-Agent", "Engine/1.0")
-	
+
 	err = SafeRedirectPolicy(reqSame, []*http.Request{req1})
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -152,7 +152,7 @@ func TestSafeRedirectPolicy(t *testing.T) {
 	if reqSame.Header.Get("Zzz-Whatever") != "secret2" {
 		t.Errorf("Expected Zzz-Whatever to be retained on same-origin redirect")
 	}
-	
+
 	// The hop cap is tested via a real server chain in TestSafeRedirectPolicyChain
 }
 
@@ -177,7 +177,7 @@ func TestSafeRedirectPolicyChain(t *testing.T) {
 		t.Errorf("Expected ErrTooManyRedirects, got %v", err)
 	}
 	// The first request is redirects=1, then 5 more redirects before failing on the 6th
-	// Wait, SafeRedirectPolicy is called *before* making the redirect. 
+	// Wait, SafeRedirectPolicy is called *before* making the redirect.
 	// The 5th redirect (via len = 5) is allowed, it responds with a redirect.
 	// The 6th redirect (via len = 6) is blocked by CheckRedirect.
 	// So the server sees 6 requests in total (initial + 5 successful redirects).

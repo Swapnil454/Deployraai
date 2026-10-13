@@ -12,6 +12,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/uuid"
+	"strings"
 )
 
 type Sample struct {
@@ -30,15 +31,22 @@ type Sample struct {
 	DidResume      uint8  // 0=full handshake, 1=TLS session resumed
 	ReqMethod      uint8  // 0=HEAD, 1=GET
 	ReqScheme      uint8  // 0=HTTP, 1=HTTPS
+	Generation     uint64 // CheckGeneration for unambiguous full-ID join
 }
 
 var (
-	TelemetryQueue   = make(chan Sample, 65536)
-	TelemetryDropped atomic.Uint64
+	TelemetryQueue    = make(chan Sample, 65536)
+	TelemetryDropped  atomic.Uint64
+	TelemetryEnqueued atomic.Uint64
+	TelemetryFlushed  atomic.Uint64
+	TelemetryFailed   atomic.Uint64
+	ActiveBufRows     atomic.Int32
 )
 
-// Emit pushes a latency sample into the non-blocking channel.
+// Emit accounts every attempted enqueue. The counters obey:
+// enqueued = flushed + failed + dropped + in_flight.
 func Emit(s Sample) {
+	TelemetryEnqueued.Add(1)
 	select {
 	case TelemetryQueue <- s:
 	default:
@@ -67,6 +75,7 @@ type Cols struct {
 	DidResume []uint8
 	ReqMethod []uint8
 	ReqScheme []uint8
+	Gen       []uint64
 }
 
 func newCols(cap int) *Cols {
@@ -86,6 +95,7 @@ func newCols(cap int) *Cols {
 		DidResume: make([]uint8, 0, cap),
 		ReqMethod: make([]uint8, 0, cap),
 		ReqScheme: make([]uint8, 0, cap),
+		Gen:       make([]uint64, 0, cap),
 	}
 }
 
@@ -105,6 +115,7 @@ func (c *Cols) add(s Sample) {
 	c.DidResume = append(c.DidResume, s.DidResume)
 	c.ReqMethod = append(c.ReqMethod, s.ReqMethod)
 	c.ReqScheme = append(c.ReqScheme, s.ReqScheme)
+	c.Gen = append(c.Gen, s.Generation)
 }
 
 func (c *Cols) len() int {
@@ -127,52 +138,110 @@ func (c *Cols) reset() {
 	c.DidResume = c.DidResume[:0]
 	c.ReqMethod = c.ReqMethod[:0]
 	c.ReqScheme = c.ReqScheme[:0]
+	c.Gen = c.Gen[:0]
 }
 
 var telemetryBreakerUntil atomic.Int64
 var TelemetrySpoolEvicted atomic.Uint64
+
 const telemetrySpoolDir = "telemetry-spool"
 
-func flush(ctx context.Context, conn driver.Conn, c *Cols) bool {
+func flush(ctx context.Context, conn driver.Conn, c *Cols, batchID string) bool {
 	if c.len() == 0 {
 		return true
 	}
 
 	var batch driver.Batch
 	var err error
+	query := "INSERT INTO uptime_telemetry (monitor_id, ts, latency_us, status, err_code, monitor_type, probe_kind, interval_s, phase_kind, attempts, total_latency_us, reused, did_resume, req_method, req_scheme, generation) SETTINGS async_insert=1, wait_for_async_insert=0, insert_deduplication_token='" + batchID + "'"
 	for attempt := 1; attempt <= 3; attempt++ {
-		batch, err = conn.PrepareBatch(ctx, "INSERT INTO uptime_telemetry (monitor_id, ts, latency_us, status, err_code, probe_kind, interval_s, phase_kind, attempts, total_latency_us, reused, did_resume, req_method, req_scheme)")
+		batch, err = conn.PrepareBatch(ctx, query)
 		if err == nil {
 			break
 		}
 		time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 	}
-	
+
 	if err != nil {
 		log.Printf("ClickHouse PrepareBatch error after 3 attempts: %v", err)
 		return false
 	}
+	defer func() {
+		if batch != nil {
+			_ = batch.Abort()
+		}
+	}()
 
-	if err := batch.Column(0).Append(c.ID); err != nil { return false }
-	if err := batch.Column(1).Append(c.Ts); err != nil { return false }
-	if err := batch.Column(2).Append(c.Lat); err != nil { return false }
-	if err := batch.Column(3).Append(c.St); err != nil { return false }
-	if err := batch.Column(4).Append(c.Er); err != nil { return false }
-	if err := batch.Column(5).Append(c.ProbeKind); err != nil { return false }
-	if err := batch.Column(6).Append(c.Iv); err != nil { return false }
-	if err := batch.Column(7).Append(c.PhaseKind); err != nil { return false }
-	if err := batch.Column(8).Append(c.Attempts); err != nil { return false }
-	if err := batch.Column(9).Append(c.TotalLat); err != nil { return false }
-	if err := batch.Column(10).Append(c.Reused); err != nil { return false }
-	if err := batch.Column(11).Append(c.DidResume); err != nil { return false }
-	if err := batch.Column(12).Append(c.ReqMethod); err != nil { return false }
-	if err := batch.Column(13).Append(c.ReqScheme); err != nil { return false }
-	
+	if err := batch.Column(0).Append(c.ID); err != nil {
+		log.Printf("ClickHouse append error col 0 (ID): %v", err)
+		return false
+	}
+	if err := batch.Column(1).Append(c.Ts); err != nil {
+		log.Printf("ClickHouse append error col 1 (Ts): %v", err)
+		return false
+	}
+	if err := batch.Column(2).Append(c.Lat); err != nil {
+		log.Printf("ClickHouse append error col 2 (Lat): %v", err)
+		return false
+	}
+	if err := batch.Column(3).Append(c.St); err != nil {
+		log.Printf("ClickHouse append error col 3 (St): %v", err)
+		return false
+	}
+	if err := batch.Column(4).Append(c.Er); err != nil {
+		log.Printf("ClickHouse append error col 4 (Er): %v", err)
+		return false
+	}
+	if err := batch.Column(5).Append(c.Kd); err != nil {
+		log.Printf("ClickHouse append error col 5 (MonitorType): %v", err)
+		return false
+	}
+	if err := batch.Column(6).Append(c.ProbeKind); err != nil {
+		log.Printf("ClickHouse append error col 6 (ProbeKind): %v", err)
+		return false
+	}
+	if err := batch.Column(7).Append(c.Iv); err != nil {
+		log.Printf("ClickHouse append error col 7 (Iv): %v", err)
+		return false
+	}
+	if err := batch.Column(8).Append(c.PhaseKind); err != nil {
+		log.Printf("ClickHouse append error col 8 (PhaseKind): %v", err)
+		return false
+	}
+	if err := batch.Column(9).Append(c.Attempts); err != nil {
+		log.Printf("ClickHouse append error col 9 (Attempts): %v", err)
+		return false
+	}
+	if err := batch.Column(10).Append(c.TotalLat); err != nil {
+		log.Printf("ClickHouse append error col 10 (TotalLat): %v", err)
+		return false
+	}
+	if err := batch.Column(11).Append(c.Reused); err != nil {
+		log.Printf("ClickHouse append error col 11 (Reused): %v", err)
+		return false
+	}
+	if err := batch.Column(12).Append(c.DidResume); err != nil {
+		log.Printf("ClickHouse append error col 12 (DidResume): %v", err)
+		return false
+	}
+	if err := batch.Column(13).Append(c.ReqMethod); err != nil {
+		log.Printf("ClickHouse append error col 13 (ReqMethod): %v", err)
+		return false
+	}
+	if err := batch.Column(14).Append(c.ReqScheme); err != nil {
+		log.Printf("ClickHouse append error col 14 (ReqScheme): %v", err)
+		return false
+	}
+	if err := batch.Column(15).Append(c.Gen); err != nil {
+		log.Printf("ClickHouse append error col 15 (Generation): %v", err)
+		return false
+	}
+
 	if err := batch.Send(); err != nil {
 		log.Printf("ClickHouse batch Send error: %v", err)
 		return false
 	}
-	
+
 	return true
 }
 
@@ -191,58 +260,66 @@ func StartTelemetryFlusher(ctx context.Context, wg *sync.WaitGroup, conn driver.
 		tick := time.NewTicker(cfg.FlushEvery)
 		defer tick.Stop()
 
-		flushChan := make(chan *Cols, 2)
-		
-		// Async flusher goroutine
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for b := range flushChan {
-				attemptFlush(ctx, conn, b)
-			}
-		}()
-
 		for {
 			select {
+			case <-ctx.Done():
+				// Routine exits on ctx cancel. Flush remaining activeBuf rows before exiting.
+				if activeBuf.len() > 0 {
+					fctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					attemptFlush(fctx, conn, activeBuf)
+					cancel()
+					ActiveBufRows.Store(0)
+				}
+				return
 			case s := <-TelemetryQueue:
 				activeBuf.add(s)
+				ActiveBufRows.Store(int32(activeBuf.len()))
 				if activeBuf.len() >= cfg.MaxRows {
-					flushChan <- activeBuf
+					fctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+					attemptFlush(fctx, conn, activeBuf)
+					cancel()
 					activeBuf = newCols(cfg.MaxRows)
+					ActiveBufRows.Store(0)
 				}
 			case <-tick.C:
 				if activeBuf.len() > 0 {
-					flushChan <- activeBuf
-					activeBuf = newCols(cfg.MaxRows)
-				}
-			case <-ctx.Done():
-				// Non-blocking read of what is queued
-				drain(activeBuf)
-				if activeBuf.len() > 0 {
-					fctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+					fctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 					attemptFlush(fctx, conn, activeBuf)
 					cancel()
+					activeBuf = newCols(cfg.MaxRows)
+					ActiveBufRows.Store(0)
 				}
-				close(flushChan)
-				return
 			}
 		}
 	}()
 }
 
 func attemptFlush(ctx context.Context, conn driver.Conn, buf *Cols) {
+	rows := uint64(buf.len())
+	if rows == 0 {
+		return
+	}
+	batchID := uuid.New().String()
 	if time.Now().UnixNano() < telemetryBreakerUntil.Load() {
-		SpoolBatch(buf)
+		log.Printf("[TELEMETRY] Circuit breaker active! Dropping %d rows to spool", rows)
+		SpoolBatch(buf, batchID)
+		TelemetryFailed.Add(rows)
 		buf.reset()
 		return
 	}
 
-	if success := flush(ctx, conn, buf); success {
+	log.Printf("[TELEMETRY] Flushing %d rows...", rows)
+	start := time.Now()
+	if success := flush(ctx, conn, buf, batchID); success {
+		log.Printf("[TELEMETRY] Flushed %d rows successfully in %v", rows, time.Since(start))
+		TelemetryFlushed.Add(rows)
 		buf.reset()
 	} else {
-		// Circuit break for 30s
-		telemetryBreakerUntil.Store(time.Now().Add(30 * time.Second).UnixNano())
-		SpoolBatch(buf)
+		log.Printf("[TELEMETRY] Flush failed for %d rows!", rows)
+		// Circuit break for 5s
+		telemetryBreakerUntil.Store(time.Now().Add(5 * time.Second).UnixNano())
+		SpoolBatch(buf, batchID)
+		TelemetryFailed.Add(rows)
 		buf.reset()
 	}
 }
@@ -258,10 +335,10 @@ func drain(buf *Cols) {
 	}
 }
 
-func SpoolBatch(c *Cols) {
+func SpoolBatch(c *Cols, batchID string) {
 	os.MkdirAll(telemetrySpoolDir, 0755)
-	
-	f, err := os.OpenFile(fmt.Sprintf("%s/seg-%d.bin", telemetrySpoolDir, time.Now().UnixNano()), os.O_CREATE|os.O_WRONLY, 0644)
+
+	f, err := os.OpenFile(fmt.Sprintf("%s/seg-%s.bin", telemetrySpoolDir, batchID), os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Printf("Failed to create spool file: %v", err)
 		return
@@ -278,7 +355,7 @@ func StartTelemetryReplayer(ctx context.Context, wg *sync.WaitGroup, conn driver
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ticker := time.NewTicker(60 * time.Second)
+		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -307,9 +384,16 @@ func StartTelemetryReplayer(ctx context.Context, wg *sync.WaitGroup, conn driver
 				dec := gob.NewDecoder(f)
 				if err := dec.Decode(&replayCols); err == nil {
 					f.Close()
-					
+
 					// Re-use the existing flush (without recursive attemptFlush)
-					if success := flush(ctx, conn, &replayCols); success {
+					fctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+					batchID := strings.TrimSuffix(strings.TrimPrefix(file.Name(), "seg-"), ".bin")
+					success := flush(fctx, conn, &replayCols, batchID)
+					cancel()
+
+					if success {
+						TelemetryFailed.Add(^uint64(replayCols.len() - 1))
+						TelemetryFlushed.Add(uint64(replayCols.len()))
 						os.Remove(filePath)
 						log.Printf("Replayed and removed telemetry spool segment: %s", file.Name())
 					}
@@ -321,3 +405,55 @@ func StartTelemetryReplayer(ctx context.Context, wg *sync.WaitGroup, conn driver
 		}
 	}()
 }
+
+// FinalTelemetryDrainAndFlush is called during engine shutdown after workers have drained/abandoned.
+// It drains remaining in-flight queue items and attempts to replay any spooled files.
+func FinalTelemetryDrainAndFlush(conn driver.Conn, timeout time.Duration) {
+	if conn == nil {
+		return
+	}
+
+	// 1. Drain TelemetryQueue and flush to ClickHouse
+	buf := newCols(10000)
+	drain(buf)
+	if buf.len() > 0 {
+		fctx, cancel := context.WithTimeout(context.Background(), timeout)
+		attemptFlush(fctx, conn, buf)
+		cancel()
+	}
+	ActiveBufRows.Store(0)
+
+	// 2. Replay all remaining spool files in telemetrySpoolDir
+	files, err := os.ReadDir(telemetrySpoolDir)
+	if err == nil {
+		for _, file := range files {
+			if !strings.HasSuffix(file.Name(), ".bin") {
+				continue
+			}
+			filePath := fmt.Sprintf("%s/%s", telemetrySpoolDir, file.Name())
+			f, err := os.Open(filePath)
+			if err != nil {
+				continue
+			}
+			var replayCols Cols
+			dec := gob.NewDecoder(f)
+			if err := dec.Decode(&replayCols); err == nil {
+				f.Close()
+				fctx, cancel := context.WithTimeout(context.Background(), timeout)
+				batchID := strings.TrimSuffix(strings.TrimPrefix(file.Name(), "seg-"), ".bin")
+				success := flush(fctx, conn, &replayCols, batchID)
+				cancel()
+				if success {
+					TelemetryFailed.Add(^uint64(replayCols.len() - 1))
+					TelemetryFlushed.Add(uint64(replayCols.len()))
+					os.Remove(filePath)
+					log.Printf("[TELEMETRY] Final shutdown replayed spool file: %s (%d rows)", file.Name(), replayCols.len())
+				}
+			} else {
+				f.Close()
+				os.Remove(filePath)
+			}
+		}
+	}
+}
+

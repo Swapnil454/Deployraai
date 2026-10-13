@@ -19,6 +19,23 @@ func init() {
 		outboundIP = conn.LocalAddr().(*net.UDPAddr).IP.To4()
 		conn.Close()
 	} else {
+		ifaces, _ := net.Interfaces()
+		for _, i := range ifaces {
+			addrs, _ := i.Addrs()
+			for _, addr := range addrs {
+				var ip net.IP
+				switch v := addr.(type) {
+				case *net.IPNet:
+					ip = v.IP
+				case *net.IPAddr:
+					ip = v.IP
+				}
+				if ip != nil && !ip.IsLoopback() && ip.To4() != nil {
+					outboundIP = ip.To4()
+					return
+				}
+			}
+		}
 		outboundIP = net.ParseIP("127.0.0.1").To4()
 	}
 }
@@ -61,4 +78,3 @@ func ExtractHost(urlStr string) string {
 	}
 	return strings.ToLower(host)
 }
-

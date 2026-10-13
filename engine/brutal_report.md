@@ -1,58 +1,99 @@
-﻿# Brutal Soak Report - 2026-10-07 04:36
+# Brutal Soak Report - 2026-10-14 01:30
 
 ## Test Configuration
 
 | Parameter         | Value                          |
 |-------------------|-------------------------------|
-| Monitor count     | 8000                  |
-| Per type          | 1000 (12.5% each)      |
-| Monitor types     | http, keyword, ping, port, heartbeat, dns, api, udp |
+| Monitor count     | 3000                  |
+| Run duration      | 1954 s             |
+| Engine Exit Code  | 0                      |
+| Effective Config  | 2026/10/13 19:27:03 [EFFECTIVE_CONFIG] arm=C-off commit=8397a4d build_tag=loadtest workers=3000 enable_engine_b=false idle_conn_dur_s=2 dns_cache=off rechecks=on tier_model=per_host compression_pct=0 |
 | Interval          | 30 s (all monitors)            |
-| Run duration      | 196 s             |
-| Compression       | 100% (all body-reading monitors use decompression) |
-| Commit            | 68dbb1d                    |
-| Seed time         | 2026-10-07T04:28:00                      |
-| Real sites        | Google, GitHub, Cloudflare, httpbin, JSONPlaceholder, Fastly |
+| Commit            | 8397a4d                    |
+| Seed time         | 2026-10-14T00:56:53                      |
+| Real-internet     | 0 (100% controlled)            |
 
 ## Resource Usage
 
 | Container      | CPU avg | CPU peak | MEM avg | MEM peak | Net RX MB | Net TX MB |
-|----------------|---------|----------|---------|----------|-----------|-----------|
-| engine         | 49.22% | 214.09% | 269.5 MB | 326.9 MB | 143 | 16.2 |
-| postgres       | 23.88%  | 109.94%  | 60.6 MB  | 65.7 MB  | 6.49  | 2.15  |
-| clickhouse     | 43.86%  | 217.27%  | 312.8 MB  | 338.4 MB  | 0.023  | 0.014  |
-| mock-farm      | 14.02% | 100.72% | 24.2 MB | 27.9 MB | 1.47 | 3.32 |
+|----------------|---------|----------|---------|----------|-----------|-----------| 
+| engine         | 11.57% | 66.73% | 249 MB | 291.4 MB | 212 | 281 |
+| postgres       | 1.02%  | 16.1%  | 50.5 MB  | 53.8 MB  | 11  | 3.74  |
+| clickhouse     | 8.37%  | 43.49%  | 349.7 MB  | 447.8 MB  | 5.19  | 1.88  |
+| mock-farm      | 10.08% | 64.67% | 29.7 MB | 43.9 MB | 267 | 207 |
 
-CPU percentages are relative to host/container limits.
+- **CPU secs / check (HTTP-class, whole run):** 0.001146 s (all) | 0.001173 s (healthy)
+- **CPU secs / check (Minutes 10-30 window):** 0 s
+- **NIC bytes (mock interface - HEADLINE):** 1457.75 B (window min 10-30) | 2519.32 B (whole run)
+- **NIC bytes (engine container total - secondary):** 2620.31 B (all) | 2789.11 B (window min 10-30)
+
+## Telemetry Invariant (pre-stop)
+
+- **Enqueued:** 197136
+- **Flushed:** 197014
+- **Failed:** 0
+- **Dropped:** 0
+- **In-flight:** 122
+- **Invariant:** HOLDS
 
 ## ClickHouse Telemetry
 
-- **Total rows inserted:** 897
-- **Expected checks (8000 monitors Ã— 30s interval over 180s):** ~48000
+| Metric | Value |
+|--------|-------|
+| Total rows | 197285 |
+| Unique rows (id, ts) | 197285 |
+| Exec rows (statusâ‰ 3) | 197285 |
+| OK rows (status=1) | 186000 |
+| Reaped rows (status=3) | 0 |
+| Scheduled rows (probe_kind=0) | 190921 |
+| Scheduled expected | 195400 |
+| Scheduled gap | 2.3% |
+| Verification rows (probe_kind=1) | 6364 |
+| Dup scheduled buckets (>1 sched/mon/30s) | 38 |
+| Dup total buckets (>1 row/mon/30s) | 4930 |
+| Dup precise tuples (id,kind,phase,30s) | 38 |
+| Post-stop CH count vs Flushed gap | 0 (0%) |
+| HTTP reuse share | 0% |
+| HTTP did_resume share | 95.2% |
+| HTTP warm_retry share | 0% |
+| Spool files | 0 |
 
-### Per-kind breakdown:
+## HTTP-Class Breakdown
 
-   ΓöîΓöÇprobe_kindΓöÇΓö¼ΓöÇreq_methodΓöÇΓö¼ΓöÇreq_schemeΓöÇΓö¼ΓöÇreusedΓöÇΓö¼ΓöÇdid_resumeΓöÇΓö¼ΓöÇsamplesΓöÇΓö¼ΓöÇavg_msΓöÇΓö¼ΓöÇp95_msΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇok_pctΓöÇΓöÉ 1. Γöé          0 Γöé          0 Γöé          1 Γöé      0 Γöé          1 Γöé      66 Γöé  906.8 Γöé   1938 Γöé 95.45454545454545 Γöé 2. Γöé          0 Γöé          0 Γöé          1 Γöé      1 Γöé          0 Γöé       5 Γöé  604.1 Γöé  699.3 Γöé               100 Γöé 3. Γöé          0 Γöé          1 Γöé          1 Γöé      0 Γöé          1 Γöé      17 Γöé    826 Γöé 1867.7 Γöé 70.58823529411765 Γöé 4. Γöé          0 Γöé          1 Γöé          1 Γöé      1 Γöé          0 Γöé      26 Γöé  320.8 Γöé  697.3 Γöé  92.3076923076923 Γöé 5. Γöé          0 Γöé          2 Γöé          0 Γöé      0 Γöé          0 Γöé     783 Γöé   12.4 Γöé   55.5 Γöé               100 Γöé    ΓööΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÿ
+   ΓöîΓöÇmonitor_typeΓöÇΓö¼ΓöÇreq_methodΓöÇΓö¼ΓöÇreq_schemeΓöÇΓö¼ΓöÇreusedΓöÇΓö¼ΓöÇdid_resumeΓöÇΓö¼ΓöÇphase_kindΓöÇΓö¼ΓöÇsamplesΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇok_pctΓöÇΓö¼ΓöÇavg_msΓöÇΓö¼ΓöÇp95_msΓöÇΓöÉ 1. Γöé            1 Γöé          0 Γöé          1 Γöé      0 Γöé          0 Γöé          1 Γöé    2140 Γöé 93.78504672897196 Γöé  124.6 Γöé  201.9 Γöé 2. Γöé            1 Γöé          0 Γöé          1 Γöé      0 Γöé          0 Γöé          0 Γöé    1000 Γöé              93.8 Γöé    109 Γöé  163.6 Γöé 3. Γöé            1 Γöé          0 Γöé          1 Γöé      0 Γöé          1 Γöé          0 Γöé   62628 Γöé 94.11445359902919 Γöé  130.4 Γöé  214.9 Γöé 4. Γöé            2 Γöé          1 Γöé          1 Γöé      0 Γöé          1 Γöé          0 Γöé   62626 Γöé 94.61565483984288 Γöé  131.4 Γöé  217.4 Γöé 5. Γöé            2 Γöé          1 Γöé          1 Γöé      0 Γöé          0 Γöé          1 Γöé    2148 Γöé 93.99441340782123 Γöé  123.7 Γöé  201.2 Γöé 6. Γöé            2 Γöé          1 Γöé          1 Γöé      0 Γöé          0 Γöé          0 Γöé    1000 Γöé              94.3 Γöé  108.7 Γöé  164.2 Γöé 7. Γöé            7 Γöé          0 Γöé          1 Γöé      0 Γöé          0 Γöé          1 Γöé    2120 Γöé  93.5377358490566 Γöé  124.3 Γöé  201.8 Γöé 8. Γöé            7 Γöé          0 Γöé          1 Γöé      0 Γöé          0 Γöé          0 Γöé    1000 Γöé              94.3 Γöé  108.8 Γöé  165.6 Γöé 9. Γöé            7 Γöé          0 Γöé          1 Γöé      0 Γöé          1 Γöé          0 Γöé   62623 Γöé 94.16827683119621 Γöé    131 Γöé    216 Γöé    ΓööΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÿ
 
-## Mock Farm
+## Mock Ground Truth
 
-- **Total requests served:** {"errors":166,"gzipped":0,"total":1022}
+| Metric | Value |
+|--------|-------|
+| Mock total hits | 197292 |
+| Mock errors | 18038 |
+| Mock inject_5xx | 6747 |
+| Mock 5s idle closes | 0 |
+| Mock 15s idle closes | 0 |
+| Mock 60s idle closes | 0 |
+| Mock 75s idle closes | 0 |
+| Mock vs Engine check gap | 0% |
 
-## Kill-Switch Drill
+## Shutdown
 
-- HTTP response: 200
-- Status: PASS - kill-switch functional
+- docker stop elapsed: 2.23s
+- Exit code: 0
 
-## What This Run Proves
+## Gate Criteria
 
-| Claim | Evidence |
-|-------|----------|
-| 8 types run equally at 30s | Seed distribution verified by SQL query 1 |
-| ~100 checks/monitor in 50 min | SQL query 4 checks_per_monitor |
-| Incident correctness (down/timeout only) | SQL query 3 |
-| No false positives | SQL query 6 |
-| ClickHouse ingestion works at load | Row count vs expected |
-| Kill-switch functional | Admin endpoint returns 200 |
-| RSS stable under compression | brutal_stats.csv MEM trend |
-| Real sites reachable and returning expected results | SQL query 7 real-site rows |
-
+| Criterion | Result |
+|-----------|--------|
+| Exit code 0 in <5s | PASS (2.23 s) |
+| Reaper rows == 0 | PASS |
+| HTTP-class rate within 5% | PASS (2.3%) |
+| Dup buckets == 0 | FAIL (38 buckets) |
+| Telemetry invariant holds | PASS |
+| Post-stop telemetry match <=0.5% | PASS (0%) |
+| Spool empty | PASS |
+| Mock request count within 5% | PASS (0%) |
+| False-DOWN == 0 | PASS |
+| False-UP == 0 | PASS |
+| NoKeepAlive reaches ~1500 by min 5 | N/A (C-off) |
+| Warm retry in late window <= 1.0% | N/A (C-off) |
+| Goroutines, FDs, RSS flat min 10-30 | FAIL |

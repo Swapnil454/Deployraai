@@ -19,7 +19,9 @@ func StartMetricsFlushLoop(ctx context.Context, wg *sync.WaitGroup, pool *pgxpoo
 	for {
 		select {
 		case <-ctx.Done():
-			flushMetrics(context.Background(), pool)
+			fctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			flushMetrics(fctx, pool)
+			cancel()
 			return
 		case <-ticker.C:
 			flushMetrics(ctx, pool)
@@ -77,7 +79,7 @@ func flushMetrics(ctx context.Context, pool *pgxpool.Pool) {
 			successful_checks = uptime_daily_metrics.successful_checks + EXCLUDED.successful_checks,
 			total_response_time_ms = uptime_daily_metrics.total_response_time_ms + EXCLUDED.total_response_time_ms
 	`
-	
+
 	_, err := pool.Exec(ctx, query, ids, dates, totals, oks, latencies)
 	if err == nil {
 		updateQuery := `

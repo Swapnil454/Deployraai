@@ -56,11 +56,6 @@ func TestBaseline0PercentErrorMix(t *testing.T) {
 		}
 	})
 
-
-
-
-
-
 	srv := httptest.Server{
 		Config: &http.Server{Handler: mux},
 	}
@@ -105,11 +100,8 @@ func TestBaseline0PercentErrorMix(t *testing.T) {
 			return
 		}
 
-
-
-
 		if keyword != "" {
-			br, rerr := ReadKeywordBody(res, 65536)
+			br, rerr := ReadKeywordBody(res, 65536, time.Now().Add(5*time.Second))
 			defer br.Release()
 
 			// Check Content-Encoding header seen by client

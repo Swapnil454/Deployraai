@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -151,8 +152,45 @@ func flushBodyStats() {
 // requests are rejected with 403 Forbidden.
 // The server is intentionally not wired into the engine's WaitGroup: it is
 // advisory and its goroutine can be left to exit with the process.
+func getOpenFDCount() int {
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return 0
+	}
+	return len(entries)
+}
+
+func getNoKeepAliveCount() int {
+	count := 0
+	Store.Mu.RLock()
+	for _, ptr := range Store.Monitors {
+		if ptr.Load().NoKeepAlive {
+			count++
+		}
+	}
+	Store.Mu.RUnlock()
+	return count
+}
+
 func StartAdminServer(addr string) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "telemetry_enqueued %d\n", TelemetryEnqueued.Load())
+		fmt.Fprintf(w, "telemetry_flushed_rows %d\n", TelemetryFlushed.Load())
+		fmt.Fprintf(w, "telemetry_failed_rows %d\n", TelemetryFailed.Load())
+		fmt.Fprintf(w, "telemetry_dropped %d\n", TelemetryDropped.Load())
+		fmt.Fprintf(w, "telemetry_in_flight %d\n", len(TelemetryQueue)+int(ActiveBufRows.Load()))
+		fmt.Fprintf(w, "mock_net_bytes_in %d\n", MockNetBytesIn.Load())
+		fmt.Fprintf(w, "mock_net_bytes_out %d\n", MockNetBytesOut.Load())
+		fmt.Fprintf(w, "mock_net_bytes_total %d\n", MockNetBytesIn.Load()+MockNetBytesOut.Load())
+		fmt.Fprintf(w, "goroutines %d\n", runtime.NumGoroutine())
+		fmt.Fprintf(w, "open_fds %d\n", getOpenFDCount())
+		fmt.Fprintf(w, "monitors_no_keepalive %d\n", getNoKeepAliveCount())
+		fmt.Fprintf(w, "warm_retry_first_err_eof %d\n", WarmRetryEOF.Load())
+		fmt.Fprintf(w, "warm_retry_first_err_reset %d\n", WarmRetryReset.Load())
+		fmt.Fprintf(w, "warm_retry_first_err_timeout %d\n", WarmRetryTimeout.Load())
+		fmt.Fprintf(w, "warm_retry_first_err_other %d\n", WarmRetryOther.Load())
+	})
 	mux.HandleFunc("/admin/compression", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

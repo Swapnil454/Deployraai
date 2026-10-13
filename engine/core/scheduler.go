@@ -23,7 +23,7 @@ func NextTick(now time.Time, interval time.Duration, id string) time.Time {
 	phase := time.Duration(HashID(id) % uint64(interval.Nanoseconds()))
 	shiftedNow := now.UnixNano() - int64(phase)
 	intervalsPassed := shiftedNow / int64(interval.Nanoseconds())
-	nextUnixNano := (intervalsPassed + 1) * int64(interval.Nanoseconds()) + int64(phase)
+	nextUnixNano := (intervalsPassed+1)*int64(interval.Nanoseconds()) + int64(phase)
 	return time.Unix(0, nextUnixNano)
 }
 
@@ -46,11 +46,11 @@ func IsColdCheck(id string, tick time.Time, interval time.Duration, lastColdAt t
 
 	slotsPerWindow := uint64(ColdCadence.Nanoseconds() / interval.Nanoseconds())
 	ownedSlot := HashID(id+"|cold") % slotsPerWindow
-	
+
 	phase := time.Duration(HashID(id) % uint64(interval.Nanoseconds()))
 	shiftedTick := tick.UnixNano() - int64(phase)
 	absoluteTickCount := uint64(shiftedTick / int64(interval.Nanoseconds()))
-	
+
 	currentSlot := absoluteTickCount % slotsPerWindow
 	return currentSlot == ownedSlot
 }

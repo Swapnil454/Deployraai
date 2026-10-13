@@ -274,7 +274,7 @@ type CachedDialer struct {
 	Bypass         bool // true => always fresh lookup (retry / DNS-monitor client)
 	Shadow         bool // true => perform shadow cache lookup, but dial fresh IP
 	ConnectTimeout time.Duration
-	Cohort         int  // 0 = default, 1 = classical key-share
+	Cohort         int // 0 = default, 1 = classical key-share
 }
 
 func (d *CachedDialer) Dial(addr string) (net.Conn, error) {
@@ -287,7 +287,9 @@ func (d *CachedDialer) Dial(addr string) (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		return newTelemetryConn(conn, d.Cohort), nil
+		tc := newTelemetryConn(conn, d.Cohort)
+		tc.SetDeadline(time.Now().Add(10 * time.Second))
+		return tc, nil
 	}
 
 	if d.Shadow {
@@ -331,7 +333,9 @@ func (d *CachedDialer) dialAny(addrs []netip.Addr, port string) (net.Conn, error
 		a := addrs[i]
 		conn, err := net.DialTimeout("tcp", net.JoinHostPort(a.String(), port), per)
 		if err == nil {
-			return newTelemetryConn(conn, d.Cohort), nil
+			tc := newTelemetryConn(conn, d.Cohort)
+			tc.SetDeadline(time.Now().Add(10 * time.Second))
+			return tc, nil
 		}
 		last = err
 	}

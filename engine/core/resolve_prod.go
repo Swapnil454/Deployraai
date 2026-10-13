@@ -4,9 +4,9 @@ package core
 
 import (
 	"context"
+	"github.com/your-org/uptime-engine/netsec"
 	"net"
 	"net/netip"
-	"github.com/your-org/uptime-engine/netsec"
 )
 
 var TLSInsecureSkipVerify bool = false

@@ -32,7 +32,7 @@ func parseIMFFixdate(b []byte) (time.Time, bool) {
 	}
 	mon := 0
 	for i, m := range imfMonths {
-		if string(b[8:11]) == m { 
+		if string(b[8:11]) == m {
 			mon = i + 1
 			break
 		}

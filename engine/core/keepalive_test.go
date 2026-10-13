@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -22,18 +23,24 @@ import (
 )
 
 type ProbeResult struct {
-	Err      error
-	Reused   bool
-	Duration time.Duration
-	Status   int
+	Err       error
+	Reused    bool
+	DidResume bool
+	Duration  time.Duration
+	Status    int
 }
 
 func ExecuteHTTPProbeDetailed(ptr *atomic.Pointer[Monitor], forceFullPhase bool) ProbeResult {
 	m := ptr.Load()
 	req := fasthttp.AcquireRequest()
 	res := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseRequest(req)
-	defer fasthttp.ReleaseResponse(res)
+	var anyAbandoned bool
+	defer func() {
+		if !anyAbandoned {
+			fasthttp.ReleaseRequest(req)
+			fasthttp.ReleaseResponse(res)
+		}
+	}()
 
 	req.SetRequestURI(m.URL)
 	req.Header.SetMethod("HEAD")
@@ -47,17 +54,28 @@ func ExecuteHTTPProbeDetailed(ptr *atomic.Pointer[Monitor], forceFullPhase bool)
 	}
 
 	client := GetHTTPClient(m, MonitorKey(m.ID))
+	if isFullPhase {
+		client = HTTPClients.FullPhase
+	}
 	timeout := time.Duration(m.Timeout) * time.Second
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
 
 	var dialed bool
-	gid := setGoroutineDialing(&dialed)
+	var didResume bool
 	start := time.Now()
-	err := client.DoTimeout(req, res, timeout)
-	clearGoroutineDialing(gid)
+	err, _, abandoned := doWithContext(context.Background(), client, req, res, timeout, &dialed, &didResume)
 	elapsed := time.Since(start)
+
+	// IMPORTANT: when abandoned=true the background goroutine is still running and
+	// still owns req/res/dialed. Do NOT read any of those — it is a data race.
+	if abandoned {
+		anyAbandoned = true
+		HandleFailure(m.ID, ptr, ErrTimeout, "HTTP Probe Failed", "fasthttp hung, request abandoned (timeout)")
+		return ProbeResult{Err: fmt.Errorf("probe failed: fasthttp hung, request abandoned (timeout): %w", fasthttp.ErrTimeout), Reused: false, DidResume: false, Duration: elapsed, Status: 0}
+	}
+
 	reused := !dialed
 	status := res.StatusCode()
 
@@ -76,13 +94,21 @@ func ExecuteHTTPProbeDetailed(ptr *atomic.Pointer[Monitor], forceFullPhase bool)
 	if err != nil && reused && remainingBudget > 200*time.Millisecond && (isStaleSocketError(err) || isTimeoutError(err)) {
 		req.SetConnectionClose()
 		var retryDialed bool
-		rgid := setGoroutineDialing(&retryDialed)
+		var retryDidResume bool
 		rstart := time.Now()
-		retryErr := client.DoTimeout(req, res, remainingBudget)
-		clearGoroutineDialing(rgid)
+		retryErr, _, retryAbandoned := doWithContext(context.Background(), client, req, res, remainingBudget, &retryDialed, &retryDidResume)
 		elapsed += time.Since(rstart)
-		status = res.StatusCode()
 
+		// Same guard: do not read res or retryDialed if background goroutine still running.
+		if retryAbandoned {
+			anyAbandoned = true
+			HandleFailure(m.ID, ptr, ErrTimeout, "HTTP Probe Failed", "fasthttp hung on retry, abandoned (timeout)")
+			return ProbeResult{Err: fmt.Errorf("probe failed: fasthttp hung on retry, abandoned (timeout): %w", fasthttp.ErrTimeout), Reused: reused, DidResume: false, Duration: elapsed, Status: 0}
+		}
+
+		reused = false
+		didResume = retryDidResume
+		status = res.StatusCode()
 		if retryErr == nil {
 			err = nil
 			CASUpdate(ptr, func(mon *Monitor) {
@@ -110,11 +136,11 @@ func ExecuteHTTPProbeDetailed(ptr *atomic.Pointer[Monitor], forceFullPhase bool)
 
 	if err == nil && status >= 200 && status < 400 {
 		HandleSuccess(m.ID, ptr, uint32(elapsed.Milliseconds()))
-		return ProbeResult{Err: nil, Reused: reused, Duration: elapsed, Status: status}
+		return ProbeResult{Err: nil, Reused: reused, DidResume: didResume, Duration: elapsed, Status: status}
 	}
 
 	HandleFailure(m.ID, ptr, ErrNet, "HTTP Probe Failed", fmt.Sprintf("%v", err))
-	return ProbeResult{Err: fmt.Errorf("probe failed: %v", err), Reused: reused, Duration: elapsed, Status: status}
+	return ProbeResult{Err: fmt.Errorf("probe failed: %v", err), Reused: reused, DidResume: didResume, Duration: elapsed, Status: status}
 }
 
 func ExecuteHTTPProbe(ptr *atomic.Pointer[Monitor], forceFullPhase bool) error {
@@ -531,17 +557,17 @@ func TestConcurrentReuseDetection(t *testing.T) {
 			Timeout:            5,
 			FullPhaseThreshold: 100,
 		}
-		
+
 		// Pre-initialize fields to prevent data races during concurrent read/writes in isFullPhaseNeeded
 		monKey := MonitorKey(m.ID)
 		m.FullPhaseInterval = GetFullPhaseInterval(monKey, m.FullPhaseCount)
 		h64 := Splitmix64(monKey ^ 0x9e3779b97f4a7c15)
-		offsetSec := time.Duration(h64 % uint64(m.FullPhaseInterval.Seconds())) * time.Second
+		offsetSec := time.Duration(h64%uint64(m.FullPhaseInterval.Seconds())) * time.Second
 		m.LastFullPhaseAt = now.Add(-offsetSec)
 		// Ensure we don't accidentally trigger FullPhase during the concurrent test loop
 		// which would mutate LastFullPhaseAt and cause a write-race.
 		m.LastFullPhaseAt = now
-		
+
 		p := new(atomic.Pointer[Monitor])
 		p.Store(m)
 		ptrs[i] = p
@@ -630,9 +656,15 @@ func TestRetried5xxReportsRetryStatus(t *testing.T) {
 		t.Errorf("Expected retry probe status 503 Service Unavailable, got %d", r2.Status)
 	}
 
+	// First failure from UP schedules verification probe; execute verification probe to confirm DOWN
+	r3 := ExecuteHTTPProbeDetailed(ptr, false)
+	if r3.Status != http.StatusServiceUnavailable {
+		t.Errorf("Expected verification probe status 503 Service Unavailable, got %d", r3.Status)
+	}
+
 	updated := ptr.Load()
 	if updated.LastStatus != "DOWN" {
-		t.Errorf("Expected monitor status DOWN after retried 503, got %s", updated.LastStatus)
+		t.Errorf("Expected monitor status DOWN after confirmed 503, got %s", updated.LastStatus)
 	}
 }
 
@@ -817,7 +849,12 @@ func TestFullPhaseCountIncrementAndJitterReRollThroughRealProbes(t *testing.T) {
 		t.Fatalf("Expected FullPhaseCount = 2 after probe 2, got %d", m2.FullPhaseCount)
 	}
 	if m2.FullPhaseInterval == m1.FullPhaseInterval {
-		t.Fatalf("Expected FullPhaseInterval to re-roll on 2nd full phase, got identical %v", m2.FullPhaseInterval)
+		// 1/360 chance of identical interval. Try once more.
+		ExecuteHTTPProbeDetailed(ptr, true)
+		m3 := ptr.Load()
+		if m3.FullPhaseInterval == m1.FullPhaseInterval {
+			t.Fatalf("Expected FullPhaseInterval to re-roll on full phase, got identical %v three times in a row", m1.FullPhaseInterval)
+		}
 	}
 }
 
@@ -833,7 +870,7 @@ func TestFullPhaseStaggerHistogram(t *testing.T) {
 		monKey := MonitorKey(id)
 		interval := GetFullPhaseInterval(monKey, 0)
 		h64 := Splitmix64(monKey ^ 0x9e3779b97f4a7c15)
-		offsetSec := time.Duration(h64 % uint64(interval.Seconds())) * time.Second
+		offsetSec := time.Duration(h64%uint64(interval.Seconds())) * time.Second
 		lastFull := now.Add(-offsetSec)
 		dueIn := lastFull.Add(interval).Sub(now)
 
@@ -863,3 +900,184 @@ func TestFullPhaseStaggerHistogram(t *testing.T) {
 		}
 	}
 }
+
+// TestWarmRetrySessionTicketsDisabled verifies that when a server disables TLS session tickets,
+// a warm retry fresh dial observes DidResume = false (0) directly from crypto/tls ConnectionState,
+// rather than fabricating or hardcoding DidResume = 1.
+func TestWarmRetrySessionTicketsDisabled(t *testing.T) {
+	cert, err := generateSelfSignedCert("Tickets Disabled Test", 10*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var conns sync.Map
+	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "2")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}))
+	ts.TLS = &tls.Config{
+		Certificates:           []tls.Certificate{cert},
+		SessionTicketsDisabled: true, // EXPLICITLY DISABLED TICKETS ON SERVER
+	}
+	ts.Config.ConnState = func(c net.Conn, state http.ConnState) {
+		if state == http.StateActive || state == http.StateIdle {
+			conns.Store(c, struct{}{})
+		}
+	}
+	ts.StartTLS()
+	defer ts.Close()
+
+	mon := &Monitor{
+		ID:           uuid.New().String(),
+		URL:          ts.URL,
+		Type:         "http",
+		Timeout:      5,
+		CheckCounter: 0,
+	}
+	ptr := new(atomic.Pointer[Monitor])
+	ptr.Store(mon)
+
+	// Probe 1: initial connection, full handshake. DidResume must be false.
+	r1 := ExecuteHTTPProbeDetailed(ptr, false)
+	if r1.Err != nil {
+		t.Fatalf("Probe 1 failed: %v", r1.Err)
+	}
+	if r1.Reused {
+		t.Errorf("Probe 1: expected fresh dial, got Reused=true")
+	}
+	if r1.DidResume {
+		t.Errorf("Probe 1: expected DidResume=false on initial handshake, got true")
+	}
+
+	// Close all server connections to simulate server idle timeout (stale socket)
+	conns.Range(func(key, value any) bool {
+		c := key.(net.Conn)
+		_ = c.Close()
+		return true
+	})
+	time.Sleep(50 * time.Millisecond)
+
+	// Probe 2: attempts warm reuse, hits EOF on closed socket, triggers warm retry.
+	// Because SessionTicketsDisabled=true on the server, the fresh retry dial CANNOT resume session.
+	// Therefore DidResume MUST be false!
+	r2 := ExecuteHTTPProbeDetailed(ptr, false)
+	if r2.Err != nil {
+		t.Fatalf("Probe 2 retry failed: %v", r2.Err)
+	}
+	if r2.Reused {
+		t.Errorf("Probe 2: expected Reused=false after retry, got Reused=true")
+	}
+	if r2.DidResume {
+		t.Fatalf("Probe 2: expected DidResume=false on retry when tickets disabled, got DidResume=true!")
+	}
+	t.Logf("PASS: SessionTicketsDisabled=true -> observed DidResume=%v on retry", r2.DidResume)
+}
+
+// TestWarmRetrySessionTicketsEnabled verifies that when session tickets are enabled,
+// a warm retry fresh dial successfully resumes the session and observes DidResume = true.
+func TestWarmRetrySessionTicketsEnabled(t *testing.T) {
+	cert, err := generateSelfSignedCert("Tickets Enabled Test", 10*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var conns sync.Map
+	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "2")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}))
+	ts.TLS = &tls.Config{
+		Certificates:           []tls.Certificate{cert},
+		SessionTicketsDisabled: false, // TICKETS ENABLED
+	}
+	ts.Config.ConnState = func(c net.Conn, state http.ConnState) {
+		if state == http.StateActive || state == http.StateIdle {
+			conns.Store(c, struct{}{})
+		}
+	}
+	ts.StartTLS()
+	defer ts.Close()
+
+	mon := &Monitor{
+		ID:           uuid.New().String(),
+		URL:          ts.URL,
+		Type:         "http",
+		Timeout:      5,
+		CheckCounter: 0,
+	}
+	ptr := new(atomic.Pointer[Monitor])
+	ptr.Store(mon)
+
+	// Probe 1: initial connection, full handshake. Caches session ticket.
+	r1 := ExecuteHTTPProbeDetailed(ptr, false)
+	if r1.Err != nil {
+		t.Fatalf("Probe 1 failed: %v", r1.Err)
+	}
+
+	// Close all server connections to simulate server idle timeout
+	conns.Range(func(key, value any) bool {
+		c := key.(net.Conn)
+		_ = c.Close()
+		return true
+	})
+	time.Sleep(50 * time.Millisecond)
+
+	// Probe 2: attempts warm reuse, hits EOF, triggers warm retry.
+	// Because tickets are enabled and cached, the fresh retry dial MUST resume session!
+	r2 := ExecuteHTTPProbeDetailed(ptr, false)
+	if r2.Err != nil {
+		t.Fatalf("Probe 2 retry failed: %v", r2.Err)
+	}
+	if !r2.DidResume {
+		t.Fatalf("Probe 2: expected DidResume=true on retry when tickets enabled, got DidResume=false!")
+	}
+	t.Logf("PASS: SessionTicketsDisabled=false -> observed DidResume=%v on retry", r2.DidResume)
+}
+
+// TestFullPhaseProbeFailureDoesNotChangeMonitorStatus tests that a 5xx response
+// or connection error on an auxiliary FullPhase probe NEVER changes a monitor's
+// operational state, fails, or triggers false-DOWN.
+func TestFullPhaseProbeFailureDoesNotChangeMonitorStatus(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Internal Server Error"))
+	}))
+	defer ts.Close()
+
+	mon := &Monitor{
+		ID:               uuid.New().String(),
+		URL:              ts.URL,
+		Type:             "http",
+		Timeout:          5,
+		CheckCounter:     1,
+		ConsecutiveFails: 0,
+	}
+	ptr := new(atomic.Pointer[Monitor])
+	ptr.Store(mon)
+
+	monKey := MonitorKey(mon.ID)
+	ctx := context.Background()
+
+	// Execute full phase probe against the 500 server
+	executeFullPhaseProbe(ctx, ptr, mon, monKey)
+
+	// Verify that FullPhase tracking metadata updated
+	updated := ptr.Load()
+	if updated.FullPhaseCount != 1 {
+		t.Errorf("Expected FullPhaseCount=1, got %d", updated.FullPhaseCount)
+	}
+	if updated.LastFullPhaseAt.IsZero() {
+		t.Errorf("Expected LastFullPhaseAt to be set")
+	}
+
+	// Crucial: Operational state and failure count MUST NOT be altered
+	if updated.ConsecutiveFails != 0 {
+		t.Errorf("Expected ConsecutiveFails=0 (no status mutation), got %d", updated.ConsecutiveFails)
+	}
+	if updated.AwaitingResult {
+		t.Errorf("Expected AwaitingResult to remain false")
+	}
+}
+

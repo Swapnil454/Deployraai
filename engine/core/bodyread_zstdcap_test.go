@@ -10,6 +10,7 @@ import (
 	"io"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -33,7 +34,7 @@ func btZstdStream(t *testing.T, window int) []byte {
 // A stream declaring a window above zstdMaxWin must be refused, not allocated.
 // Fails while zstdMaxWin is still 8 MB.
 func TestZstdHugeWindowRejected(t *testing.T) {
-	res, err := readBody(bytes.NewReader(btZstdStream(t, 8<<20)), "zstd", btLimit)
+	res, err := readBody(bytes.NewReader(btZstdStream(t, 8<<20)), "zstd", btLimit, time.Now().Add(5*time.Second))
 	res.Release()
 	if err == nil {
 		t.Fatalf("8 MB declared zstd window accepted (zstdMaxWin=%d); lower it to 2<<20", zstdMaxWin)

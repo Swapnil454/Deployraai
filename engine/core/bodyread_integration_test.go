@@ -57,7 +57,7 @@ func btServe(t *testing.T, handle func(c net.Conn, done <-chan struct{})) string
 
 func btDo(url string) (*fasthttp.Response, error) {
 	cl := &fasthttp.Client{
-		StreamResponseBody: true,
+		StreamResponseBody:  true,
 		MaxIdleConnDuration: 10 * time.Millisecond,
 		Dial: func(addr string) (net.Conn, error) {
 			return net.DialTimeout("tcp4", addr, 2*time.Second)
@@ -96,7 +96,7 @@ func TestSlowDripIsBounded(t *testing.T) {
 	start := time.Now()
 
 	cl := &fasthttp.Client{
-		StreamResponseBody: true,
+		StreamResponseBody:  true,
 		MaxIdleConnDuration: 10 * time.Millisecond,
 		Dial: func(addr string) (net.Conn, error) {
 			return net.DialTimeout("tcp4", addr, 2*time.Second)
@@ -124,7 +124,7 @@ func TestSlowDripIsBounded(t *testing.T) {
 			}
 
 			// ReadKeywordBody should block and then time out
-			br, rerr := ReadKeywordBody(res, 65536)
+			br, rerr := ReadKeywordBody(res, 65536, time.Now().Add(5*time.Second))
 			if rerr == nil {
 				t.Error("ReadKeywordBody returned nil error, expected timeout")
 				br.Release()
@@ -137,7 +137,7 @@ func TestSlowDripIsBounded(t *testing.T) {
 	time.Sleep(500 * time.Millisecond) // Allow fasthttp worker pool to clean up
 	runtime.GC()
 	endGoroutines := runtime.NumGoroutine()
-	
+
 	if float64(endGoroutines) > float64(startGoroutines)*1.5+10 {
 		t.Fatalf("goroutine/FD leak detected: started with %d, ended with %d", startGoroutines, endGoroutines)
 	}
@@ -157,7 +157,7 @@ func TestShortContentLengthIsNotCleanEOF(t *testing.T) {
 				t.Logf("fasthttp rejected it before the body read (also acceptable, engine classifies via classifyNetError): %v", err)
 				return
 			}
-			br, rerr := ReadKeywordBody(res, 64<<10)
+			br, rerr := ReadKeywordBody(res, 64<<10, time.Now().Add(5*time.Second))
 			defer br.Release()
 			if rerr == nil {
 				t.Fatalf("CLEAN EOF after %d bytes of a body that promised more: this recreates false keyword_missing", len(br.Body))
@@ -198,7 +198,7 @@ func TestBrHostileWindowMemory(t *testing.T) {
 // returns -1) must be rejected. lgwin=24 (the RFC maximum) must now be accepted.
 func TestBrHugeWindowRejected(t *testing.T) {
 	// lgwin=24 is valid per RFC 7932; maxBrWindowBits=24 must accept it.
-	res, err := readBody(bytes.NewReader(btHostileBrotli(t, 24)), "br", 64<<10)
+	res, err := readBody(bytes.NewReader(btHostileBrotli(t, 24)), "br", 64<<10, time.Now().Add(5*time.Second))
 	defer res.Release()
 	if err != nil {
 		t.Fatalf("lgwin=24 (max valid RFC 7932 window) must be accepted: %v", err)
@@ -278,7 +278,7 @@ func TestConcurrentRealServerReadKeywordBody(t *testing.T) {
 				req.Header.Set("Accept-Encoding", AcceptEncoding)
 
 				if err := client.Do(req, res); err == nil {
-					br, rerr := ReadKeywordBody(res, 65536)
+					br, rerr := ReadKeywordBody(res, 65536, time.Now().Add(5*time.Second))
 					if rerr == nil && !bytes.Contains(br.Body, []byte("Keyword Match")) {
 						t.Errorf("expected Keyword Match in body")
 					}

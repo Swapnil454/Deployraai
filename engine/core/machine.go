@@ -6,15 +6,17 @@ import (
 )
 
 type Status string
+
 const (
-	StatusUp       Status = "UP"
-	StatusDown     Status = "DOWN"
-	StatusDegraded Status = "DEGRADED"
+	StatusUp          Status = "UP"
+	StatusDown        Status = "DOWN"
+	StatusDegraded    Status = "DEGRADED"
 	StatusBlocked     Status = "BLOCKED"
 	StatusConfigError Status = "CONFIG_ERROR"
 )
 
 type Role string
+
 const (
 	RolePrimary Role = "PRIMARY"
 	RoleVoter   Role = "VOTER"
@@ -22,26 +24,33 @@ const (
 )
 
 type ErrClass string
+
 const (
-	ErrNone      ErrClass = ""
-	ErrTimeout   ErrClass = "TIMEOUT"
-	ErrBlocked   ErrClass = "BLOCKED"
-	ErrNet       ErrClass = "NETWORK"
-	ErrTLS       ErrClass = "TLS"
-	ErrStatus    ErrClass = "STATUS"
-	ErrKeyword   ErrClass = "KEYWORD"
+	ErrNone          ErrClass = ""
+	ErrTimeout       ErrClass = "TIMEOUT"
+	ErrBlocked       ErrClass = "BLOCKED"
+	ErrNet           ErrClass = "NETWORK"
+	ErrTLS           ErrClass = "TLS"
+	ErrStatus        ErrClass = "STATUS"
+	ErrKeyword       ErrClass = "KEYWORD"
 	ErrBodyTruncated ErrClass = "BODY_TRUNCATED"
 	ErrBodyTooLarge  ErrClass = "BODY_TOO_LARGE"
 	ErrBodyDecode    ErrClass = "BODY_DECODE"
-	ErrDegraded  ErrClass = "DEGRADED"
-	ErrRedirect  ErrClass = "REDIRECT"
-	ErrDNS       ErrClass = "DNS"
-	ErrSSRF      ErrClass = "SSRF"
-	ErrUnsupported ErrClass = "UNSUPPORTED"
-	ErrCanceled    ErrClass = "CANCELED"
-	ErrRefused     ErrClass = "REFUSED"
-	ErrSlow        ErrClass = "SLOW"
-	ErrConfig      ErrClass = "CONFIG_ERROR"
+	ErrDegraded      ErrClass = "DEGRADED"
+	ErrRedirect      ErrClass = "REDIRECT"
+	ErrDNS           ErrClass = "DNS"
+	ErrSSRF          ErrClass = "SSRF"
+	ErrUnsupported   ErrClass = "UNSUPPORTED"
+	ErrCanceled      ErrClass = "CANCELED"
+	ErrRefused       ErrClass = "REFUSED"
+	ErrSlow          ErrClass = "SLOW"
+	ErrConfig        ErrClass = "CONFIG_ERROR"
+	ErrDropped       ErrClass = "DROPPED"
+	// ErrNotExecuted is emitted by the reaper when a check's deadline expires
+	// before the worker ever ran it. It is NEVER reported as DOWN to the state
+	// machine — it is filtered at the call site. A non-zero count in ClickHouse
+	// means the engine was overloaded; it invalidates that run's benchmark data.
+	ErrNotExecuted ErrClass = "NOT_EXECUTED"
 )
 
 func (e ErrClass) ToOk() bool {
@@ -75,8 +84,8 @@ type MonitorState struct {
 }
 
 type Vote struct {
-	PoP   string
-	ASN   string
+	PoP      string
+	ASN      string
 	Epoch    uint64
 	Round    uint64
 	Ok       bool
@@ -93,53 +102,61 @@ type EventCheckResult struct {
 	Ok       bool
 	ErrClass ErrClass
 }
+
 func (e EventCheckResult) isEvent() {}
 
 type EventVoteResult struct {
-	PoP   string
-	ASN   string
-	Epoch    uint64
-	Round    uint64
-	Ok       bool
-	ErrClass ErrClass
+	PoP       string
+	ASN       string
+	Epoch     uint64
+	Round     uint64
+	Ok        bool
+	ErrClass  ErrClass
 	FromCache bool
 }
+
 func (e EventVoteResult) isEvent() {}
 
 type EventHedgeTimerFired struct {
 	Epoch uint64
 	Round uint64
 }
+
 func (e EventHedgeTimerFired) isEvent() {}
 
 type EventVoteDeadline struct {
 	Epoch uint64
 	Round uint64
 }
+
 func (e EventVoteDeadline) isEvent() {}
 
 type EventPersistResult struct {
 	Ok bool
 }
+
 func (e EventPersistResult) isEvent() {}
 
 type EventSweep struct{}
+
 func (e EventSweep) isEvent() {}
 
 // Effects
 type Effect interface{ isEffect() }
 
 type EffectRequestVotes struct {
-	Epoch       uint64
-	Round       uint64
+	Epoch         uint64
+	Round         uint64
 	Count         int
 	ExcludePoPs   []string
 	ExcludeASNs   []string
 	RoundOpenedAt time.Time
 }
+
 func (e EffectRequestVotes) isEffect() {}
 
 type EffectCancelHedge struct{}
+
 func (e EffectCancelHedge) isEffect() {}
 
 type EffectScheduleDeadline struct {
@@ -147,9 +164,11 @@ type EffectScheduleDeadline struct {
 	Round uint64
 	After time.Duration
 }
+
 func (e EffectScheduleDeadline) isEffect() {}
 
 type EffectReloadState struct{}
+
 func (e EffectReloadState) isEffect() {}
 
 type AlertPayload struct {
@@ -160,6 +179,7 @@ type AlertPayload struct {
 type EffectEmitAlert struct {
 	Alert AlertPayload
 }
+
 func (e EffectEmitAlert) isEffect() {}
 
 type EffectPersistTransition struct {
@@ -170,13 +190,14 @@ type EffectPersistTransition struct {
 	IncidentEnd   time.Time
 	Alert         *AlertPayload
 }
+
 func (e EffectPersistTransition) isEffect() {}
 
 type EffectLog struct {
 	Message string
 }
-func (e EffectLog) isEffect() {}
 
+func (e EffectLog) isEffect() {}
 
 // Step executes the pure state machine logic.
 func Step(state MonitorState, event Event, now time.Time, cfg MachineConfig) (MonitorState, []Effect) {
@@ -227,19 +248,19 @@ func Step(state MonitorState, event Event, now time.Time, cfg MachineConfig) (Mo
 
 	case EventCheckResult:
 		if ev.Role == RolePrimary {
-			
-			if ev.ErrClass == ErrBlocked || ev.ErrClass == ErrConfig {
-				// 4. BLOCKED/CONFIG: silent from UP. From DOWN stays DOWN. 
+
+			if ev.ErrClass == ErrBlocked || ev.ErrClass == ErrConfig || ev.ErrClass == ErrDropped {
+				// 4. BLOCKED/CONFIG/DROPPED: silent from UP. From DOWN stays DOWN.
 				// Never closes an incident. Persistent BLOCKED sends a single notice.
 				closeRound(&state, &effects)
 				state.ConsecutiveFails = 0
 				state.ConsecutivePass = 0
-				
+
 				targetStatus := StatusBlocked
 				if ev.ErrClass == ErrConfig {
 					targetStatus = StatusConfigError
 				}
-				
+
 				if state.Status != StatusDown && state.Status != targetStatus {
 					oldState := state.Status
 					state.Status = targetStatus
@@ -274,16 +295,16 @@ func Step(state MonitorState, event Event, now time.Time, cfg MachineConfig) (Mo
 						state.FirstPassAt = now
 					}
 					state.ConsecutivePass++
-					
+
 					if state.ConsecutivePass >= cfg.RecoveryN {
 						state.Status = StatusUp
 						state.Epoch++
-						
+
 						alert := &AlertPayload{
 							IdempotencyKey: fmt.Sprintf("%s-%d-%s", state.ID, state.Epoch, StatusUp),
 							Status:         StatusUp,
 						}
-						
+
 						effects = append(effects, EffectPersistTransition{
 							ExpectedEpoch: state.Epoch - 1,
 							OldState:      StatusDown,
@@ -308,7 +329,7 @@ func Step(state MonitorState, event Event, now time.Time, cfg MachineConfig) (Mo
 				} else {
 					state.ConsecutivePass = 0
 				}
-				
+
 			} else {
 				// Primary Failed (Standard Failure)
 				if cfg.SingleNodeMode {
@@ -316,7 +337,7 @@ func Step(state MonitorState, event Event, now time.Time, cfg MachineConfig) (Mo
 						state.ConsecutivePass = 0
 						return state, effects
 					}
-					
+
 					if state.ConsecutiveFails == 0 {
 						state.FirstFailAt = now
 					}
@@ -328,7 +349,7 @@ func Step(state MonitorState, event Event, now time.Time, cfg MachineConfig) (Mo
 						state.IncidentStart = state.FirstFailAt
 						state.ConsecutiveFails = 0
 						state.ConsecutivePass = 0
-						
+
 						alert := &AlertPayload{
 							IdempotencyKey: fmt.Sprintf("%s-%d-%s", state.ID, state.Epoch, StatusDown),
 							Status:         StatusDown,
@@ -357,14 +378,14 @@ func Step(state MonitorState, event Event, now time.Time, cfg MachineConfig) (Mo
 							After: cfg.VoteDeadline,
 						})
 					} else if state.FirstFailAt.IsZero() {
-						state.FirstFailAt = now 
+						state.FirstFailAt = now
 					}
-					
+
 					cloneVotes()
 					if _, exists := state.Votes[ev.PoP]; !exists {
 						state.Votes[ev.PoP] = Vote{PoP: ev.PoP, ASN: ev.ASN, Epoch: state.Epoch, Round: state.Round, Ok: false}
 					}
-					
+
 					needed := 2 - state.VotesRequested
 					if needed > 0 {
 						effects = append(effects, EffectRequestVotes{
@@ -396,12 +417,12 @@ func Step(state MonitorState, event Event, now time.Time, cfg MachineConfig) (Mo
 							After: cfg.VoteDeadline,
 						})
 					}
-					
+
 					cloneVotes()
 					if _, exists := state.Votes[ev.PoP]; !exists {
 						state.Votes[ev.PoP] = Vote{PoP: ev.PoP, ASN: ev.ASN, Epoch: state.Epoch, Round: state.Round, Ok: false}
 					}
-					
+
 					needed := 2 - state.VotesRequested
 					if needed > 0 {
 						effects = append(effects, EffectRequestVotes{
@@ -422,7 +443,7 @@ func Step(state MonitorState, event Event, now time.Time, cfg MachineConfig) (Mo
 		if ev.Epoch != state.Epoch || ev.Round != state.Round || !state.RoundOpen {
 			return state, effects
 		}
-		
+
 		cloneVotes()
 		if _, exists := state.Votes[ev.PoP]; !exists {
 			state.Votes[ev.PoP] = Vote{
@@ -440,13 +461,13 @@ func Step(state MonitorState, event Event, now time.Time, cfg MachineConfig) (Mo
 		if ev.Epoch != state.Epoch || ev.Round != state.Round || !state.RoundOpen {
 			return state, effects
 		}
-		
+
 		state, effects = evaluateQuorum(state, effects, now, closeRound, cfg)
 		if state.RoundOpen {
 			effects = append(effects, EffectLog{Message: "quorum unavailable"})
 			closeRound(&state, &effects)
 		}
-		
+
 	case EventHedgeTimerFired:
 		if cfg.SingleNodeMode {
 			return state, effects
@@ -460,13 +481,13 @@ func Step(state MonitorState, event Event, now time.Time, cfg MachineConfig) (Mo
 				state.FirstFailAt = time.Time{}
 				state.HedgeInFlight = true
 				state.VotesRequested = 0
-				
+
 				effects = append(effects, EffectScheduleDeadline{
 					Epoch: state.Epoch,
 					Round: state.Round,
 					After: cfg.VoteDeadline,
 				})
-				
+
 				needed := 1
 				effects = append(effects, EffectRequestVotes{
 					Epoch:         state.Epoch,
@@ -476,7 +497,7 @@ func Step(state MonitorState, event Event, now time.Time, cfg MachineConfig) (Mo
 				})
 				state.VotesRequested += needed
 			}
-			// If round is open but hedge fired later, and we haven't set HedgeInFlight, 
+			// If round is open but hedge fired later, and we haven't set HedgeInFlight,
 			// and no primary failure has happened (but primary failure opens round without HedgeInFlight).
 			// Actually, a timer for a round that already has a primary vote is ignored.
 		}
@@ -497,11 +518,11 @@ func evaluateQuorum(state MonitorState, effects []Effect, now time.Time, closeRo
 	for _, v := range state.Votes {
 		if v.Ok {
 			passingASNs[v.ASN] = true
-		} else if v.ErrClass != ErrBlocked {
+		} else if v.ErrClass != ErrBlocked && v.ErrClass != ErrDropped {
 			failingASNs[v.ASN] = true
 		}
 	}
-	
+
 	// A passing vote in an ASN overrides a failing vote in the same ASN
 	for asn := range passingASNs {
 		delete(failingASNs, asn)
@@ -539,7 +560,7 @@ TransitionDown:
 	} else {
 		state.IncidentStart = state.FirstFailAt
 	}
-	
+
 	effects = append(effects, EffectPersistTransition{
 		ExpectedEpoch: state.Epoch - 1,
 		OldState:      oldState,

@@ -50,10 +50,10 @@ func StartEBPFReader(ctx context.Context, wg *sync.WaitGroup) error {
 			return err
 		}
 	}
-	
+
 	rd, err := ringbuf.NewReader(objs.PingEvents)
 	if err != nil {
-		l.Close()   // don't leak the XDP link
+		l.Close() // don't leak the XDP link
 		objs.Close()
 		return err
 	}
@@ -82,56 +82,56 @@ func StartEBPFReader(ctx context.Context, wg *sync.WaitGroup) error {
 				continue
 			}
 
-				// bpf2go creates the bpfPingEventT struct automatically!
-				// Wait, doing raw bytes is safer if bpfPingEventT has padding issues.
-				// xdp_hook.c packed it: monitor_index (__u16), echoed_hash (__u32)
-				// Total size = 6 bytes.
-				if len(record.RawSample) >= 14 {
-					monitorIndex := uint16(record.RawSample[0]) | uint16(record.RawSample[1])<<8
-					echoedHash := uint32(record.RawSample[2]) | uint32(record.RawSample[3])<<8 | uint32(record.RawSample[4])<<16 | uint32(record.RawSample[5])<<24
-					ktimeNs := uint64(record.RawSample[6]) | uint64(record.RawSample[7])<<8 | uint64(record.RawSample[8])<<16 | uint64(record.RawSample[9])<<24 | uint64(record.RawSample[10])<<32 | uint64(record.RawSample[11])<<40 | uint64(record.RawSample[12])<<48 | uint64(record.RawSample[13])<<56
+			// bpf2go creates the bpfPingEventT struct automatically!
+			// Wait, doing raw bytes is safer if bpfPingEventT has padding issues.
+			// xdp_hook.c packed it: monitor_index (__u16), echoed_hash (__u32)
+			// Total size = 6 bytes.
+			if len(record.RawSample) >= 14 {
+				monitorIndex := uint16(record.RawSample[0]) | uint16(record.RawSample[1])<<8
+				echoedHash := uint32(record.RawSample[2]) | uint32(record.RawSample[3])<<8 | uint32(record.RawSample[4])<<16 | uint32(record.RawSample[5])<<24
+				ktimeNs := uint64(record.RawSample[6]) | uint64(record.RawSample[7])<<8 | uint64(record.RawSample[8])<<16 | uint64(record.RawSample[9])<<24 | uint64(record.RawSample[10])<<32 | uint64(record.RawSample[11])<<40 | uint64(record.RawSample[12])<<48 | uint64(record.RawSample[13])<<56
 
-					id, ok := core.PortAllocator.Lookup(monitorIndex)
-					if !ok {
-						continue
+				id, ok := core.PortAllocator.Lookup(monitorIndex)
+				if !ok {
+					continue
+				}
+
+				p := core.Store.GetPointer(id)
+				if p == nil {
+					continue
+				}
+				m := p.Load()
+				if m == nil {
+					continue
+				}
+
+				expectedHash := core.CalculateHash(m.TargetIP, m.ID, m.CurrentNonce)
+
+				isValid := false
+				if m.Type == "port" {
+					isValid = echoedHash == expectedHash
+				} else if m.Type == "ping" {
+					isValid = uint16(echoedHash) == uint16(expectedHash)
+				}
+
+				if isValid {
+					sentNs := core.SentNs[m.AssignedPort].Load()
+					var latencyMs uint64
+					if sentNs > 0 && ktimeNs > sentNs {
+						latencyMs = (ktimeNs - sentNs) / 1000000
+					} else {
+						latencyMs = uint64(time.Since(m.LastProbeSentAt).Milliseconds())
 					}
 
-					p := core.Store.GetPointer(id)
-					if p == nil {
-						continue
-					}
-					m := p.Load()
-					if m == nil {
-						continue
-					}
+					core.SentNs[m.AssignedPort].Store(0)
 
-					expectedHash := core.CalculateHash(m.TargetIP, m.ID, m.CurrentNonce)
-					
-					isValid := false
-					if m.Type == "port" {
-						isValid = echoedHash == expectedHash
-					} else if m.Type == "ping" {
-						isValid = uint16(echoedHash) == uint16(expectedHash)
-					}
+					core.HandleSuccess(id, p, uint32(latencyMs))
 
-					if isValid {
-						sentNs := core.SentNs[m.AssignedPort].Load()
-						var latencyMs uint64
-						if sentNs > 0 && ktimeNs > sentNs {
-							latencyMs = (ktimeNs - sentNs) / 1000000
-						} else {
-							latencyMs = uint64(time.Since(m.LastProbeSentAt).Milliseconds())
-						}
-						
-						core.SentNs[m.AssignedPort].Store(0)
-
-						core.HandleSuccess(id, p, uint32(latencyMs))
-						
-						// NOTE: core.SendRST() was removed because xdp_hook.c now bounces 
-						// an RST natively via XDP_TX in zero CPU cost!
-					}
+					// NOTE: core.SendRST() was removed because xdp_hook.c now bounces
+					// an RST natively via XDP_TX in zero CPU cost!
 				}
 			}
+		}
 	}()
 	return nil
 }

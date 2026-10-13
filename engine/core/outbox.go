@@ -36,10 +36,10 @@ func NewOutbox(dir string) (*Outbox, error) {
 		ch:     make(chan walEntry, 10000),
 		done:   make(chan struct{}),
 	}
-	
+
 	ob.wg.Add(1)
 	go ob.batchWriter()
-	
+
 	return ob, nil
 }
 
@@ -54,13 +54,13 @@ func (o *Outbox) Submit(monitorID string, eff EffectPersistTransition) error {
 		MonitorID: monitorID,
 		Effect:    eff,
 	}
-	
+
 	// Optimistic non-blocking append to memory channel.
 	// If channel is full during massive outage, blocks caller.
 	select {
 	case o.ch <- entry:
 		// For testing memory inspection
-		// o.Memory is not safe to append here concurrently if used in production, 
+		// o.Memory is not safe to append here concurrently if used in production,
 		// but since it's just for tests, we accept the race or tests can use it differently.
 	case <-o.done:
 		return fmt.Errorf("outbox closed")
@@ -70,11 +70,11 @@ func (o *Outbox) Submit(monitorID string, eff EffectPersistTransition) error {
 
 func (o *Outbox) batchWriter() {
 	defer o.wg.Done()
-	
+
 	// Batch array
 	var batch []walEntry
 	timer := time.NewTimer(100 * time.Millisecond)
-	
+
 	for {
 		select {
 		case <-o.done:
@@ -113,7 +113,7 @@ func (o *Outbox) flush(batch []walEntry) {
 	if len(batch) == 0 {
 		return
 	}
-	
+
 	var buf []byte
 	for _, entry := range batch {
 		b, err := json.Marshal(entry)
@@ -122,7 +122,7 @@ func (o *Outbox) flush(batch []walEntry) {
 			buf = append(buf, '\n')
 		}
 	}
-	
+
 	if len(buf) > 0 {
 		if _, err := o.wal.Write(buf); err != nil {
 			panic(fmt.Sprintf("CRITICAL: WAL write failed, disk may be full! Halting to prevent data loss: %v", err))

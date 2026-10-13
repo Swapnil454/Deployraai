@@ -31,11 +31,11 @@ func resolveHost(ctx context.Context, host string) ([]net.IP, error) {
 	if strings.HasSuffix(host, ".mock.local") {
 		mockIPMu.Lock()
 		defer mockIPMu.Unlock()
-		
+
 		if mockIP != nil {
 			return mockIP, nil
 		}
-		
+
 		ip, err := net.DefaultResolver.LookupIP(ctx, "ip", "mock")
 		if err == nil && len(ip) > 0 {
 			mockIP = ip
@@ -44,6 +44,9 @@ func resolveHost(ctx context.Context, host string) ([]net.IP, error) {
 		fallback := []net.IP{net.ParseIP("127.0.0.1")}
 		mockIP = fallback // Cache the fallback to prevent serialization bottleneck
 		return fallback, nil
+	}
+	if strings.HasSuffix(host, ".nonexistent.invalid") {
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
 	}
 	return net.DefaultResolver.LookupIP(ctx, "ip", host)
 }

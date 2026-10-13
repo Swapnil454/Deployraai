@@ -31,7 +31,7 @@ func getTCPBytes(conn net.Conn) (in, out int) {
 		if err == nil {
 			// TCP_INFO excludes TCP/IP headers. We estimate payload + headers.
 			// Roughly segs_in/segs_out * 52 (IPv4) or 72 (IPv6).
-			// We'll use 52 for standard IPv4 estimation. 
+			// We'll use 52 for standard IPv4 estimation.
 			in = int(info.Bytes_received) + int(info.Segs_in)*52
 			out = int(info.Bytes_acked) + int(info.Segs_out)*52 + int(info.Bytes_retrans)
 			// Excludes teardown (FIN/ACK) since this is read before Close.

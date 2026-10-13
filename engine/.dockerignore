@@ -17,4 +17,5 @@ engine_logs*
 *.tmp
 
 # Build artifacts (outside docker)
-uptime-engine
+
+vendor/

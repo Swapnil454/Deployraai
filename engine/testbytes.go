@@ -13,7 +13,7 @@ func main() {
 		defer serverConn.Close()
 		tls.Server(serverConn, &tls.Config{}).Handshake()
 	}()
-	
+
 	tlsCfg := &tls.Config{InsecureSkipVerify: true}
 	c := tls.Client(clientConn, tlsCfg)
 	c.Handshake()

@@ -432,7 +432,6 @@ func classifyNetError(err error, didConnect bool) ErrClass {
 		return ErrTLS
 	}
 
-
 	if errors.Is(err, syscall.ECONNREFUSED) {
 		return ErrRefused
 	}

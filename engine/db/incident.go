@@ -18,6 +18,7 @@ import (
 )
 
 const deadLetterFile = "incidents.jsonl"
+
 var dlMu sync.Mutex
 
 func isPermanent(err error) bool {
