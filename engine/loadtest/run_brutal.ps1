@@ -692,7 +692,7 @@ $gateItems = @(
     @{ name="Mock request count within 5%";             pass=($Arm -eq "A" -or $mockGapPct -le 5.0) }
     @{ name="False-DOWN == 0";                          pass=($falseDownCount -eq 0) }
     @{ name="False-UP == 0";                            pass=($falseUpCount -eq 0) }
-    @{ name="NoKeepAlive reaches ~1500 by min 5";       pass=($Arm -ne "C-on" -or $noKeepMin5 -ge 1400 -or $ActualRunSecs -lt 300) }
+    @{ name="NoKeepAlive reaches ~50% by min 5";       pass=($Arm -ne "C-on" -or $noKeepMin5 -ge [int]($MonitorCount * 0.45) -or $ActualRunSecs -lt 300) }
     @{ name="Warm retry in late window <= 1.0%";        pass=($lateRetryPct -le 1.0) }
     @{ name="Goroutines, FDs, RSS flat min 10-30";      pass=($resFlat -or $ActualRunSecs -lt 1800) }
 )

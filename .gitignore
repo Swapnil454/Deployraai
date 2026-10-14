@@ -57,3 +57,6 @@ Thumbs.db
 
 # NPM Credentials
 .npmrc
+
+# Benchmark, test artifacts, and internal algorithm scratch
+algorithms/
