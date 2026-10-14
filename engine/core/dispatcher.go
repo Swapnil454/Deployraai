@@ -868,6 +868,7 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 					if ctx.Err() != nil {
 						return
 					}
+					ChecksInFlight.Add(1)
 					m := job.m
 					p := job.ptr
 					// Note: AwaitingResult and LastProbeSentAt are already set by
@@ -965,6 +966,7 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 						var leaked, abandoned bool
 						err, leaked, abandoned = doWithContext(ctx, client, req, res, time.Until(deadline), &dialed, &didResume)
 						if leaked {
+							ChecksInFlight.Add(-1)
 							return
 						}
 						if abandoned {
@@ -1010,6 +1012,7 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 								}
 							}
 							if leaked2 {
+								ChecksInFlight.Add(-1)
 								return
 							}
 							latency = uint64(time.Since(start).Microseconds())
@@ -1049,6 +1052,7 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 							var leaked3, abandoned3 bool
 							retryErr, leaked3, abandoned3 := doWithContext(ctx, client, req, res, remainingBudget, &retryDialed, &retryDidResume)
 							if leaked3 {
+								ChecksInFlight.Add(-1)
 								return
 							}
 							if abandoned3 {
@@ -1254,6 +1258,7 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 
 						HandleFailureDetailed(m.ID, p, errClass, cause, msg, meta)
 					}
+					ChecksInFlight.Add(-1)
 				}
 			}
 		}()

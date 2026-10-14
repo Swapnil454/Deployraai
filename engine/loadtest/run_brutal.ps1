@@ -191,7 +191,7 @@ if ($configLog) {
 $elapsed  = 0
 $interval = 30
 $SERIESCSV = "brutal_process_series.csv"
-"ts,elapsed_s,goroutines,open_fds,in_flight,no_keepalive,retry_eof,retry_reset,retry_timeout,retry_other,cgroup_cpu_usec,net_rx_bytes,net_tx_bytes,mock_bytes,sock_fds,pipe_fds,snap" | Out-File -FilePath $SERIESCSV -Encoding utf8
+"ts,elapsed_s,goroutines,open_fds,in_flight,checks_in_flight,no_keepalive,retry_eof,retry_reset,retry_timeout,retry_other,cgroup_cpu_usec,net_rx_bytes,net_tx_bytes,mock_bytes,sock_fds,pipe_fds,snap" | Out-File -FilePath $SERIESCSV -Encoding utf8
 
 while ($elapsed -lt $RunSeconds) {
     Start-Sleep -Seconds $interval
@@ -202,7 +202,7 @@ while ($elapsed -lt $RunSeconds) {
 
     # Query runtime metrics from /metrics endpoint
     $mRaw = ((curl.exe -s "http://127.0.0.1:9101/metrics" -H "Authorization: Bearer brutal-soak-token" 2>$null) -join "`n")
-    $gCount = 0; $fdCount = 0; $noKeep = 0; $mockBytes = 0; $inflightNow = 0
+    $gCount = 0; $fdCount = 0; $noKeep = 0; $mockBytes = 0; $inflightNow = 0; $checksInFlight = 0
     $retryEof = 0; $retryReset = 0; $retryTimeout = 0; $retryOther = 0
     $Matches = $null
     if ($mRaw -match "goroutines\s+(\d+)") { $gCount = [int]$Matches[1] }
@@ -210,6 +210,8 @@ while ($elapsed -lt $RunSeconds) {
     if ($mRaw -match "open_fds\s+(\d+)") { $fdCount = [int]$Matches[1] }
     $Matches = $null
     if ($mRaw -match "telemetry_in_flight\s+(\d+)") { $inflightNow = [int]$Matches[1] }
+    $Matches = $null
+    if ($mRaw -match "checks_in_flight\s+(\d+)") { $checksInFlight = [int]$Matches[1] }
     $Matches = $null
     if ($mRaw -match "monitors_no_keepalive\s+(\d+)") { $noKeep = [int]$Matches[1] }
     $Matches = $null
@@ -242,8 +244,8 @@ while ($elapsed -lt $RunSeconds) {
     if ($txRaw -match "^\s*(\d+)") { $txBytes = [int64]$Matches[1] }
 
     $tsNow = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
-    "$tsNow,$elapsed,$gCount,$fdCount,$inflightNow,$noKeep,$retryEof,$retryReset,$retryTimeout,$retryOther,$cpuUsec,$rxBytes,$txBytes,$mockBytes,$sockFds,$pipeFds,$snap" | Out-File -Append -FilePath $SERIESCSV -Encoding utf8
-    Log "[$elapsed/${RunSeconds}s] $snap | FDs=$fdCount(sock=$sockFds,pipe=$pipeFds) InFlight=$inflightNow G=$gCount NoKeep=$noKeep Retries=[EOF:$retryEof,Reset:$retryReset,TO:$retryTimeout] cpuUsec=$cpuUsec (${remaining}s left)"
+    "$tsNow,$elapsed,$gCount,$fdCount,$inflightNow,$checksInFlight,$noKeep,$retryEof,$retryReset,$retryTimeout,$retryOther,$cpuUsec,$rxBytes,$txBytes,$mockBytes,$sockFds,$pipeFds,$snap" | Out-File -Append -FilePath $SERIESCSV -Encoding utf8
+    Log "[$elapsed/${RunSeconds}s] $snap | FDs=$fdCount(sock=$sockFds,pipe=$pipeFds) ExecutingChecks=$checksInFlight InFlightTelemetry=$inflightNow G=$gCount NoKeep=$noKeep cpuUsec=$cpuUsec (${remaining}s left)"
 
     if ($AttendedCheck) {
         $chByKind = CH "SELECT count() types_ok FROM (SELECT monitor_type FROM uptime_telemetry WHERE status=1 GROUP BY monitor_type HAVING count() > 0)"
@@ -369,12 +371,14 @@ $finalFlushed = 0
 $finalFailed = 0
 $finalDropped = 0
 $finalInFlight = 0
-if ($finalRunCounters -match "telemetry_enqueued=(\d+)\s+telemetry_flushed=(\d+)\s+telemetry_failed=(\d+)\s+telemetry_dropped=(\d+)\s+telemetry_in_flight=(\d+)") {
+$finalChecksInFlight = 0
+if ($finalRunCounters -match "telemetry_enqueued=(\d+)\s+telemetry_flushed=(\d+)\s+telemetry_failed=(\d+)\s+telemetry_dropped=(\d+)\s+telemetry_in_flight=(\d+)\s+checks_in_flight=(\d+)") {
     $finalEnq = [int64]$Matches[1]
     $finalFlushed = [int64]$Matches[2]
     $finalFailed = [int64]$Matches[3]
     $finalDropped = [int64]$Matches[4]
     $finalInFlight = [int64]$Matches[5]
+    $finalChecksInFlight = [int64]$Matches[6]
 } else {
     $finalEnq = [int64]$enq
     $finalFlushed = [int64]$flushed

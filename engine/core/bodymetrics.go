@@ -172,6 +172,9 @@ func getNoKeepAliveCount() int {
 	return count
 }
 
+// ChecksInFlight tracks the number of concurrent check executions actively running in worker goroutines.
+var ChecksInFlight atomic.Int64
+
 func StartAdminServer(addr string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -180,6 +183,7 @@ func StartAdminServer(addr string) {
 		fmt.Fprintf(w, "telemetry_failed_rows %d\n", TelemetryFailed.Load())
 		fmt.Fprintf(w, "telemetry_dropped %d\n", TelemetryDropped.Load())
 		fmt.Fprintf(w, "telemetry_in_flight %d\n", len(TelemetryQueue)+int(ActiveBufRows.Load()))
+		fmt.Fprintf(w, "checks_in_flight %d\n", ChecksInFlight.Load())
 		fmt.Fprintf(w, "mock_net_bytes_in %d\n", MockNetBytesIn.Load())
 		fmt.Fprintf(w, "mock_net_bytes_out %d\n", MockNetBytesOut.Load())
 		fmt.Fprintf(w, "mock_net_bytes_total %d\n", MockNetBytesIn.Load()+MockNetBytesOut.Load())

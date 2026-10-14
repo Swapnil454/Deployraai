@@ -94,7 +94,7 @@ services:
       # ClickHouse — telemetry store (local container, native protocol)
       - UPTIMER_CLICKHOUSE_URL=clickhouse://engine:password@clickhouse:9000/default?compress=lz4
       # Engine tunables
-      - HTTP_WORKERS=3000
+      - HTTP_WORKERS=${HTTP_WORKERS:-3000}
       - ENABLE_ENGINE_B=false
       - ENGINE_CONN_TELEMETRY=true
       - MAX_IDLE_CONN_DURATION_S=${MAX_IDLE_CONN_DURATION_S:-90}

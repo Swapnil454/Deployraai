@@ -249,9 +249,9 @@ func main() {
 	}
 
 	inFlight := uint64(len(core.TelemetryQueue)) + uint64(core.ActiveBufRows.Load())
-	log.Printf("[RUN_COUNTERS] telemetry_enqueued=%d telemetry_flushed=%d telemetry_failed=%d telemetry_dropped=%d telemetry_in_flight=%d invariant_delta=%d queue_full=%d force_get_learned=%d",
+	log.Printf("[RUN_COUNTERS] telemetry_enqueued=%d telemetry_flushed=%d telemetry_failed=%d telemetry_dropped=%d telemetry_in_flight=%d checks_in_flight=%d invariant_delta=%d queue_full=%d force_get_learned=%d",
 		core.TelemetryEnqueued.Load(), core.TelemetryFlushed.Load(), core.TelemetryFailed.Load(), core.TelemetryDropped.Load(),
-		inFlight,
+		inFlight, core.ChecksInFlight.Load(),
 		int64(core.TelemetryEnqueued.Load())-int64(core.TelemetryFlushed.Load()+core.TelemetryFailed.Load()+core.TelemetryDropped.Load()+inFlight),
 		core.QueueFull.Load(), atomic.LoadInt64(&core.ForceGETLearned))
 
