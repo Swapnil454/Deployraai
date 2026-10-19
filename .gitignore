@@ -60,3 +60,12 @@ Thumbs.db
 
 # Benchmark, test artifacts, and internal algorithm scratch
 algorithms/
+engine/*.json
+engine/*.pprof
+engine/*.pgo
+engine/main
+engine/mock_hosts
+engine/test_sigkill.exe
+engine/uptime-engine-*
+engine/scratch/
+server/src/scratch/
