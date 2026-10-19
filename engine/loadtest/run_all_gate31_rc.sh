@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
+export ALLOW_TEST_CLICKHOUSE=1
+export CLICKHOUSE_HOST=ch_node1
+
 echo "================================================================================"
 echo "    MASTER 3.1 RELEASE CANDIDATE VERIFICATION SUITE                             "
 echo "    Release Candidate SHA: $(git rev-parse HEAD)                                "
@@ -22,7 +25,8 @@ run_gate() {
 
 echo "=== Shipped Constants ==="
 echo "ClickHouseFlushTimeout: 2s"
-echo "BreakerDialProbeTimeout: 500ms"
+echo "ClickHouseProbeTimeout: 2s"
+echo "ProbeTimeout (Probers): 500ms"
 echo "DefaultReplayBatchesPerSec: 10"
 echo "QuarantineBackoffWindow: 10m"
 echo "QuarantineThreshold: 3"
