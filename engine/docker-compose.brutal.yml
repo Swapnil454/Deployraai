@@ -65,11 +65,13 @@ services:
       context: .
       dockerfile: Dockerfile.mock
     container_name: brutal-mock
+    cpuset: "2,3"
     ports:
       - "8443:8443"
     deploy:
       resources:
         limits:
+          cpus: '2.0'
           memory: 1536M
     ulimits:
       nofile:
@@ -86,7 +88,13 @@ services:
       args:
         BUILD_TAGS: "loadtest"
     container_name: brutal-engine
-    command: ${ENGINE_BINARY:-./uptime-engine}
+    cpuset: "0,1"
+    volumes:
+      - ./mock_hosts:/tmp/mock_hosts:ro
+      - ./uptime-engine:/app/uptime-engine:ro
+      - ./uptime-engine-pgo:/app/uptime-engine-pgo:ro
+      - ./default.pgo:/app/default.pgo
+    command: bash -c "cat /tmp/mock_hosts >> /etc/hosts 2>/dev/null; exec $${ENGINE_BINARY:-./uptime-engine}"
     environment:
       # Postgres — state store
       - DATABASE_URL_DIRECT=postgresql://engine:password@db:5432/engine_test?sslmode=disable
@@ -100,8 +108,11 @@ services:
       - MAX_IDLE_CONN_DURATION_S=${MAX_IDLE_CONN_DURATION_S:-90}
       - ADMIN_TOKEN=brutal-soak-token
       - ADMIN_ADDR=0.0.0.0:9101
-      - GOMEMLIMIT=1800MiB
-      - GOMAXPROCS=4
+      - GOMEMLIMIT=${GOMEMLIMIT:-1536MiB}
+      - GOGC=${GOGC:-100}
+      - GODEBUG=${GODEBUG:-gctrace=1}
+      - CPU_PROFILE=${CPU_PROFILE:-}
+      - GOMAXPROCS=2
       - DISABLE_SSRF_BLOCKER=true
       - CHANNEL_SIZE=${CHANNEL_SIZE:-500000}
       - TLS_CACHE_SIZE=${TLS_CACHE_SIZE:-110000}
@@ -124,7 +135,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4.0'
+          cpus: '2.0'
           memory: 2G
     # 15s gives the 8s final-flush budget + ~7s margin.
     # Exit code 0 = clean; exit code 2 = bounded drain (see main.go); 137 = defect.

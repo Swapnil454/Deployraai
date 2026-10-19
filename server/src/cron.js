@@ -15,12 +15,18 @@ const db = new Pool({ connectionString: process.env.DATABASE_URL });
 import { triggerWorkflow } from './services/workflow.service.js';
 import { clickhouse } from './config/clickhouse.js';
 import { startHeartbeatDetector } from './uptime-cron/heartbeatDetector.js';
+import { startHeartbeatBatcher } from './uptime-cron/controller.js';
+import { runHourlyReconciliation, runDailySlidingRebuild } from './uptime-cron/reconciliationService.js';
+import { ADVISORY_LOCKS } from './uptime-cron/clickhouseSchema.js';
 
 let monitorCronJob    = null;
 let domainHealthCronJob = null;
 let workflowAwakenerJob = null;
 let dataRetentionCronJob = null;
+let dailyRebuildCronJob = null;
+let hourlyReconciliationCronJob = null;
 let heartbeatDetectorStarted = false;
+let heartbeatBatcherStarted = false;
 
 export const initCron = () => {
   if (monitorCronJob && domainHealthCronJob && workflowAwakenerJob && dataRetentionCronJob && heartbeatDetectorStarted) return;
@@ -63,13 +69,11 @@ export const initCron = () => {
   }
 
   // ── 1. Uptime monitor (DISABLED: V1 system replaced by Go Engine & V2 uptime-cron) ───
-  /* 
-  if (!monitorCronJob) {
-    monitorCronJob = cron.schedule('*/5 * * * *', async () => {
-      // Disabled to prevent duplicate checks against V1 MongoDB monitors
-    });
-  }
-  */
+  // if (!monitorCronJob) {
+  //   monitorCronJob = cron.schedule('*/5 * * * *', async () => {
+  //     // Disabled to prevent duplicate checks against V1 MongoDB monitors
+  //   });
+  // }
 
   // ── 2. Domain health — every 5 minutes ────────────────────────────────────
   // Re-verifies all active/partially_active/degraded/pending_dns domains.
@@ -296,10 +300,39 @@ export const initCron = () => {
     }
   });
 
-  console.log('[Cron] Initialized schedulers: monitors (*/5 min), domain-health (*/5 min), workflows (* * * * *), slo (0 0 * * *), billing (0 1 * * *)');
+  // ── 6. Hourly Telemetry-Rollup Reconciliation — every hour at :15 UTC ─────
+  if (!hourlyReconciliationCronJob) {
+    hourlyReconciliationCronJob = cron.schedule('15 * * * *', async () => {
+      try {
+        console.log('[Cron:reconciliation] Running hourly telemetry-rollup reconciliation...');
+        await runHourlyReconciliation();
+      } catch (error) {
+        console.error('[Cron:reconciliation] Error in hourly reconciliation:', error);
+      }
+    }, { timezone: 'UTC' });
+  }
+
+  // ── 7. Daily Rollups Sliding Rebuild — every day at 02:00 UTC ──────────────
+  if (!dailyRebuildCronJob) {
+    dailyRebuildCronJob = cron.schedule('0 2 * * *', async () => {
+      try {
+        console.log('[Cron:daily-rebuild] Running sliding-window daily rollups rebuild for days D-3..D-1...');
+        await runDailySlidingRebuild();
+      } catch (error) {
+        console.error('[Cron:daily-rebuild] Error in daily sliding rebuild:', error);
+      }
+    }, { timezone: 'UTC' });
+  }
+
+  console.log('[Cron] Initialized schedulers: monitors (*/5 min), domain-health (*/5 min), workflows (* * * * *), slo (0 0 * * *), billing (0 1 * * *), reconciliation (15 * * * *), daily-rebuild (0 2 * * *)');
   
   if (!heartbeatDetectorStarted) {
     startHeartbeatDetector();
     heartbeatDetectorStarted = true;
+  }
+
+  if (!heartbeatBatcherStarted) {
+    startHeartbeatBatcher();
+    heartbeatBatcherStarted = true;
   }
 };

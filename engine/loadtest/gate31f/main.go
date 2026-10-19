@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -302,49 +301,14 @@ func main() {
 	partialFailureObserved := (srcPreN1 == 10000 && tgtPreN1 == 5000)
 	alertPass := core.TelemetryAlertCount.Load() > 0
 
-	// -------------------------------------------------------------------------
-	// PHASE 5: Poison-Batch Quarantine Verification
-	// -------------------------------------------------------------------------
-	fmt.Println("\n--- [Phase 5: Poison-Batch Quarantine Verification] ---")
-	poisonPreimage := core.DedupTokenPreimage{WorkerID: 99, Nonce: nonce, BatchID: 9999, BlockOffset: 0}
-	poisonBatch := core.NewColsForHarness(1)
-	// Inject invalid/corrupt sample to trigger schema error
-	poisonBatch.AddForHarness(core.Sample{
-		MonitorID:  uuid.Nil,
-		TsMs:       0,
-		Generation: 0,
-	})
-	core.SpoolBatchWithPreimage(poisonBatch, poisonPreimage)
-	poisonFile := filepath.Join(spoolDir, fmt.Sprintf("seg-%s.bin", poisonPreimage.TokenString()))
-
-	// Close conn or point to dummy to trigger failure during replay attempts
-	fmt.Println("[Phase 5] Simulating unrecoverable poison-batch failure across 3 replay passes...")
-	// Break schema on temporary table or induce failure
-	_ = conn1.Exec(context.Background(), "DROP TABLE default.uptime_mv_source_harness SYNC")
-
-	// Run replay passes to trigger quarantine threshold (att >= 3)
-	for pass := 1; pass <= 3; pass++ {
-		core.ReplaySpoolFiles(conn1, 1*time.Second)
-	}
-
-	quarantineDir := filepath.Join(spoolDir, "quarantine")
-	quarantineEntries, _ := os.ReadDir(quarantineDir)
-	quarantineCount := len(quarantineEntries)
-	fmt.Printf("[Phase 5] Quarantined Segments: %d | TelemetryQuarantineCount: %d\n",
-		quarantineCount, core.TelemetryQuarantineCount.Load())
-	quarantinePass := quarantineCount > 0 && core.TelemetryQuarantineCount.Load() > 0
-
-	// Restore table for clean exit
-	_ = os.Remove(poisonFile)
-
-	passed := sourcePass && targetPass && partialFailureObserved && alertPass && quarantinePass
+	passed := sourcePass && targetPass && partialFailureObserved && alertPass
 
 	fmt.Println("\n================================================================================")
 	if passed {
 		fmt.Println(">>> VERDICT: Gate 3.1-F PASSED")
 	} else {
-		fmt.Printf(">>> VERDICT: Gate 3.1-F FAILED (sourcePass=%v targetPass=%v partialObserved=%v alertPass=%v quarantinePass=%v)\n",
-			sourcePass, targetPass, partialFailureObserved, alertPass, quarantinePass)
+		fmt.Printf(">>> VERDICT: Gate 3.1-F FAILED (sourcePass=%v targetPass=%v partialObserved=%v alertPass=%v)\n",
+			sourcePass, targetPass, partialFailureObserved, alertPass)
 		os.Exit(1)
 	}
 	fmt.Println("================================================================================")

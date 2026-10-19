@@ -9,6 +9,8 @@ import HumanSupportCase from "./models/HumanSupportCase.js";
 import { ensureMonitorCheckRetention } from "./models/MonitorCheck.js";
 import { initializeUptimeCronSchema } from "./uptime-cron/schema.js";
 import { startUptimeCronScheduler } from "./uptime-cron/service.js";
+import { stopHeartbeatBatcher } from "./uptime-cron/controller.js";
+import { stopHeartbeatDetector } from "./uptime-cron/heartbeatDetector.js";
 import { fork } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -130,6 +132,97 @@ connect(process.env.MONGO_URI)
         server.on('error', (error) => {
             console.error(' Server error:', error);
         });
+
+        let isShuttingDown = false;
+        const gracefulShutdown = (signal) => {
+          if (isShuttingDown) return;
+          isShuttingDown = true;
+          console.log(`[Server] Received ${signal}. Commencing graceful shutdown...`);
+
+          // 1. Immediately halt the heartbeat detector sweep loop before draining.
+          // Prevents overdue false DOWN alerts while pings remain buffered in Node memory.
+          try {
+            stopHeartbeatDetector();
+          } catch (e) {
+            console.error("[Server] Error stopping heartbeat detector:", e);
+          }
+
+          // 2. Unconditional hard deadline (17s).
+          // Guarantees process terminates even if server.close() or batch flush hangs.
+          const hardDeadlineTimer = setTimeout(() => {
+            console.error("[Server] Hard shutdown deadline (17s) reached. Forcing immediate process exit.");
+            process.exit(1);
+          }, 17_000);
+          hardDeadlineTimer.unref();
+
+          let serverClosed = false;
+          let flushFailed = false;
+
+          // 3. Stop accepting new connections
+          server.close(async () => {
+            if (serverClosed) return;
+            serverClosed = true;
+            console.log("[Server] HTTP server closed. Draining in-flight heartbeat batcher buffer...");
+            try {
+              // Bounded flush (5s max) on the normal callback path
+              const flushPromise = stopHeartbeatBatcher();
+              const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error("Shutdown flush timed out (5s)")), 5000)
+              );
+              const res = await Promise.race([flushPromise, timeoutPromise]);
+              if (!res.success) {
+                flushFailed = true;
+                console.error(`[Server] FATAL: Shutdown flush failed. ${res.remaining} heartbeat pings were lost!`);
+              }
+              // Note: Phase 3 ClickHouse buffer flush will also be awaited here
+            } catch (err) {
+              flushFailed = true;
+              console.error("[Server] Error stopping heartbeat batcher:", err.message);
+            }
+            if (flushFailed) {
+              console.error("[Server] Exiting with code 1 due to unpersisted telemetry.");
+              process.exit(1);
+            }
+            console.log("[Server] Clean shutdown complete.");
+            process.exit(0);
+          });
+
+          // Node 18+: Close idle keep-alives immediately so they do not hold server.close()
+          if (typeof server.closeIdleConnections === "function") {
+            server.closeIdleConnections();
+          }
+
+          // 4. Timer fallback (10s): If active requests don't finish in 10s, sever connections
+          setTimeout(async () => {
+            if (serverClosed) return;
+            serverClosed = true;
+            console.warn("[Server] Drain timeout (10s) reached. Severing active client connections...");
+            if (typeof server.closeAllConnections === "function") {
+              server.closeAllConnections();
+            }
+
+            console.log("[Server] Attempting bounded 5s emergency flush of heartbeat batcher...");
+            try {
+              const flushPromise = stopHeartbeatBatcher();
+              const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error("Emergency flush timed out (5s)")), 5000)
+              );
+              const res = await Promise.race([flushPromise, timeoutPromise]);
+              if (!res.success) {
+                console.error(`[Server] Emergency flush incomplete: ${res.remaining} pings lost.`);
+                process.exit(1);
+              }
+              console.log("[Server] Emergency flush succeeded after connection severance.");
+              process.exit(0);
+            } catch (err) {
+              console.error("[Server] Emergency flush failed or timed out:", err.message);
+              process.exit(1);
+            }
+          }, 10_000).unref();
+        };
+
+        process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+        process.on("SIGINT", () => gracefulShutdown("SIGINT"));
     })
     .catch((error) => {
         console.error(" MongoDB connection error:", error);

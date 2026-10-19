@@ -24,12 +24,13 @@ export async function getStatusPages(req, res) {
             'url', m.url,
             'target_host', m.target_host,
             'dns_hostname', m.dns_hostname,
-            'status', m.status
+            'status', COALESCE(hs.status, m.status)
           )
         ) FILTER (WHERE spm.monitor_id IS NOT NULL), '[]'::json) as monitors
        FROM uptime_status_pages sp
        LEFT JOIN uptime_status_page_monitors spm ON spm.status_page_id = sp.id
        LEFT JOIN uptime_monitors m ON m.id = spm.monitor_id
+       LEFT JOIN uptime_heartbeat_state hs ON hs.id = m.id AND m.monitor_type = 'heartbeat'
        WHERE sp.user_id = $1
        GROUP BY sp.id
        ORDER BY sp.created_at DESC`,
@@ -59,13 +60,14 @@ export async function getStatusPage(req, res) {
             'url', m.url,
             'target_host', m.target_host,
             'dns_hostname', m.dns_hostname,
-            'status', m.status,
+            'status', COALESCE(hs.status, m.status),
             'sort_order', spm.sort_order
           )
         ) FILTER (WHERE spm.monitor_id IS NOT NULL), '[]'::json) as monitors
        FROM uptime_status_pages sp
        LEFT JOIN uptime_status_page_monitors spm ON spm.status_page_id = sp.id
        LEFT JOIN uptime_monitors m ON m.id = spm.monitor_id
+       LEFT JOIN uptime_heartbeat_state hs ON hs.id = m.id AND m.monitor_type = 'heartbeat'
        WHERE sp.id = $1 AND sp.user_id = $2
        GROUP BY sp.id`,
       [id, userId]
@@ -222,12 +224,13 @@ export async function getPublicStatusPage(req, res) {
          m.id, 
          COALESCE(m.url, m.target_host, m.dns_hostname) AS target,
          m.monitor_type, 
-         m.status,
+         COALESCE(hs.status, m.status) AS status,
          m.interval_seconds,
-         m.last_checked_at,
+         COALESCE(hs.last_ping_at, m.last_checked_at) AS last_checked_at,
          spm.sort_order
        FROM uptime_status_page_monitors spm
        JOIN uptime_monitors m ON m.id = spm.monitor_id
+       LEFT JOIN uptime_heartbeat_state hs ON hs.id = m.id AND m.monitor_type = 'heartbeat'
        WHERE spm.status_page_id = $1
        ORDER BY spm.sort_order ASC`,
       [page.id]

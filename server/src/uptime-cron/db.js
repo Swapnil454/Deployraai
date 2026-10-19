@@ -2,8 +2,9 @@ import pg from "pg";
 
 const { Pool, types } = pg;
 
-if (!process.env.UPTIMER_DB) {
-  throw new Error("UPTIMER_DB is required for the Uptime Cron Job service.");
+const connectionString = process.env.UPTIMER_DB || process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error("UPTIMER_DB or DATABASE_URL is required for the Uptime Cron Job service.");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -27,9 +28,11 @@ types.setTypeParser(1009, parsePgTextArray);
 // OID 1043 = VARCHAR[] — just in case
 types.setTypeParser(1015, parsePgTextArray);
 
+const isLocal = connectionString.includes("localhost") || connectionString.includes("127.0.0.1");
+
 export const uptimeDb = new Pool({
-  connectionString: process.env.UPTIMER_DB,
-  ssl: { rejectUnauthorized: false },
+  connectionString,
+  ssl: isLocal ? false : { rejectUnauthorized: false },
   max: 10,
   idleTimeoutMillis: 30_000,
 });
