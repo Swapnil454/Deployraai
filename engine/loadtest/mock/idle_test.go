@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"net/http"
@@ -23,6 +24,18 @@ func TestMockIdleTiers200Connections(t *testing.T) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		if c, ok := r.Context().Value(connContextKey{}).(net.Conn); ok {
+			if direct, ok := c.(*idleTierConn); ok {
+				direct.resetIdleTimer()
+			} else if tlsC, ok := c.(*tls.Conn); ok {
+				if inner, ok := tlsC.NetConn().(*idleTierConn); ok {
+					inner.resetIdleTimer()
+				}
+			}
+		}
 	})
 
 	rawLn, err := net.Listen("tcp", "127.0.0.1:0")
@@ -35,6 +48,9 @@ func TestMockIdleTiers200Connections(t *testing.T) {
 
 	ts := httptest.NewUnstartedServer(handler)
 	ts.Listener = tierLn
+	ts.Config.ConnContext = func(ctx context.Context, c net.Conn) context.Context {
+		return context.WithValue(ctx, connContextKey{}, c)
+	}
 	ts.StartTLS()
 	defer ts.Close()
 

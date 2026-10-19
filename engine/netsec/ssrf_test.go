@@ -50,6 +50,7 @@ func TestIsBlocked(t *testing.T) {
 		// Tricky Mappings
 		{"::ffff:169.254.169.254", true},
 		{"::ffff:10.0.0.1", true},
+		{"::ffff:127.0.0.1", true},
 
 		// Multicast & Others
 		{"224.0.0.1", true},
@@ -109,7 +110,7 @@ func TestRedirectToBlockedIPRefused(t *testing.T) {
 	c := &http.Client{
 		Timeout:       3 * time.Second,
 		CheckRedirect: SafeRedirectPolicy,
-		Transport:     &http.Transport{DialContext: (&net.Dialer{Control: controlWith(allowLoopback)}).DialContext},
+		Transport:     &http.Transport{DialContext: (&net.Dialer{Control: ControlWith(allowLoopback)}).DialContext},
 	}
 
 	_, err := c.Get(srv.URL)

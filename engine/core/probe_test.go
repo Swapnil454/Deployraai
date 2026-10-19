@@ -10,8 +10,6 @@ import (
 	"testing"
 	"testing/iotest"
 	"time"
-
-	"github.com/your-org/uptime-engine/netsec"
 )
 
 // Helper to provide NewTestExecutor inline for tests
@@ -198,9 +196,6 @@ func TestProbePhase3Constraints(t *testing.T) {
 
 	// S8 SSRF Zone & Loopback
 	t.Run("S8-SSRF-Protection", func(t *testing.T) {
-		netsec.DisableSSRFBlocker = false
-		defer func() { netsec.DisableSSRFBlocker = true }()
-
 		prodEx := NewExecutor(nil, "pop1")
 		mon := &Monitor{URL: "http://127.0.0.1:22", TimeoutMs: 3000}
 		res := prodEx.RunCheck(context.Background(), mon, ModeSteady, RolePrimary, 0)

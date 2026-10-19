@@ -4,6 +4,7 @@ import (
 	"context"
 	"hash/fnv"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -92,10 +93,10 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 	}
 
-	// Before entering Lock(): identify new rows and allocate ports for ping/port monitors outside any Store.Mu lock.
+	// Before entering Lock(): identify new rows and allocate ports only if required (e.g. Engine B eBPF).
 	preAllocated := make(map[string]int)
 	for _, r := range fresh {
-		if _, ok := existing[r.ID]; !ok && (r.Type == "ping" || r.Type == "port") {
+		if _, ok := existing[r.ID]; !ok && core.RequiresAssignedPort(r.Type) {
 			if port, ok := core.PortAllocator.Allocate(r.ID); ok {
 				preAllocated[r.ID] = port
 			} else {
@@ -130,6 +131,8 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
 			m := &core.Monitor{
 				ID: r.ID, ParsedUUID: parsedUUID, URL: r.URL, Interval: r.Interval, Timeout: r.Timeout, Type: r.Type, IsPaused: r.IsPaused, Keyword: r.Keyword,
 				LastStatus: "UP", ConfidenceScore: 0.0, CurrentInterval: r.Interval, ConfigSyncedAt: time.Now(),
+				NoKeepAlive: strings.HasPrefix(strings.ToLower(r.URL), "http://"),
+				DNSTempCell: &core.DNSTempCell{},
 			}
 
 			// Phase 5 Staleness Check
@@ -202,6 +205,7 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
 				core.PortAllocator.Deallocate(m.AssignedPort)
 			}
 			delete(core.Store.Monitors, id)
+			core.CleanupMonitorState(id)
 		}
 	}
 	core.Store.Mu.Unlock()

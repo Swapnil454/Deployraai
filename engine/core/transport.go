@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"sync"
 	"syscall"
 	"time"
@@ -25,9 +26,10 @@ var ColdTLSConfig = &tls.Config{
 	ClientSessionCache: nil,
 }
 
-// TransportOptions allows injecting root CAs specifically for testing.
+// TransportOptions allows injecting root CAs or custom blocked policy specifically for testing.
 type TransportOptions struct {
-	RootCAs *tls.Config // Just to borrow the RootCAs pool
+	RootCAs       *tls.Config // Just to borrow the RootCAs pool
+	BlockedIPFunc func(netip.Addr) bool
 }
 
 // NewTransports creates the tightly bound transports for Steady and Cold checks.

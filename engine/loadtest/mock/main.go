@@ -107,32 +107,41 @@ func newIdleTierListener(inner net.Listener, tiers []time.Duration) *idleTierLis
 	}
 }
 
+var listenerConnSeq atomic.Uint64
+
 func (l *idleTierListener) Accept() (net.Conn, error) {
 	c, err := l.Listener.Accept()
 	if err != nil {
 		return nil, err
 	}
-	// Initial default tier until host is learned via TLS SNI or HTTP Host header
-	return newIdleTierConn(c, 15*time.Second), nil
+	tier := 15 * time.Second
+	if len(l.tiers) > 0 {
+		idx := listenerConnSeq.Add(1) - 1
+		tier = l.tiers[idx%uint64(len(l.tiers))]
+	}
+	conn := newIdleTierConn(c, tier)
+	conn.tierSet = true
+	return conn, nil
 }
 
 type idleTierConn struct {
 	net.Conn
-	tier         time.Duration
-	tierSet      bool
-	host         string
-	timer        *time.Timer
-	timerMu      sync.Mutex
-	isClosed     atomic.Bool
-	lastActivity time.Time
+	tier             time.Duration
+	tierSet          bool
+	host             string
+	timer            *time.Timer
+	timerMu          sync.Mutex
+	isClosed         atomic.Bool
+	lastActivityNano atomic.Int64
 }
 
 func newIdleTierConn(c net.Conn, tier time.Duration) *idleTierConn {
-	return &idleTierConn{
-		Conn:         c,
-		tier:         tier,
-		lastActivity: time.Now(),
+	conn := &idleTierConn{
+		Conn: c,
+		tier: tier,
 	}
+	conn.lastActivityNano.Store(time.Now().UnixNano())
+	return conn
 }
 
 func (c *idleTierConn) setHost(host string) {
@@ -159,10 +168,10 @@ func (c *idleTierConn) resetIdleTimer() {
 	if !c.tierSet || tier <= 0 {
 		tier = 15 * time.Second
 	}
-	c.lastActivity = time.Now()
+	c.lastActivityNano.Store(time.Now().UnixNano())
 	c.timer = time.AfterFunc(tier, func() {
 		if c.isClosed.CompareAndSwap(false, true) {
-			dur := time.Since(c.lastActivity)
+			dur := time.Duration(time.Now().UnixNano() - c.lastActivityNano.Load())
 			log.Printf("[CONN_TIMEOUT_CLOSE] host=%s tier=%v real_idle=%.2fs", c.host, tier, dur.Seconds())
 			switch tier {
 			case 5 * time.Second:
@@ -192,9 +201,7 @@ func (c *idleTierConn) stopIdleTimer() {
 }
 
 func (c *idleTierConn) Read(b []byte) (int, error) {
-	c.timerMu.Lock()
-	c.lastActivity = time.Now()
-	c.timerMu.Unlock()
+	c.lastActivityNano.Store(time.Now().UnixNano())
 	n, err := c.Conn.Read(b)
 	if n > 0 {
 		c.stopIdleTimer()
@@ -203,16 +210,14 @@ func (c *idleTierConn) Read(b []byte) (int, error) {
 }
 
 func (c *idleTierConn) Write(b []byte) (int, error) {
-	c.timerMu.Lock()
-	c.lastActivity = time.Now()
-	c.timerMu.Unlock()
+	c.lastActivityNano.Store(time.Now().UnixNano())
 	return c.Conn.Write(b)
 }
 
 func (c *idleTierConn) Close() error {
 	c.stopIdleTimer()
 	if c.isClosed.CompareAndSwap(false, true) {
-		dur := time.Since(c.lastActivity)
+		dur := time.Duration(time.Now().UnixNano() - c.lastActivityNano.Load())
 		switch {
 		case dur < 10*time.Second:
 			atomic.AddInt64(&closeClusters[0], 1)

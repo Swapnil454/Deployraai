@@ -178,6 +178,9 @@ var ChecksInFlight atomic.Int64
 func StartAdminServer(addr string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "checks_completed %d\n", ChecksCompleted.Load())
+		fmt.Fprintf(w, "checks_late %d\n", ChecksLate.Load())
+		fmt.Fprintf(w, "checks_dropped %d\n", QueueFull.Load())
 		fmt.Fprintf(w, "telemetry_enqueued %d\n", TelemetryEnqueued.Load())
 		fmt.Fprintf(w, "telemetry_flushed_rows %d\n", TelemetryFlushed.Load())
 		fmt.Fprintf(w, "telemetry_failed_rows %d\n", TelemetryFailed.Load())
@@ -194,6 +197,12 @@ func StartAdminServer(addr string) {
 		fmt.Fprintf(w, "warm_retry_first_err_reset %d\n", WarmRetryReset.Load())
 		fmt.Fprintf(w, "warm_retry_first_err_timeout %d\n", WarmRetryTimeout.Load())
 		fmt.Fprintf(w, "warm_retry_first_err_other %d\n", WarmRetryOther.Load())
+		var mem runtime.MemStats
+		runtime.ReadMemStats(&mem)
+		fmt.Fprintf(w, "heap_sys_mb %d\n", mem.HeapSys/(1024*1024))
+		fmt.Fprintf(w, "heap_alloc_mb %d\n", mem.HeapAlloc/(1024*1024))
+		fmt.Fprintf(w, "p99_dispatch_lag_ms %.3f\n", float64(CurrentP99LagUs.Load())/1000.0)
+		fmt.Fprintf(w, "p50_dispatch_lag_ms %.3f\n", float64(CurrentP50LagUs.Load())/1000.0)
 	})
 	mux.HandleFunc("/admin/compression", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

@@ -17,7 +17,6 @@ var (
 const MaxRedirects = 5
 
 var blockedNetworks []netip.Prefix
-var DisableSSRFBlocker bool
 
 var engineHeaders = map[string]bool{
 	"User-Agent":      true,
@@ -59,9 +58,6 @@ func init() {
 
 // IsBlocked returns true if the IP address is prohibited.
 func IsBlocked(ip netip.Addr) bool {
-	if DisableSSRFBlocker {
-		return false
-	}
 	if !ip.IsValid() {
 		return true // fail closed
 	}
@@ -78,22 +74,34 @@ func IsBlocked(ip netip.Addr) bool {
 	return false
 }
 
-// controlWith allows injecting a custom block function for testing (e.g. allowing loopback)
-func controlWith(blocked func(netip.Addr) bool) func(string, string, syscall.RawConn) error {
+// IsBlockedIP is an alias for IsBlocked for compatibility.
+func IsBlockedIP(ip netip.Addr) bool {
+	return IsBlocked(ip)
+}
+
+// ControlWith allows injecting a custom block function for testing or isolated dialers.
+func ControlWith(blocked func(netip.Addr) bool) func(string, string, syscall.RawConn) error {
 	return func(network, address string, _ syscall.RawConn) error {
 		ap, err := netip.ParseAddrPort(address)
 		if err != nil {
 			return errors.New("ssrf: unparseable address in control hook")
 		}
-		if blocked(ap.Addr()) {
+		fn := blocked
+		if fn == nil {
+			fn = IsBlocked
+		}
+		if fn(ap.Addr()) {
 			return ErrSSRFBlocked
 		}
 		return nil
 	}
 }
 
-// SSRFControl is the production hook for net.Dialer's Control function.
-var SSRFControl = controlWith(IsBlocked)
+// SSRFControl is the production net.Dialer Control function enforcing IsBlocked.
+// It is an unassignable function, preventing any runtime mutation of SSRF controls.
+func SSRFControl(network, address string, c syscall.RawConn) error {
+	return ControlWith(IsBlocked)(network, address, c)
+}
 
 // NewDialer creates a secure net.Dialer with the SSRF control hook automatically injected.
 func NewDialer() *net.Dialer {

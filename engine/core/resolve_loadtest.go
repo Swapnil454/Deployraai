@@ -9,10 +9,10 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 var TLSInsecureSkipVerify bool = true
-var DisableSSRFBlocker bool = true
 
 func init() {
 	log.Println("=====================================================")
@@ -23,26 +23,30 @@ func init() {
 }
 
 var (
-	mockIPMu sync.Mutex
-	mockIP   []net.IP
+	mockIPMu     sync.Mutex
+	mockIPAtomic atomic.Pointer[[]net.IP]
 )
 
 func resolveHost(ctx context.Context, host string) ([]net.IP, error) {
 	if strings.HasSuffix(host, ".mock.local") {
+		if ptr := mockIPAtomic.Load(); ptr != nil {
+			return *ptr, nil
+		}
+
 		mockIPMu.Lock()
 		defer mockIPMu.Unlock()
 
-		if mockIP != nil {
-			return mockIP, nil
+		if ptr := mockIPAtomic.Load(); ptr != nil {
+			return *ptr, nil
 		}
 
 		ip, err := net.DefaultResolver.LookupIP(ctx, "ip", "mock")
 		if err == nil && len(ip) > 0 {
-			mockIP = ip
+			mockIPAtomic.Store(&ip)
 			return ip, nil
 		}
 		fallback := []net.IP{net.ParseIP("127.0.0.1")}
-		mockIP = fallback // Cache the fallback to prevent serialization bottleneck
+		mockIPAtomic.Store(&fallback)
 		return fallback, nil
 	}
 	if strings.HasSuffix(host, ".nonexistent.invalid") {

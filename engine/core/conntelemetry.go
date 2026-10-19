@@ -49,6 +49,11 @@ type telemetryConn struct {
 	closed atomic.Bool
 	cohort int
 	opened time.Time
+	stats  DialStats
+}
+
+func (c *telemetryConn) Stats() DialStats {
+	return c.stats
 }
 
 type tlsBugfixConn struct {

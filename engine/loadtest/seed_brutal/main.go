@@ -24,6 +24,8 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -133,17 +135,33 @@ func main() {
 	if len(os.Args) > 1 {
 		fmt.Sscanf(os.Args[1], "%d", &count)
 	}
-	// Benchmark HTTP-class monitors only: http, keyword, api (Goal 2)
-	monitorTypes := []string{"http", "keyword", "api"}
+	// Realistic workload mix: HTTPS, keyword validation, TCP port check, and ICMP ping
+	monitorTypes := []string{"http", "keyword", "port", "ping"}
+	if envTypes := os.Getenv("MONITOR_TYPES"); envTypes != "" {
+		monitorTypes = strings.Split(envTypes, ",")
+	}
 	perType := count / len(monitorTypes)
 	count = perType * len(monitorTypes)
-	log.Printf("Brutal soak seed: %d HTTP-class monitors total, %d per type across %v, all at 30s interval", count, perType, monitorTypes)
+	log.Printf("Realistic workload seed: %d monitors total, %d per type across %v, all at 30s interval", count, perType, monitorTypes)
 
 	log.Println("Truncating existing monitors and incidents...")
 	_, err = pool.Exec(ctx, "TRUNCATE uptime_monitors CASCADE")
 	if err != nil {
 		log.Fatalf("Truncate failed: %v", err)
 	}
+
+	// Generate large hosts file for the container harness so DNS resolver is not profiled
+	mockIPStr := os.Getenv("MOCK_IP")
+	if mockIPStr == "" {
+		mockIPStr = "172.18.0.2"
+	}
+	var hostsB strings.Builder
+	for i := 0; i < count; i++ {
+		hostsB.WriteString(fmt.Sprintf("%s mock-%d.mock.local\n", mockIPStr, i))
+	}
+	_ = os.WriteFile("mock_hosts", []byte(hostsB.String()), 0644)
+	_ = os.WriteFile("loadtest/mock_hosts", []byte(hostsB.String()), 0644)
+	log.Printf("Generated mock_hosts with %d distinct hosts -> %s", count, mockIPStr)
 
 	rng := rand.New(rand.NewSource(42))
 	var rows [][]interface{}
@@ -226,25 +244,25 @@ func main() {
 
 			case "ping":
 				if isDown {
-					monURL = fmt.Sprintf("https://192.0.2.%d", rng.Intn(254)+1) // RFC5737 documentation range = unreachable
+					monURL = fmt.Sprintf("192.0.2.%d", rng.Intn(254)+1) // RFC5737 documentation range = unreachable
 					tag = "down"
 				} else if useReal && len(realPingHosts) > 0 {
 					monURL = realPingHosts[i%len(realPingHosts)]
 					tag = "real_ping"
 				} else {
-					monURL = fmt.Sprintf("https://mock-%d.mock.local:8443/mock/up", globalIdx)
+					monURL = fmt.Sprintf("127.0.%d.%d", (globalIdx/250), (globalIdx%250)+1)
 					tag = "up_ping"
 				}
 
 			case "port":
 				if isDown {
-					monURL = fmt.Sprintf("https://192.0.2.%d:9999", rng.Intn(254)+1) // RFC5737 unreachable
+					monURL = fmt.Sprintf("192.0.2.%d:9999", rng.Intn(254)+1) // RFC5737 unreachable
 					tag = "down"
 				} else if useReal && len(realPortSites) > 0 {
 					monURL = realPortSites[i%len(realPortSites)]
 					tag = "real_port"
 				} else {
-					monURL = fmt.Sprintf("https://mock-%d.mock.local:8443", globalIdx)
+					monURL = fmt.Sprintf("127.0.%d.%d:9101", (globalIdx/250), (globalIdx%250)+1)
 					tag = "up_port"
 				}
 
@@ -322,6 +340,13 @@ func main() {
 				}
 			}
 
+			intervalSeconds := 30
+			if s := os.Getenv("SEED_INTERVAL_SECONDS"); s != "" {
+				if iv, err := strconv.Atoi(s); err == nil && iv > 0 {
+					intervalSeconds = iv
+				}
+			}
+
 			rows = append(rows, []interface{}{
 				uuid.New().String(), // id
 				"brutal-soak",       // user_id
@@ -329,7 +354,7 @@ func main() {
 				monURL,              // url
 				keyword,             // keyword
 				[]string{tag},       // tags
-				30,                  // interval_seconds  ← ALL 30s
+				intervalSeconds,     // interval_seconds
 				timeout,             // timeout_seconds
 				"up",                // status
 				false,               // is_paused

@@ -4,13 +4,17 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/metrics"
 	"runtime/pprof"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,17 +24,90 @@ import (
 	"github.com/your-org/uptime-engine/core"
 	"github.com/your-org/uptime-engine/db"
 	"github.com/your-org/uptime-engine/ebpf"
-	"github.com/your-org/uptime-engine/netsec"
 )
+
+func readCgroupCPU() (usageUsec int64, userUsec int64, sysUsec int64) {
+	data, err := os.ReadFile("/sys/fs/cgroup/cpu.stat")
+	if err != nil {
+		return 0, 0, 0
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 {
+			val, _ := strconv.ParseInt(fields[1], 10, 64)
+			switch fields[0] {
+			case "usage_usec":
+				usageUsec = val
+			case "user_usec":
+				userUsec = val
+			case "system_usec":
+				sysUsec = val
+			}
+		}
+	}
+	return
+}
+
+func readGCMetrics() (gcSec float64, userSec float64, totalSec float64, gcSharePct float64) {
+	const (
+		gcCPU   = "/cpu/classes/gc/total:cpu-seconds"
+		userCPU = "/cpu/classes/user:cpu-seconds"
+		totCPU  = "/cpu/classes/total:cpu-seconds"
+	)
+	samples := []metrics.Sample{
+		{Name: gcCPU},
+		{Name: userCPU},
+		{Name: totCPU},
+	}
+	metrics.Read(samples)
+	if samples[0].Value.Kind() == metrics.KindFloat64 {
+		gcSec = samples[0].Value.Float64()
+	}
+	if samples[1].Value.Kind() == metrics.KindFloat64 {
+		userSec = samples[1].Value.Float64()
+	}
+	if samples[2].Value.Kind() == metrics.KindFloat64 {
+		totalSec = samples[2].Value.Float64()
+	}
+	activeCPU := userSec + gcSec
+	if activeCPU > 0 {
+		gcSharePct = (gcSec / activeCPU) * 100.0
+	} else if totalSec > 0 {
+		gcSharePct = (gcSec / totalSec) * 100.0
+	}
+	return
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if os.Getenv("DISABLE_SSRF_BLOCKER") == "true" {
-		netsec.DisableSSRFBlocker = true
-		log.Println("WARNING: SSRF Blocker is DISABLED via environment variable")
+	// pprof HTTP server on port 6060
+	go func() {
+		pprofAddr := os.Getenv("PPROF_ADDR")
+		if pprofAddr == "" {
+			pprofAddr = "0.0.0.0:6060"
+		}
+		if err := http.ListenAndServe(pprofAddr, nil); err != nil && err != http.ErrServerClosed {
+			log.Printf("pprof HTTP server failed: %v", err)
+		}
+	}()
+
+	// Automatic file-based CPU profiling if CPU_PROFILE is set
+	var cpuProfFile *os.File
+	if cpuProfPath := os.Getenv("CPU_PROFILE"); cpuProfPath != "" {
+		f, err := os.Create(cpuProfPath)
+		if err != nil {
+			log.Fatalf("failed to create CPU profile %s: %v", cpuProfPath, err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			log.Fatalf("failed to start CPU profile: %v", err)
+		}
+		cpuProfFile = f
+		log.Printf("CPU profiling enabled, writing to %s", cpuProfPath)
 	}
+
+
 
 	cfg, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL_POOLED"))
 	if err != nil {
@@ -51,14 +128,31 @@ func main() {
 	monitorCount := len(core.Store.Monitors)
 	core.InitTLSConfig(monitorCount)
 
+	var pingCount int
 	for _, p := range core.Store.Monitors {
-		if p.Load().Type != "http" {
+		mType := p.Load().Type
+		if mType == "ping" {
+			pingCount++
+		}
+		if mType != "http" {
 			skippedCount++
 		}
 	}
 	core.Store.Mu.RUnlock()
+	if ok, icmpErr := core.CheckICMPCapability(); !ok {
+		atomic.StoreUint32(&core.MetricICMPCapabilityDenied, 1)
+		if pingCount > 0 || os.Getenv("REQUIRE_ICMP") == "true" {
+			log.Fatalf("FATAL: %d ping monitors configured but unprivileged ICMP sockets are denied by kernel: %v. Set sysctl net.ipv4.ping_group_range='0 2147483647' or grant CAP_NET_RAW", pingCount, icmpErr)
+		} else {
+			log.Printf("STARTUP WARNING: ICMP ping capability not permitted by kernel: %v", icmpErr)
+		}
+	} else {
+		atomic.StoreUint32(&core.MetricICMPCapabilityDenied, 0)
+		log.Printf("ICMP capability verified: unprivileged non-root datagram sockets enabled")
+	}
+
 	if !core.EnableEngineB && skippedCount > 0 {
-		log.Printf("WARNING: Engine B is gated. %d non-HTTP monitors will be silently skipped.", skippedCount)
+		log.Printf("INFO: %d non-HTTP monitors loaded into store (%d ping).", skippedCount, pingCount)
 	}
 
 	var wg sync.WaitGroup
@@ -192,9 +286,12 @@ func main() {
 					}
 				}
 				core.Store.Mu.RUnlock()
-				log.Printf("[PROCESS_STATS] goroutines=%d open_fds=%d heap_sys_mb=%d heap_alloc_mb=%d no_keepalive_monitors=%d mock_net_bytes=%d",
+				gcSec, userSec, totSec, gcShare := readGCMetrics()
+				log.Printf("[PROCESS_STATS] goroutines=%d open_fds=%d heap_sys_mb=%d heap_alloc_mb=%d no_keepalive_monitors=%d mock_net_bytes=%d checks_completed=%d checks_late=%d checks_dropped=%d gc_share=%.2f%% (gc_sec=%.3f/user_sec=%.3f/tot_sec=%.3f)",
 					runtime.NumGoroutine(), fds, m.Sys/(1024*1024), m.Alloc/(1024*1024), noKeepAlive,
-					core.MockNetBytesIn.Load()+core.MockNetBytesOut.Load())
+					core.MockNetBytesIn.Load()+core.MockNetBytesOut.Load(),
+					core.ChecksCompleted.Load(), core.ChecksLate.Load(), core.QueueFull.Load(),
+					gcShare, gcSec, userSec, totSec)
 			}
 		}
 	}()
@@ -249,16 +346,30 @@ func main() {
 	}
 
 	inFlight := uint64(len(core.TelemetryQueue)) + uint64(core.ActiveBufRows.Load())
-	log.Printf("[RUN_COUNTERS] telemetry_enqueued=%d telemetry_flushed=%d telemetry_failed=%d telemetry_dropped=%d telemetry_in_flight=%d checks_in_flight=%d invariant_delta=%d queue_full=%d force_get_learned=%d",
+	finalGCSec, finalUserSec, finalTotSec, finalGCShare := readGCMetrics()
+	usageUsec, userUsec, sysUsec := readCgroupCPU()
+	cpuPerCheckUs := float64(0)
+	if core.ChecksCompleted.Load() > 0 && usageUsec > 0 {
+		cpuPerCheckUs = float64(usageUsec) / float64(core.ChecksCompleted.Load())
+	}
+	log.Printf("[RUN_COUNTERS] telemetry_enqueued=%d telemetry_flushed=%d telemetry_failed=%d telemetry_dropped=%d telemetry_in_flight=%d checks_in_flight=%d invariant_delta=%d queue_full=%d force_get_learned=%d checks_completed=%d checks_late=%d checks_dropped=%d cpu_per_check_us=%.1f cgroup_usage_usec=%d cgroup_user_usec=%d cgroup_sys_usec=%d gc_share=%.2f%% (gc_sec=%.3f/user_sec=%.3f/tot_sec=%.3f)",
 		core.TelemetryEnqueued.Load(), core.TelemetryFlushed.Load(), core.TelemetryFailed.Load(), core.TelemetryDropped.Load(),
 		inFlight, core.ChecksInFlight.Load(),
 		int64(core.TelemetryEnqueued.Load())-int64(core.TelemetryFlushed.Load()+core.TelemetryFailed.Load()+core.TelemetryDropped.Load()+inFlight),
-		core.QueueFull.Load(), atomic.LoadInt64(&core.ForceGETLearned))
+		core.QueueFull.Load(), atomic.LoadInt64(&core.ForceGETLearned),
+		core.ChecksCompleted.Load(), core.ChecksLate.Load(), core.QueueFull.Load(),
+		cpuPerCheckUs, usageUsec, userUsec, sysUsec,
+		finalGCShare, finalGCSec, finalUserSec, finalTotSec)
 
 	db.DrainQueueToDeadLetter() // Final catch-all for events generated during shutdown
 	pool.Close()
 	if chConn != nil {
 		chConn.Close()
+	}
+	if cpuProfFile != nil {
+		pprof.StopCPUProfile()
+		cpuProfFile.Close()
+		log.Println("[PGO] CPU profile successfully flushed and closed.")
 	}
 	log.Printf("[SHUTDOWN_TIMING] Clean shutdown completed in %.3fs with exit code 0", time.Since(shutdownStart).Seconds())
 	os.Exit(0)

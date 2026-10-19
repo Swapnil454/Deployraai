@@ -1,19 +1,5 @@
 package core
 
-// Phase 1 "safe core": bounded, classified, multi-codec body reading for
-// keyword monitors on top of fasthttp's BodyStream().
-//
-// Semantics (deliberate, keep in sync with docs):
-//   - The keyword window (limit) is measured in DECODED bytes. Reading stops
-//     once the window is full, so a decompression bomb can never produce more
-//     than `limit` bytes of output. A full window is NOT an error.
-//   - A body that ends early or breaks mid-stream is NEVER reported as a clean
-//     EOF. Callers get errBodyTruncated / errBodyDecode / a raw network error,
-//     plus whatever valid prefix was decoded (BodyResult.Body).
-//   - Wire bytes are capped separately, to stop streams that burn bandwidth
-//     without producing output (e.g. endless empty gzip blocks / zstd
-//     skippable frames).
-
 import (
 	"bufio"
 	"bytes"
@@ -32,16 +18,15 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// AcceptEncoding matches what current Chrome sends without zstd for initial canary.
-// zstd decoder remains active for unsolicited Content-Encoding: zstd responses.
-const AcceptEncoding = "gzip, deflate, br"
+// AcceptEncoding advertises modern compression codecs supported by the engine.
+const AcceptEncoding = "gzip, deflate, br, zstd"
 
 const (
 	wireFactor      = 4         // wire cap = limit*wireFactor + wireSlack
 	wireSlack       = 256 << 10 // headroom for small/incompressible bodies
 	maxPooledBuf    = 1 << 20   // don't pin huge buffers in the pool
-	zstdMaxWin      = 2 << 20   // Capped at 2 MB to prevent memory bloat from hostile 8 MB zstd windows
-	zstdPoolSize    = 16        // Reduced idle retention cap to ~40 MB
+	zstdMaxWin      = 2 << 20   // Capped at 2 MB to bound decoder memory footprint
+	zstdPoolSize    = 16        // Capped idle retention pool
 	bodyReadTimeout = 10 * time.Second
 )
 
@@ -53,13 +38,12 @@ var (
 	errWireCap             = errors.New("wire cap exceeded")
 )
 
-// BodyResult holds the decoded prefix plus per-check metrics (Phase 0).
-// Body is backed by a pooled buffer: use it before calling Release().
+// BodyResult holds the decoded prefix plus per-check metrics.
 type BodyResult struct {
 	Body       []byte
-	Encoding   string // normalized: identity|gzip|deflate|br|zstd (or raw header if unsupported)
-	WireBytes  int64  // body bytes pulled off the connection (compressed size, incl. decoder read-ahead)
-	WindowFull bool   // true if the window filled before EOF (more data may exist)
+	Encoding   string
+	WireBytes  int64
+	WindowFull bool
 	pb         *pooledBuf
 }
 
@@ -82,6 +66,9 @@ var (
 	gzipPool sync.Pool
 	brPool   sync.Pool
 	zstdPool = make(chan *zstd.Decoder, zstdPoolSize)
+	brdPool  = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, 4096) }}
+	zlibPool sync.Pool
+	flPool   sync.Pool
 )
 
 // ReadKeywordBody reads up to `limit` decoded bytes from a fasthttp response.
@@ -114,12 +101,16 @@ func readBody(src io.Reader, header string, limit int, deadline time.Time) (Body
 	}
 
 	wr := &wireReader{r: src, max: int64(limit)*wireFactor + wireSlack}
-	// Drop our reference to the stream so a pooled decoder can't pin it.
 	defer func() { wr.r = nil }()
 
-	var dec io.Reader = wr
+	// Defect fix: arm the deadline reader BEFORE newDecoder reads compression headers.
+	// This prevents a server from hanging the worker during header sniffing/initialization.
+	dl, stopDL := newDeadlineReader(wr, deadline, src)
+	defer stopDL()
+
+	var dec io.Reader = dl
 	if enc != "identity" {
-		d, release, derr := newDecoder(enc, wr)
+		d, release, derr := newDecoder(enc, dl)
 		if derr != nil {
 			res.WireBytes = wr.n
 			return res, finishErr(derr, wr)
@@ -128,7 +119,6 @@ func readBody(src io.Reader, header string, limit int, deadline time.Time) (Body
 		dec = d
 	}
 
-	// Pass src as the closer so the deadline timer can close the connection (Fix 5).
 	full, rerr := readUpTo(dec, res.pb, limit, deadline, src)
 	res.Body, res.WindowFull, res.WireBytes = res.pb.b, full, wr.n
 	if rerr != nil {
@@ -137,15 +127,6 @@ func readBody(src io.Reader, header string, limit int, deadline time.Time) (Body
 	return res, nil
 }
 
-// deadlineReader wraps an io.Reader and interrupts blocking reads when the
-// absolute deadline passes (Fix 5: body reads share the check's own timeout).
-//
-// Strategy (in priority order):
-//  1. If the reader implements SetReadDeadline (net.Conn, tls.Conn, etc.),
-//     call it before each read — the OS kernel interrupts the blocking syscall.
-//  2. Otherwise, schedule a time.AfterFunc that closes an io.Closer after
-//     the deadline; the broken pipe causes r.Read() to return an error.
-//     The timer is always stopped after r.Read() returns to prevent leaks.
 type deadlineReader struct {
 	r        io.Reader
 	deadline time.Time
@@ -157,7 +138,7 @@ type deadliner interface {
 
 func newDeadlineReader(r io.Reader, deadline time.Time, closer io.Reader) (*deadlineReader, func()) {
 	dr := &deadlineReader{r: r, deadline: deadline}
-	stop := func() {} // no-op unless we started a timer
+	stop := func() {}
 
 	if !deadline.IsZero() {
 		if dl, ok := closer.(deadliner); ok {
@@ -183,10 +164,6 @@ func (d *deadlineReader) Read(p []byte) (int, error) {
 	return d.r.Read(p)
 }
 
-// readUpTo fills pb.b with up to limit bytes. It returns full=true if the
-// window filled, nil error on clean EOF, and the raw error otherwise.
-// The deadline is enforced via deadlineReader so blocking reads are interrupted
-// when the per-check timeout expires (Fix 5: one deadline per check).
 func readUpTo(r io.Reader, pb *pooledBuf, limit int, deadline time.Time, closer io.Reader) (full bool, err error) {
 	if cap(pb.b) < limit {
 		pb.b = make([]byte, 0, limit)
@@ -194,23 +171,19 @@ func readUpTo(r io.Reader, pb *pooledBuf, limit int, deadline time.Time, closer 
 	buf := pb.b[:0]
 	empties := 0
 
-	dr, stop := newDeadlineReader(r, deadline, closer)
-	defer stop()
-
 	for len(buf) < limit {
 		if !deadline.IsZero() && time.Now().After(deadline) {
 			pb.b = buf
 			return false, fmt.Errorf("read exceeded absolute deadline")
 		}
 
-		n, rerr := dr.Read(buf[len(buf):limit])
+		n, rerr := r.Read(buf[len(buf):limit])
 		buf = buf[:len(buf)+n]
 		if rerr != nil {
 			pb.b = buf
 			if errors.Is(rerr, io.EOF) {
 				return false, nil
 			}
-			// If deadline fired, classify as deadline error.
 			if !deadline.IsZero() && time.Now().After(deadline) {
 				return false, fmt.Errorf("read exceeded absolute deadline")
 			}
@@ -239,14 +212,12 @@ func normalizeEncoding(h string) (string, error) {
 	case "deflate", "br", "zstd":
 		return e, nil
 	}
-	// Includes chained encodings ("gzip, br"): reject explicitly rather than guess.
 	return e, fmt.Errorf("%w: %q", errUnsupportedEncoding, h)
 }
 
-// finishErr classifies a failure. Order matters: wire-level evidence first.
 func finishErr(err error, wr *wireReader) error {
 	if wr.n == 0 && errors.Is(wr.err, io.EOF) {
-		return nil // genuinely empty body (decoders fail on empty input)
+		return nil
 	}
 	if wr.err != nil && !errors.Is(wr.err, io.EOF) {
 		switch {
@@ -255,18 +226,15 @@ func finishErr(err error, wr *wireReader) error {
 		case errors.Is(wr.err, io.ErrUnexpectedEOF):
 			return fmt.Errorf("%w: %v", errBodyTruncated, wr.err)
 		default:
-			return wr.err // network error: let classifyNetError handle it
+			return wr.err
 		}
 	}
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		return fmt.Errorf("%w: %v", errBodyTruncated, err)
 	}
-
 	return fmt.Errorf("%w: %v", errBodyDecode, err)
 }
 
-// wireReader counts and caps compressed bytes and remembers the first error
-// the connection produced, so we can tell network failure from corrupt data.
 type wireReader struct {
 	r   io.Reader
 	n   int64
@@ -297,21 +265,31 @@ func newDecoder(enc string, src io.Reader) (io.Reader, func(), error) {
 	var err error
 	switch enc {
 	case "gzip":
+		bufr := brdPool.Get().(*bufio.Reader)
+		bufr.Reset(src)
+		putB := func() { bufr.Reset(nil); brdPool.Put(bufr) }
+
 		zr, _ := gzipPool.Get().(*gzip.Reader)
 		if zr == nil {
-			if zr, err = gzip.NewReader(src); err != nil { // reads the header
+			if zr, err = gzip.NewReader(bufr); err != nil {
+				putB()
 				return nil, nil, err
 			}
-		} else if err = zr.Reset(src); err != nil {
+		} else if err = zr.Reset(bufr); err != nil {
 			gzipPool.Put(zr)
+			putB()
 			return nil, nil, err
 		}
-		return zr, func() { gzipPool.Put(zr) }, nil
+		return zr, func() { gzipPool.Put(zr); putB() }, nil
 
 	case "br":
-		bufr := bufio.NewReaderSize(src, 4096)
+		bufr := brdPool.Get().(*bufio.Reader)
+		bufr.Reset(src)
+		putB := func() { bufr.Reset(nil); brdPool.Put(bufr) }
+
 		if h, _ := bufr.Peek(1); len(h) == 1 {
 			if wb := brWindowBits(h[0]); wb < 0 || wb > maxBrWindowBits {
+				putB()
 				return nil, nil, fmt.Errorf("%w: brotli window %d bits exceeds cap", errUnsupportedEncoding, wb)
 			}
 		}
@@ -319,17 +297,16 @@ func newDecoder(enc string, src io.Reader) (io.Reader, func(), error) {
 		if br == nil {
 			br = brotli.NewReader(bufr)
 		} else if err = br.Reset(bufr); err != nil {
+			putB()
 			return nil, nil, err
 		}
-		return br, func() { brPool.Put(br) }, nil
+		return br, func() { brPool.Put(br); putB() }, nil
 
 	case "zstd":
 		var zd *zstd.Decoder
 		select {
 		case zd = <-zstdPool:
 		default:
-			// Concurrency 1 => synchronous stream decoding, no helper goroutines
-			// to leak if a decoder is ever dropped.
 			zd, err = zstd.NewReader(nil,
 				zstd.WithDecoderConcurrency(1),
 				zstd.WithDecoderMaxWindow(zstdMaxWin),
@@ -340,10 +317,13 @@ func newDecoder(enc string, src io.Reader) (io.Reader, func(), error) {
 		}
 		if err = zd.Reset(src); err != nil {
 			zd.Close()
+			if strings.Contains(err.Error(), "window size exceeded") {
+				return nil, nil, fmt.Errorf("%w: %v", errUnsupportedEncoding, err)
+			}
 			return nil, nil, err
 		}
 		return zd, func() {
-			_ = zd.Reset(nil) // drop reference to the connection stream
+			_ = zd.Reset(nil)
 			select {
 			case zstdPool <- zd:
 			default:
@@ -352,18 +332,35 @@ func newDecoder(enc string, src io.Reader) (io.Reader, func(), error) {
 		}, nil
 
 	case "deflate":
-		// HTTP "deflate" is zlib-wrapped per spec, but some servers send raw
-		// DEFLATE. Sniff the 2-byte zlib header (RFC 1950).
-		bufr := bufio.NewReaderSize(src, 512)
+		bufr := brdPool.Get().(*bufio.Reader)
+		bufr.Reset(src)
+		putB := func() { bufr.Reset(nil); brdPool.Put(bufr) }
+
 		h, _ := bufr.Peek(2)
 		if len(h) == 2 && h[0]&0x0f == 8 && (uint(h[0])<<8|uint(h[1]))%31 == 0 {
+			if zr, _ := zlibPool.Get().(io.ReadCloser); zr != nil {
+				if err = zr.(zlib.Resetter).Reset(bufr, nil); err != nil {
+					putB()
+					return nil, nil, err
+				}
+				return zr, func() { zlibPool.Put(zr); putB() }, nil
+			}
 			zr, zerr := zlib.NewReader(bufr)
 			if zerr != nil {
+				putB()
 				return nil, nil, zerr
 			}
-			return zr, func() { _ = zr.Close() }, nil
+			return zr, func() { zlibPool.Put(zr); putB() }, nil
 		}
-		return flate.NewReader(bufr), func() {}, nil
+		if fr, _ := flPool.Get().(io.ReadCloser); fr != nil {
+			if err = fr.(flate.Resetter).Reset(bufr, nil); err != nil {
+				putB()
+				return nil, nil, err
+			}
+			return fr, func() { flPool.Put(fr); putB() }, nil
+		}
+		fr := flate.NewReader(bufr)
+		return fr, func() { flPool.Put(fr); putB() }, nil
 	}
 	return nil, nil, fmt.Errorf("%w: %q", errUnsupportedEncoding, enc)
 }
@@ -374,8 +371,9 @@ func classifyBodyErr(err error) ErrClass {
 		return ErrBodyTruncated
 	case errors.Is(err, errBodyTooLarge):
 		return ErrBodyTooLarge
-	case errors.Is(err, errBodyDecode),
-		errors.Is(err, errUnsupportedEncoding):
+	case errors.Is(err, errUnsupportedEncoding):
+		return ErrUnsupported
+	case errors.Is(err, errBodyDecode):
 		return ErrBodyDecode
 	default:
 		return classifyNetError(err, false)

@@ -84,7 +84,14 @@ type Executor struct {
 }
 
 func NewExecutor(opts *TransportOptions, pop string) *Executor {
-	d := netsec.NewDialer()
+	var d *net.Dialer
+	if opts != nil && opts.BlockedIPFunc != nil {
+		d = &net.Dialer{
+			Control: netsec.ControlWith(opts.BlockedIPFunc),
+		}
+	} else {
+		d = netsec.NewDialer()
+	}
 	s, c := NewTransports(d, opts)
 	return &Executor{
 		Dialer:          d,
@@ -377,6 +384,12 @@ func (e *Executor) RunCheck(ctx context.Context, monitor *Monitor, mode CheckMod
 }
 
 func classifyNetError(err error, didConnect bool) ErrClass {
+	if errors.Is(err, ErrDNSUnsupportedIPv6) {
+		return ErrUnsupported
+	}
+	if errors.Is(err, ErrRecursorUnavailable) || errors.Is(err, ErrDNSLocalResource) || errors.Is(err, ErrDNSDeadlineExceeded) {
+		return ErrLocalResource
+	}
 	if errors.Is(err, netsec.ErrSSRFBlocked) {
 		return ErrConfig
 	}
@@ -391,6 +404,9 @@ func classifyNetError(err error, didConnect bool) ErrClass {
 	if errors.As(err, &dnsErr) {
 		if dnsErr.IsNotFound {
 			return ErrNet // NXDOMAIN is a target failure, not local resolver failure
+		}
+		if dnsErr.IsTemporary || dnsErr.IsTimeout {
+			return ErrDNSTemporary
 		}
 		return ErrDNS // includes DNS timeouts, SERVFAIL, etc.
 	}

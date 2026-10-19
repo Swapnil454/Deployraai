@@ -46,6 +46,11 @@ type Monitor struct {
 	// HTTP specific
 	TimeoutMs       int
 	Keyword         string
+	KeywordBytes    []byte
+	LowerKeyword    []byte
+	RareOffset      int
+	IsASCII         bool
+	CaseSensitive   bool
 	KeywordMaxBytes int64
 	ExpectedStatus  []int
 	ForceGET        bool
@@ -58,10 +63,20 @@ type Monitor struct {
 	FullPhaseInterval  time.Duration
 	StaleSocketCount   uint16
 	NoKeepAlive        bool
+	LatchedNoKeepAlive bool
+	GracefulClose      bool
 	IsVerification     bool
 	CertExpiry         time.Time
 	CertDaysRemaining  int
 	LastFullPhaseAt    time.Time
+
+	// DNS temporary failure escalation tracking cell shared across copy-on-write clones.
+	// Clones share this cell via pointer, eliminating plain/atomic load-store races during CASUpdate.
+	DNSTempCell *DNSTempCell
+}
+
+type DNSTempCell struct {
+	State atomic.Uint64
 }
 
 func Splitmix64(x uint64) uint64 {
@@ -111,14 +126,20 @@ func (s *MonitorStore) GetPointer(id string) *atomic.Pointer[Monitor] {
 // Retries are expected to be rare in practice, since writes to any single
 // monitor happen at most a few times per interval — but the loop is unbounded
 // specifically so it is always correct, not just usually correct.
-func CASUpdate(p *atomic.Pointer[Monitor], apply func(*Monitor)) {
+func CASUpdate(p *atomic.Pointer[Monitor], apply func(*Monitor)) bool {
+	if p == nil {
+		return false
+	}
 	for {
 		old := p.Load()
+		if old == nil {
+			return false
+		}
 		updated := *old
 		apply(&updated)
 
 		if p.CompareAndSwap(old, &updated) {
-			return
+			return true
 		}
 	}
 }

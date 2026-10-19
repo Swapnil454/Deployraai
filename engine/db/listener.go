@@ -6,6 +6,7 @@ import (
 	"hash/fnv"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -132,6 +133,7 @@ func processNotification(ctx context.Context, pool *pgxpool.Pool, payloadStr str
 		}
 		delete(core.Store.Monitors, id)
 		core.Store.Mu.Unlock()
+		core.CleanupMonitorState(id)
 		return
 	}
 
@@ -167,6 +169,7 @@ func processNotification(ctx context.Context, pool *pgxpool.Pool, payloadStr str
 			delete(core.Store.Monitors, id)
 		}
 		core.Store.Mu.Unlock()
+		core.CleanupMonitorState(id)
 		return
 	}
 
@@ -205,6 +208,8 @@ func processNotification(ctx context.Context, pool *pgxpool.Pool, payloadStr str
 		m := &core.Monitor{
 			ID: r.ID, URL: r.URL, Interval: r.Interval, Timeout: r.Timeout, Type: r.Type, IsPaused: r.IsPaused,
 			LastStatus: "UP", ConfidenceScore: 0.0, CurrentInterval: r.Interval, ConfigSyncedAt: time.Now(),
+			NoKeepAlive: strings.HasPrefix(strings.ToLower(r.URL), "http://"),
+			DNSTempCell: &core.DNSTempCell{},
 		}
 
 		// A4: Spread out the check schedule (Jitter for new monitors)
@@ -213,7 +218,7 @@ func processNotification(ctx context.Context, pool *pgxpool.Pool, payloadStr str
 		offset := time.Duration(h.Sum32()%5) * time.Second
 		m.NextCheckAt = time.Now().Add(offset)
 
-		if r.Type != "http" {
+		if core.RequiresAssignedPort(r.Type) {
 			if port, ok := core.PortAllocator.Allocate(r.ID); ok {
 				m.AssignedPort = port
 			} else {

@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -26,10 +25,216 @@ import (
 )
 
 var (
-	sessionCacheHits   int64
-	sessionCacheMisses int64
-	sessionCachePuts   int64
+	sessionCacheHits             int64
+	sessionCacheMisses           int64
+	sessionCachePuts             int64
+	LocalResourceExhaustionCount uint64
+	LocalRoutingFailureCount     uint64
+	DNSTemporaryCount            uint64
+	consecutiveDNSTemporary      sync.Map // monitorID -> *int32
 )
+
+// CleanupMonitorState removes any transient tracking state for a removed monitor.
+func CleanupMonitorState(monitorID string) {
+	consecutiveDNSTemporary.Delete(monitorID)
+}
+
+type dnsTemporaryState struct {
+	count     int32
+	lastUpdAt int64 // Unix nano
+}
+
+const dnsTemporaryCounterMaxAge = 10 * time.Minute
+
+// GetDNSTemporaryCount returns the current count of consecutive DNS temporary failures for a monitor.
+func GetDNSTemporaryCount(monitorID string) int32 {
+	if val, ok := consecutiveDNSTemporary.Load(monitorID); ok {
+		st := val.(*dnsTemporaryState)
+		if time.Now().UnixNano()-st.lastUpdAt > int64(dnsTemporaryCounterMaxAge) {
+			consecutiveDNSTemporary.Delete(monitorID)
+			return 0
+		}
+		return st.count
+	}
+	return 0
+}
+
+// ResetDNSTemporaryCount explicitly resets the consecutive DNS temporary failures for a monitor.
+func ResetDNSTemporaryCount(monitorID string) {
+	consecutiveDNSTemporary.Delete(monitorID)
+}
+
+// PackDNSTempState packs count (8 bits, bits 56..63) and timestamp in milliseconds (56 bits, bits 0..55).
+func PackDNSTempState(count uint8, tsMs int64) uint64 {
+	return (uint64(count) << 56) | (uint64(tsMs) & 0x00FFFFFFFFFFFFFF)
+}
+
+// UnpackDNSTempState unpacks count (8 bits, bits 56..63) and timestamp in milliseconds (56 bits, bits 0..55).
+func UnpackDNSTempState(v uint64) (uint8, int64) {
+	return uint8(v >> 56), int64(v & 0x00FFFFFFFFFFFFFF)
+}
+
+func packDNSTempState(count uint8, tsMs int64) uint64 {
+	return PackDNSTempState(count, tsMs)
+}
+
+func unpackDNSTempState(v uint64) (uint8, int64) {
+	return UnpackDNSTempState(v)
+}
+
+// StepDNSTemporaryEvaluationOnMonitor updates the consecutive DNS temporary failure counter directly on *Monitor.
+// Zero heap allocations on the success path (ErrNone) and zero CAS when already zero.
+// Inconclusive errors (ErrLocalResource, ErrUnsupported, ErrSlow) HOLD the counter without resetting or incrementing.
+// Consecutive ErrDNSTemporary failures increment the counter; upon reaching 5, it saturates at 5 and escalates to true.
+// The counter remains saturated at 5 until an ErrNone (or non-DNS definitive failure) resets it to 0, preventing flapping.
+func StepDNSTemporaryEvaluationOnMonitor(m *Monitor, intervalSec int, errClass ErrClass) (currentCount int32, escalated bool) {
+	if m == nil {
+		return 0, false
+	}
+
+	// 1. Success fast-path: Zero allocations, zero writes, and zero time.Now() calls if already 0 (or unallocated)
+	if errClass == ErrNone {
+		if m.DNSTempCell == nil {
+			return 0, false
+		}
+		cur := m.DNSTempCell.State.Load()
+		if cur == 0 {
+			return 0, false
+		}
+		m.DNSTempCell.State.Store(0)
+		return 0, false
+	}
+
+	if intervalSec <= 0 {
+		intervalSec = 60
+	}
+	maxAge := dnsTemporaryCounterMaxAge
+	if limit := 3 * time.Duration(intervalSec) * time.Second; limit > maxAge {
+		maxAge = limit
+	}
+	maxAgeMs := maxAge.Milliseconds()
+	nowMs := time.Now().UnixMilli()
+
+	cell := m.DNSTempCell
+	if cell == nil {
+		cell = &DNSTempCell{}
+		m.DNSTempCell = cell
+	}
+
+	// 2. Inconclusive hold path (ErrLocalResource, ErrUnsupported, ErrSlow)
+	if errClass == ErrLocalResource || errClass == ErrUnsupported || errClass == ErrSlow {
+		cur := cell.State.Load()
+		if cur == 0 {
+			return 0, false
+		}
+		cnt, ts := unpackDNSTempState(cur)
+		if nowMs-ts > maxAgeMs {
+			// Stale count expired, reset to 0
+			cell.State.CompareAndSwap(cur, 0)
+			return 0, false
+		}
+		// Hold current count
+		return int32(cnt), cnt >= 5
+	}
+
+	// 3. DNS Temporary failure path (ErrDNSTemporary)
+	if errClass == ErrDNSTemporary {
+		for {
+			cur := cell.State.Load()
+			cnt, ts := unpackDNSTempState(cur)
+			var nextCnt uint8
+			if cnt > 0 {
+				if nowMs-ts > maxAgeMs {
+					nextCnt = 1
+				} else {
+					nextCnt = cnt + 1
+					if nextCnt >= 5 {
+						nextCnt = 5 // Saturated at 5! Never flap back to 0!
+					}
+				}
+			} else {
+				nextCnt = 1
+			}
+			nextVal := packDNSTempState(nextCnt, nowMs)
+			if cell.State.CompareAndSwap(cur, nextVal) {
+				return int32(nextCnt), nextCnt >= 5
+			}
+		}
+	}
+
+	// 4. Definitive non-DNS failure resets the counter
+	cur := cell.State.Load()
+	if cur == 0 {
+		return 0, false
+	}
+	cell.State.Store(0)
+	return 0, false
+}
+
+// StepDNSTemporaryEvaluation evaluates DNS temporary failures for monitorID.
+// If the monitor is resident in Store, it performs the atomic evaluation directly on the Monitor struct with zero heap allocations.
+func StepDNSTemporaryEvaluation(monitorID string, intervalSec int, errClass ErrClass) (currentCount int32, escalated bool) {
+	ptr := Store.GetPointer(monitorID)
+	if ptr != nil {
+		m := ptr.Load()
+		if m != nil {
+			return StepDNSTemporaryEvaluationOnMonitor(m, intervalSec, errClass)
+		}
+	}
+
+	// Fallback strictly for isolated tests where Store is unpopulated
+	return stepDNSTemporaryEvaluationFallback(monitorID, intervalSec, errClass)
+}
+
+func stepDNSTemporaryEvaluationFallback(monitorID string, intervalSec int, errClass ErrClass) (int32, bool) {
+	if intervalSec <= 0 {
+		intervalSec = 60
+	}
+	maxAge := dnsTemporaryCounterMaxAge
+	if limit := 3 * time.Duration(intervalSec) * time.Second; limit > maxAge {
+		maxAge = limit
+	}
+	now := time.Now().UnixNano()
+
+	if errClass == ErrNone {
+		consecutiveDNSTemporary.Delete(monitorID)
+		return 0, false
+	}
+	if errClass == ErrLocalResource || errClass == ErrUnsupported || errClass == ErrSlow {
+		if val, ok := consecutiveDNSTemporary.Load(monitorID); ok {
+			st := val.(*dnsTemporaryState)
+			if now-st.lastUpdAt > int64(maxAge) {
+				consecutiveDNSTemporary.Delete(monitorID)
+				return 0, false
+			}
+			return st.count, st.count >= 5
+		}
+		return 0, false
+	}
+	if errClass == ErrDNSTemporary {
+		var st *dnsTemporaryState
+		val, loaded := consecutiveDNSTemporary.Load(monitorID)
+		if loaded {
+			existing := val.(*dnsTemporaryState)
+			if now-existing.lastUpdAt > int64(maxAge) {
+				st = &dnsTemporaryState{count: 1, lastUpdAt: now}
+			} else {
+				nextCount := existing.count + 1
+				if nextCount >= 5 {
+					nextCount = 5 // Saturated at 5!
+				}
+				st = &dnsTemporaryState{count: nextCount, lastUpdAt: now}
+			}
+		} else {
+			st = &dnsTemporaryState{count: 1, lastUpdAt: now}
+		}
+		consecutiveDNSTemporary.Store(monitorID, st)
+		return st.count, st.count >= 5
+	}
+	// Definitive non-DNS failure resets the counter
+	consecutiveDNSTemporary.Delete(monitorID)
+	return 0, false
+}
 
 func getGID() uint64 {
 	var buf [64]byte
@@ -204,7 +409,11 @@ func guardedDial(d *CachedDialer) fasthttp.DialFunc {
 		if err != nil {
 			return nil, err
 		}
-		if ip, perr := netip.ParseAddr(host); perr == nil && isBlockedIP(ip.Unmap()) {
+		isBlocked := netsec.IsBlocked
+		if d != nil && d.cfg.BlockedIPFunc != nil {
+			isBlocked = d.cfg.BlockedIPFunc
+		}
+		if ip, perr := netip.ParseAddr(host); perr == nil && isBlocked(ip.Unmap()) {
 			return nil, netsec.ErrSSRFBlocked
 		}
 		conn, err := d.Dial(addr)
@@ -484,6 +693,24 @@ type ProbeMeta struct {
 	DispatchTimeMs     int64  // Wall-clock time (Unix ms) when probe was initiated
 }
 
+func HandleInconclusiveDetailed(id string, p *atomic.Pointer[Monitor], meta ProbeMeta) {
+	mutate := func(m *Monitor) {
+		m.AwaitingResult = false
+		m.ChecksTotal++
+		// Preserve LastStatus and ConsecutiveFails - do not transition state
+		m.CurrentInterval = m.Interval
+		intervalDur := time.Duration(m.CurrentInterval) * time.Second
+		next := m.LastProbeSentAt.Add(intervalDur)
+		if next.Before(time.Now()) {
+			next = time.Now()
+		}
+		m.NextCheckAt = next
+	}
+	if p != nil {
+		CASUpdate(p, mutate)
+	}
+}
+
 func HandleFailure(id string, p *atomic.Pointer[Monitor], errClass ErrClass, cause string, firstError string) {
 	HandleFailureDetailed(id, p, errClass, cause, firstError, ProbeMeta{})
 }
@@ -740,9 +967,14 @@ var engineStartTime = time.Now()
 // during steady-state operation. Zero value means no alert has fired yet.
 var lastAlertTime time.Time
 
+var (
+	CurrentP50LagUs atomic.Uint64
+	CurrentP99LagUs atomic.Uint64
+)
+
 func init() {
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(5 * time.Second)
 		var lags []time.Duration
 		for {
 			select {
@@ -786,6 +1018,9 @@ func printLagStats(lags []time.Duration) {
 	p95 := lags[(n*95)/100]
 	p99 := lags[(n*99)/100]
 	max := lags[n-1]
+
+	CurrentP50LagUs.Store(uint64(p50.Microseconds()))
+	CurrentP99LagUs.Store(uint64(p99.Microseconds()))
 
 	hits := atomic.LoadInt64(&sessionCacheHits)
 	misses := atomic.LoadInt64(&sessionCacheMisses)
@@ -893,6 +1128,18 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 					}
 
 					start := time.Now()
+					dispatchLag := start.Sub(m.NextCheckAt)
+					if dispatchLag < 0 {
+						dispatchLag = 0
+					}
+					if dispatchLag > 2*time.Second {
+						ChecksLate.Add(1)
+					}
+					select {
+					case lagChan <- dispatchLag:
+					default:
+					}
+
 					statusCode := 0
 
 					var probeKind = "warm"
@@ -913,8 +1160,13 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 
 						// HEAD for plain http/api (no keyword, no ForceGET).
 						// GET only when body is needed (keyword match) or learned (ForceGET).
-						if m.Keyword != "" || m.ForceGET {
+						if m.Keyword != "" {
 							req.Header.SetMethod("GET")
+							res.SkipBody = false
+							reqMethod = 1 // 1=GET
+						} else if m.ForceGET {
+							req.Header.SetMethod("GET")
+							req.Header.Set("Range", "bytes=0-0") // Learned-GET status check: request 1 byte to avoid downloading full body
 							res.SkipBody = false
 							reqMethod = 1 // 1=GET
 						} else {
@@ -929,7 +1181,7 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 						}
 						req.Header.Set("X-Request-ID", initReqID)
 						if m.Keyword != "" && compressionEnabledFor(m.ID) {
-							req.Header.Set("Accept-Encoding", AcceptEncoding)
+							req.Header.Set("Accept-Encoding", "gzip")
 						}
 
 						var timeoutDuration time.Duration
@@ -955,7 +1207,7 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 						if isFullPhaseNeeded(m, time.Now()) {
 							go executeFullPhaseProbe(ctx, p, m, monKey)
 						}
-						if globalHostReconnectTracker.ShouldForceReconnect(parsedHost) || m.NoKeepAlive {
+						if globalHostReconnectTracker.ShouldForceReconnect(parsedHost) || m.NoKeepAlive || m.LatchedNoKeepAlive {
 							req.SetConnectionClose()
 						}
 
@@ -1023,9 +1275,9 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 						}
 
 						// Explicit single retry on fresh connection ONLY when failure occurs on a warm reused socket
-						// AND remaining budget > 200ms
+						// AND remaining budget > 200ms (never retry timeouts: timeouts are genuine failures)
 						remainingBudget := time.Until(deadline)
-						if err != nil && reused && remainingBudget > 200*time.Millisecond && (isStaleSocketError(err) || isTimeoutError(err)) {
+						if err != nil && reused && remainingBudget > 200*time.Millisecond && isStaleSocketError(err) {
 							probeKind = "warm_retry"
 							reused = false      // retry is always executed on a fresh connection
 							didResumeVal = 0    // observed from TLS handshake on fresh dial
@@ -1033,8 +1285,6 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 								WarmRetryEOF.Add(1)
 							} else if strings.Contains(strings.ToLower(err.Error()), "reset") {
 								WarmRetryReset.Add(1)
-							} else if isTimeoutError(err) {
-								WarmRetryTimeout.Add(1)
 							} else {
 								WarmRetryOther.Add(1)
 							}
@@ -1045,6 +1295,12 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 								retryReqID = fmt.Sprintf("%s-%d-v2", m.ID, job.generation)
 							}
 							req.Header.Set("X-Request-ID", retryReqID)
+
+							// Preserve SkipBody across retry strictly for HEAD status probes.
+							// Forced-GET probes require res.SkipBody = false to read their 1-byte Range response.
+							if reqMethod == 0 {
+								res.SkipBody = true
+							}
 
 							var retryDialed bool
 							var retryDidResume bool
@@ -1077,7 +1333,8 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 								CASUpdate(p, func(mon *Monitor) {
 									mon.StaleSocketCount++
 									if mon.StaleSocketCount >= 3 {
-										mon.NoKeepAlive = true
+										// Latch into non-keep-alive after 3 consecutive stale socket events
+										mon.LatchedNoKeepAlive = true
 									}
 								})
 							} else {
@@ -1088,18 +1345,21 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 							}
 						}
 
-						CASUpdate(p, func(mon *Monitor) {
-							mon.CheckCounter++
-							if err == nil && reused && statusCode >= 200 && statusCode < 400 {
+						cc := atomic.AddUint32(&m.CheckCounter, 1)
+						if m.LatchedNoKeepAlive && cc%60 == 0 {
+							// Periodic keep-alive re-probe: allow socket reuse to be re-evaluated every 60 checks
+							// strictly for monitors that were temporarily latched by consecutive stale socket errors.
+							CASUpdate(p, func(mon *Monitor) {
+								mon.LatchedNoKeepAlive = false
 								mon.StaleSocketCount = 0
-							}
-						})
-
-						dispatchLag := time.Since(m.NextCheckAt)
-						select {
-						case lagChan <- dispatchLag:
-						default:
+							})
+						} else if err == nil && reused && statusCode >= 200 && statusCode < 400 && m.StaleSocketCount > 0 {
+							// Reset stale socket count on successful reuse
+							CASUpdate(p, func(mon *Monitor) {
+								mon.StaleSocketCount = 0
+							})
 						}
+
 
 						if err != nil {
 							errClass = classifyNetError(err, false)
@@ -1121,12 +1381,17 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 								}
 							} else {
 								statusOK = (statusCode >= 200 && statusCode < 400)
+								if !statusOK && statusCode == fasthttp.StatusRequestedRangeNotSatisfiable && m.ForceGET && m.Keyword == "" {
+									// RFC 9110 §14.4: Range: bytes=0-0 on an empty resource returns 416 (Range Not Satisfiable).
+									// For a learned-GET status probe, 416 proves the server is reachable and responsive.
+									statusOK = true
+								}
 							}
 
 							if !statusOK {
 								errClass = ErrStatus
 								DropValidatorState(monKey)
-							} else if statusCode == fasthttp.StatusNotModified {
+							} else if conditionalInjected && statusCode == fasthttp.StatusNotModified {
 								// 304 conditional hit: pass check cleanly without body read
 							} else if reqMethod == 1 {
 								limit := 65536
@@ -1135,6 +1400,10 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 									if limit <= 0 {
 										limit = 65536
 									}
+								} else if m.ForceGET {
+									// Learned-GET without keyword: status-only probe with Range: bytes=0-0.
+									// Cap limit at 1 byte to prevent downloading up to 64 KB of body.
+									limit = 1
 								}
 
 								br, rerr := ReadKeywordBody(res, limit, deadline)
@@ -1143,11 +1412,16 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 								ObserveValidators(monKey, res, int(br.WireBytes), time.Now())
 
 								if m.Keyword != "" {
+									keywordFound := SearchKeywordMonitor(br.Body, m) >= 0
 									switch {
-									case bytes.Contains(br.Body, []byte(m.Keyword)):
+									case keywordFound && rerr == nil:
 										etag := res.Header.Peek(fasthttp.HeaderETag)
 										lm := res.Header.Peek(fasthttp.HeaderLastModified)
 										StoreValidatorState(monKey, etag, lm, nowS, !conditionalInjected)
+									case keywordFound && rerr != nil:
+										// Keyword found in prefix, but response errored/truncated.
+										// Pass the check, but DO NOT store validators for incomplete response.
+										DropValidatorState(monKey)
 									case rerr != nil:
 										errClass = classifyBodyErr(rerr)
 										customMsg = fmt.Sprintf("body read error: %v", rerr)
@@ -1186,14 +1460,32 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 							fasthttp.ReleaseResponse(res)
 						}
 
+					} else if m.Type == "port" {
+						// Subphase 2.3: Non-blocking TCP Port Prober with SO_LINGER{1, 0}
+						res := ProbeTCPPort(ctx, m.URL, timeoutDuration)
+						latency = uint64(res.Latency.Microseconds())
+						errClass = res.ErrClass
+						customMsg = res.ErrorMessage
+					} else if m.Type == "ping" {
+						// Subphase 2.4: Unprivileged Non-Root ICMP Ping Engine
+						res := ProbeICMPPing(ctx, m.URL, timeoutDuration)
+						latency = uint64(res.RTT.Microseconds())
+						errClass = res.ErrClass
+						customMsg = res.ErrorMessage
+					} else if m.Type == "dns" {
+						res := ProbeDNS(ctx, m.URL, "", 0, timeoutDuration)
+						latency = uint64(res.Latency.Microseconds())
+						errClass = res.ErrClass
+						customMsg = res.ErrorMessage
+					} else if m.Type == "udp" {
+						res := ProbeUDP(ctx, m.URL, nil, timeoutDuration)
+						latency = uint64(res.Latency.Microseconds())
+						errClass = res.ErrClass
+						customMsg = res.ErrorMessage
 					} else {
-						// Non-HTTP Protocols (Ping, Port, DNS, UDP, Heartbeat)
-						// Simulate network latency (20-100ms)
+						// Remaining Non-HTTP Protocols (Heartbeat)
 						time.Sleep(2 * time.Millisecond) // loadtest: reduced from 50ms to free CPU
 						latency = uint64(time.Since(start).Microseconds())
-
-						// For loadtest purposes, we consider them successful unless they are explicitly seeded as down.
-						// Since we don't have endpoints for these, we mock success here.
 						errClass = ErrNone
 					}
 
@@ -1234,10 +1526,42 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 						ExpectedGeneration: job.generation,
 						DispatchTimeMs:     dispatchTime.UnixMilli(),
 					}
+					ChecksCompleted.Add(1)
 
 					if errClass == ErrNone {
+						StepDNSTemporaryEvaluationOnMonitor(m, m.Interval, errClass)
 						HandleSuccessDetailed(m.ID, p, uint32(latency), meta)
+					} else if errClass == ErrUnsupported || errClass == ErrLocalResource || errClass == ErrDNSTemporary || errClass == ErrSlow {
+						// Inconclusive check:
+						// 1. ErrUnsupported: unsupported compression window > 2MB.
+						// 2. ErrLocalResource: local exhaustion (EMFILE, EADDRNOTAVAIL, ENOBUFS, ENOMEM, EPERM).
+						// 3. ErrDNSTemporary: resolver timeout or temporary failure (not an NXDOMAIN / host not found).
+						// 4. ErrSlow: rate limiter cooldown / singleflight safety valve.
+						// Inconclusive checks HOLD any pending DNS temporary failure counter without incrementing.
+						StepDNSTemporaryEvaluationOnMonitor(m, m.Interval, errClass)
+						if errClass == ErrLocalResource {
+							cnt := atomic.AddUint64(&LocalResourceExhaustionCount, 1)
+							if cnt%100 == 1 {
+								log.Printf("ALERT: high rate of local resource exhaustion (EMFILE/EADDRNOTAVAIL): count=%d", cnt)
+							}
+						} else if errClass == ErrDNSTemporary {
+							atomic.AddUint64(&DNSTemporaryCount, 1)
+							_, escalated := StepDNSTemporaryEvaluationOnMonitor(m, m.Interval, errClass)
+							if escalated {
+								// Escalate to definitive failure: 5 consecutive SERVFAILs indicate broken authoritative DNS!
+								cause := "DNS Outage (Escalated after 5 consecutive SERVFAIL/temporary failures)"
+								msg := customMsg
+								if msg == "" {
+									msg = "persistent DNS resolver failure"
+								}
+								HandleFailureDetailed(m.ID, p, ErrDNS, cause, msg, meta)
+								ChecksInFlight.Add(-1)
+								continue
+							}
+						}
+						HandleInconclusiveDetailed(m.ID, p, meta)
 					} else {
+						StepDNSTemporaryEvaluationOnMonitor(m, m.Interval, errClass)
 						if m.Keyword != "" {
 							ResetValidatorBaseline(MonitorKey(m.ID))
 						}
@@ -1275,6 +1599,12 @@ var ForceGETLearned int64
 // QueueFull records dispatches rejected because a worker queue was saturated.
 // A nonzero value invalidates a soak comparison; it is not merely a warning.
 var QueueFull atomic.Uint64
+
+// ChecksLate records checks whose dispatch lag exceeded 2 seconds.
+var ChecksLate atomic.Uint64
+
+// ChecksCompleted records total probes completed by workers.
+var ChecksCompleted atomic.Uint64
 
 func MasterDispatcher(ctx context.Context, wg *sync.WaitGroup, httpJobs chan<- DispatchJob, netJobs chan<- DispatchJob) {
 	defer wg.Done()
