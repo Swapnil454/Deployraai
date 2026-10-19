@@ -17,7 +17,7 @@ func validateTestClickHouseHost(t *testing.T, host string) {
 		t.Skip("skipping ClickHouse test: ALLOW_TEST_CLICKHOUSE=1 not set in environment")
 	}
 
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "ch_node1" || host == "ch_node2" {
 		return
 	}
 

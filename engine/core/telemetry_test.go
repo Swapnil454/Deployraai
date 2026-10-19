@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/binary"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -88,10 +89,11 @@ func TestTelemetry_DiskSpoolAndReplay(t *testing.T) {
 	SpoolBatch(cols, batchID)
 
 	// Verify file exists
-	spoolFile := telemetrySpoolDir + "/seg-" + batchID + ".bin"
-	if _, err := os.Stat(spoolFile); err != nil {
-		t.Fatalf("expected spool file %s to exist: %v", spoolFile, err)
+	matches, _ := filepath.Glob(filepath.Join(telemetrySpoolDir, "seg-*" + batchID + ".bin"))
+	if len(matches) == 0 {
+		t.Fatalf("expected spool file matching *%s.bin to exist in %s", batchID, telemetrySpoolDir)
 	}
+	spoolFile := matches[0]
 
 	// Verify we can read it back
 	replayCols, err := readSpoolFile(spoolFile)
@@ -145,7 +147,11 @@ func TestSpoolSegmentActualDiskSize(t *testing.T) {
 	batchID := "measure-size-uuid"
 	SpoolBatch(cols, batchID)
 
-	spoolFile := telemetrySpoolDir + "/seg-" + batchID + ".bin"
+	matches, _ := filepath.Glob(filepath.Join(telemetrySpoolDir, "seg-*" + batchID + ".bin"))
+	if len(matches) == 0 {
+		t.Fatalf("expected spool file matching *%s.bin to exist in %s", batchID, telemetrySpoolDir)
+	}
+	spoolFile := matches[0]
 	fi, err := os.Stat(spoolFile)
 	if err != nil {
 		t.Fatalf("spool file stat error: %v", err)
@@ -217,10 +223,11 @@ func TestSpoolTokenPersistedAcrossRestartDeduplication(t *testing.T) {
 	SpoolBatchWithPreimage(cols, preimage)
 
 	originalToken := preimage.TokenString()
-	spoolFile := telemetrySpoolDir + "/seg-" + originalToken + ".bin"
-	if _, err := os.Stat(spoolFile); err != nil {
-		t.Fatalf("expected spool file %s to exist: %v", spoolFile, err)
+	matches, _ := filepath.Glob(filepath.Join(telemetrySpoolDir, "seg-*" + originalToken + ".bin"))
+	if len(matches) == 0 {
+		t.Fatalf("expected spool file matching *%s.bin to exist in %s", originalToken, telemetrySpoolDir)
 	}
+	spoolFile := matches[0]
 
 	// 3. Simulate ClickHouse deduplication table/engine tracking committed tokens
 	committedTokens := make(map[string]int) // token -> committed row count
