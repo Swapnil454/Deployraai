@@ -69,3 +69,5 @@ engine/test_sigkill.exe
 engine/uptime-engine-*
 engine/scratch/
 server/src/scratch/
+engine/rc_artifacts/
+engine/*.txt
