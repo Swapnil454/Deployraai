@@ -1004,8 +1004,8 @@ func LogEffectiveConfig(workers int) {
 	if dnsCache == "" {
 		dnsCache = "off"
 	}
-	log.Printf("[EFFECTIVE_CONFIG] arm=%s commit=8397a4d build_tag=loadtest workers=%d enable_engine_b=%v idle_conn_dur_s=%s dns_cache=%s rechecks=on tier_model=per_host compression_pct=%d",
-		arm, workers, EnableEngineB, idleDur, dnsCache, CompressionPercent.Load())
+	log.Printf("[EFFECTIVE_CONFIG] arm=%s commit=%s build_tag=%s workers=%d enable_engine_b=%v idle_conn_dur_s=%s dns_cache=%s rechecks=on tier_model=per_host compression_pct=%d",
+		arm, buildCommit(), buildTags(), workers, EnableEngineB, idleDur, dnsCache, CompressionPercent.Load())
 }
 
 var lastHits int64

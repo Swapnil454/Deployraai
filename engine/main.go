@@ -296,12 +296,6 @@ func main() {
 		}
 	}()
 
-	go func() {
-		time.Sleep(120 * time.Second)
-		log.Println("=== START GOROUTINE PROFILE (120s) ===")
-		pprof.Lookup("goroutine").WriteTo(os.Stdout, 2)
-		log.Println("=== END GOROUTINE PROFILE ===")
-	}()
 
 	<-ctx.Done()
 	shutdownStart := time.Now()

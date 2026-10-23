@@ -51,6 +51,24 @@ if (process.env.JWT_SECRET === "fallback_secret_do_not_use_in_prod") {
 const PORT = process.env.PORT || 5000;
 const HOST = "0.0.0.0";
 
+// Handle transient cloud connection drops (e.g. Neon auto-suspend, network resets) gracefully
+process.on('unhandledRejection', (reason) => {
+  console.warn('[System] Unhandled promise rejection:', reason?.message || reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[System] Uncaught exception:', err?.message || err);
+  if (
+    err?.code === 'ECONNRESET' || 
+    err?.code === '57P01' || // terminating connection due to administrator command / server shutdown
+    err?.message?.includes('writeAfterFIN') || 
+    err?.message?.includes('Connection terminated')
+  ) {
+    console.warn('[System] Handled transient database socket severance. Service remains active.');
+    return;
+  }
+});
+
 connect(process.env.MONGO_URI)
     .then(() => {
         console.log(` MongoDB Connected`);

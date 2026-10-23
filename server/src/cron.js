@@ -11,7 +11,19 @@ import Stripe from 'stripe';
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_mock');
 
 const { Pool } = pg;
-const db = new Pool({ connectionString: process.env.DATABASE_URL });
+const isLocalDb = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes("localhost") || process.env.DATABASE_URL.includes("127.0.0.1");
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: isLocalDb ? false : { rejectUnauthorized: false },
+  max: 10,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
+});
+
+db.on('error', (err) => {
+  // Prevent unhandled error event from crashing the server when Neon auto-suspends or terminates idle connections
+  console.warn('[Cron:db] PostgreSQL client error on idle connection (e.g. Neon auto-suspend / socket reset):', err.message);
+});
 import { triggerWorkflow } from './services/workflow.service.js';
 import { clickhouse } from './config/clickhouse.js';
 import { startHeartbeatDetector } from './uptime-cron/heartbeatDetector.js';
