@@ -84,11 +84,12 @@ func flushMetrics(ctx context.Context, pool *pgxpool.Pool) {
 	if err == nil {
 		updateQuery := `
 			UPDATE uptime_monitors 
-			SET last_checked_at = NOW(), current_interval_seconds = t.interval 
-			FROM unnest($1::uuid[], $2::int[]) AS t(id, interval) 
+			SET last_checked_at = NOW(), current_interval_seconds = t.interval,
+				status = CASE WHEN uptime_monitors.status = 'pending' AND t.ok > 0 THEN 'up' ELSE uptime_monitors.status END 
+			FROM unnest($1::uuid[], $2::int[], $3::int[]) AS t(id, interval, ok) 
 			WHERE uptime_monitors.id = t.id
 		`
-		_, err2 := pool.Exec(ctx, updateQuery, ids, currentIntervals)
+		_, err2 := pool.Exec(ctx, updateQuery, ids, currentIntervals, oks)
 		if err2 != nil {
 			log.Printf("Failed to flush last_checked_at for %d monitors: %v", len(ids), err2)
 		}

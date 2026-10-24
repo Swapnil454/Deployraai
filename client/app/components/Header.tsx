@@ -64,7 +64,7 @@ export default function Header() {
   ];
 
   return (
-    <header className="sticky top-0 z-50 w-full flex flex-col font-sans select-none bg-[#0a0a0c]">
+    <header className="sticky top-0 z-50 w-full flex flex-col font-sans select-none bg-[#111111]">
       {/* ── Top Announcement Banner (Slightly greenish dark tint matching corner glow) ─── */}
       <div className="w-full bg-[#011910] py-2 sm:py-2.5 px-4 text-center text-[13px] text-white/95 tracking-normal">
         <span>Migrating production infrastructure? Get up to $10K in migration credits. </span>
@@ -77,7 +77,7 @@ export default function Header() {
       </div>
 
       {/* ── Main Navigation Bar (Slightly grey subtle off-black with no top border) ── */}
-      <nav className="w-full h-[68px] bg-[#0a0a0c] border-b border-zinc-900/80 flex items-center justify-between pl-6 sm:pl-8 pr-0">
+      <nav className="w-full h-[68px] bg-[#111111] border-b border-zinc-800/70 flex items-center justify-between pl-6 sm:pl-8 pr-0">
         {/* Left Section: Logo + Navigation Links */}
         <div className="flex items-center gap-8 lg:gap-11 h-full">
           {/* Deployra Brand Logo */}

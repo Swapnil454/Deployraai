@@ -50,23 +50,25 @@ type walEntry struct {
 
 // Submit records the persistence effect to the local WAL, guaranteeing delivery asynchronously.
 func (o *Outbox) Submit(monitorID string, eff EffectPersistTransition) error {
-	entry := walEntry{
-		MonitorID: monitorID,
-		Effect:    eff,
+	// Never park the caller. A shard state worker calls this while holding the monitor mutex;
+	// blocking here (nil channels on a zero-value Outbox, or a full buffer) kills the whole shard.
+	if o == nil || o.ch == nil {
+		return errOutboxDisabled
 	}
-
-	// Optimistic non-blocking append to memory channel.
-	// If channel is full during massive outage, blocks caller.
 	select {
-	case o.ch <- entry:
-		// For testing memory inspection
-		// o.Memory is not safe to append here concurrently if used in production,
-		// but since it's just for tests, we accept the race or tests can use it differently.
+	case o.ch <- walEntry{MonitorID: monitorID, Effect: eff}:
+		return nil
 	case <-o.done:
 		return fmt.Errorf("outbox closed")
+	default:
+		return errOutboxFull
 	}
-	return nil
 }
+
+var (
+	errOutboxDisabled = fmt.Errorf("outbox not configured")
+	errOutboxFull     = fmt.Errorf("outbox full")
+)
 
 func (o *Outbox) batchWriter() {
 	defer o.wg.Done()

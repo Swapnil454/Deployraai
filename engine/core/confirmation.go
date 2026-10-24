@@ -154,7 +154,7 @@ func SubmitCheckResult(monitorID string, ev EventCheckResult) {
 	select {
 	case shardBuses[shard] <- me:
 	case <-timer.C:
-		log.Printf("[WARN] shard %d bus full, dropping EventCheckResult for %s (Ok: %v)", shard, monitorID, ev.Ok)
+		noteBusDrop("EventCheckResult", shard, monitorID)
 	}
 }
 
@@ -174,7 +174,7 @@ func SubmitVoteResult(monitorID string, ev EventVoteResult) {
 	select {
 	case shardBuses[shard] <- me:
 	case <-timer.C:
-		log.Printf("[WARN] shard %d bus full, dropping EventVoteResult for %s", shard, monitorID)
+		noteBusDrop("EventVoteResult", shard, monitorID)
 	}
 }
 
@@ -400,7 +400,7 @@ func dispatchEffects(monitorID string, effects []Effect) []Event {
 				select {
 				case shardBuses[shard] <- me:
 				case <-timer.C:
-					log.Printf("[WARN] shard %d bus full, dropped EventVoteDeadline for %s", shard, monitorID)
+					noteBusDrop("EventVoteDeadline", shard, monitorID)
 				}
 			})
 

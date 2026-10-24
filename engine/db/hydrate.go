@@ -142,10 +142,14 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
 			}
 			if r.CurrentIntervalFromDB != nil && r.Status == "up" && staleness < 2*time.Duration(*r.CurrentIntervalFromDB)*time.Second {
 				m.ConfidenceScore = 100.0
-				m.CurrentInterval = *r.CurrentIntervalFromDB
+				if ci := *r.CurrentIntervalFromDB; ci > 0 && ci <= r.Interval {
+					m.CurrentInterval = ci
+				} else {
+					m.CurrentInterval = r.Interval
+				}
 			} else if r.Status == "up" && staleness < 2*time.Duration(r.Interval)*time.Second {
 				m.ConfidenceScore = 100.0
-				m.CurrentInterval = r.Interval * 4
+				m.CurrentInterval = r.Interval
 			}
 
 			// A1: Restore DOWN state if an incident is open

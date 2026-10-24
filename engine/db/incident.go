@@ -106,7 +106,12 @@ func executeIncidentWrite(ctx context.Context, pool *pgxpool.Pool, evt core.Inci
 			continue
 		}
 
-		if evt.NewStatus == "DOWN" {
+		if evt.NewStatus == string(core.StatusBlocked) || evt.NewStatus == string(core.StatusConfigError) {
+			// BLOCKED / CONFIG_ERROR is not a recovery: never touch incidents, never report 'up'.
+			// 'pending' renders amber in the dashboard (nothing is known about the target).
+			_, finalErr = tx.Exec(queryCtx, "UPDATE uptime_monitors SET status='pending' WHERE id=$1 AND status NOT IN ('down','paused')", evt.ID)
+			finalRows = 1
+		} else if evt.NewStatus == "DOWN" {
 			query := `
 				INSERT INTO uptime_incidents (id, monitor_id, cause, first_error_message, started_at)
 				VALUES ($1, $2, $3, $4, $5)

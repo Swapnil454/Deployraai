@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Moon, Server, Database, Globe, Zap, Shield, Terminal } from "lucide-react";
 import TopologyGraph from "./components/TopologyGraph";
+import UptimeMonitoringSection from "./components/UptimeMonitoringSection";
 
 const ROTATING_FEATURES = [
   "autonomous self-healing",
@@ -54,7 +54,7 @@ export default function Home() {
   }, [displayText, isDeleting, featureIndex]);
 
   return (
-    <main className="flex-1 flex flex-col w-full bg-black text-white relative overflow-hidden font-sans select-none">
+    <main className="flex-1 flex flex-col w-full bg-[#111111] text-white relative overflow-hidden font-sans select-none">
       {/* ── Background Matrix Grid ────────────────────────────────────────── */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f1f2820_1px,transparent_1px),linear-gradient(to_bottom,#1f1f2820_1px,transparent_1px)] bg-[size:76px_76px] pointer-events-none z-0" />
 
@@ -67,29 +67,31 @@ export default function Home() {
       />
 
       {/* ── HERO SECTION ──────────────────────────────────────────────────── */}
-      <section className="relative z-10 w-full max-w-[1440px] mx-auto px-6 sm:px-10 lg:px-14 pt-8 sm:pt-12 lg:pt-14 pb-0">
+      <section className="relative z-10 w-full max-w-[1440px] mx-auto px-6 sm:px-10 lg:px-14 pt-8 sm:pt-12 lg:pt-16 pb-0">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-6 items-start">
           {/* Left Column: Headline, Subtitle, CTAs — sticky so it stays visible as graph extends */}
-          <div className="lg:col-span-4 flex flex-col items-start pr-0 lg:pr-2 lg:sticky lg:top-24">
-            <h1 className="text-[28px] sm:text-[36px] xl:text-[42px] font-semibold text-white tracking-[-0.035em] leading-[1.15] mb-4 min-h-[110px] sm:min-h-[140px]">
+          <div className="lg:col-span-4 flex flex-col items-start pr-0 lg:pr-2 lg:sticky lg:top-24 z-20 w-full max-w-[540px] xl:max-w-[580px]">
+            <h1 className="font-heading text-[32px] sm:text-[40px] md:text-[44px] lg:text-[48px] xl:text-[53px] font-semibold text-white tracking-[-0.038em] leading-[1.16] mb-2 min-h-[180px] sm:min-h-[210px] md:min-h-[225px] lg:min-h-[240px] xl:min-h-[255px]">
               <span className="block whitespace-nowrap">Deploy with certainty.</span>
-              <span className="block text-zinc-300 whitespace-nowrap">Real-time telemetry meets</span>
-              <span className="inline-flex items-center mt-1">
-                <span className="bg-gradient-to-r from-[#9333ea] via-[#c084fc] to-[#2dd4bf] bg-clip-text text-transparent">
+              <span className="block text-zinc-200/90 whitespace-nowrap mt-2 sm:mt-3">real-time telemetry meets</span>
+              <span className="inline-flex items-center mt-2.5 sm:mt-3.5 h-[1.3em] min-h-[1.3em] whitespace-nowrap overflow-visible py-1">
+                {/* Typographic strut: ensures exact baseline and line height when text is completely erased */}
+                <span className="inline-block w-0 overflow-hidden invisible select-none pointer-events-none" aria-hidden="true">A</span>
+                <span className="inline-block pb-3 -mb-3 pr-1 bg-gradient-to-r from-emerald-400 via-teal-300 to-green-300 bg-clip-text text-transparent drop-shadow-[0_0_28px_rgba(16,185,129,0.35)] leading-normal">
                   {displayText}
                 </span>
-                <span className="inline-block w-3 sm:w-3.5 h-[0.75em] bg-[#9333ea]/40 border border-[#c084fc]/60 ml-2 align-middle rounded-[1px] animate-pulse" />
+                <span className={`inline-block w-3.5 sm:w-4 xl:w-4.5 h-[0.78em] bg-emerald-400/40 border border-emerald-400/75 align-middle rounded-[1.5px] shadow-[0_0_12px_rgba(52,211,153,0.5)] animate-pulse ${displayText ? "ml-2.5" : "ml-0"}`} />
               </span>
             </h1>
 
-            <p className="text-[15px] sm:text-[16px] text-zinc-400 font-normal leading-[1.55] max-w-[440px] mb-7 tracking-tight">
+            <p className="text-[16.5px] sm:text-[18px] lg:text-[18.5px] xl:text-[19px] text-zinc-400 font-normal leading-[1.62] max-w-[490px] xl:max-w-[520px] mt-6 mb-8 tracking-tight">
               Multi-region synthetic uptime monitoring and 1-click cloud deployments with autonomous AI error remediation.
             </p>
 
             <div className="flex flex-wrap items-center gap-3.5">
               <Link
                 href="/login"
-                className="bg-white text-black font-medium text-[14.5px] px-5 py-3 rounded-[2px] hover:bg-zinc-200 transition-colors flex items-center gap-2 group tracking-tight"
+                className="bg-white hover:bg-zinc-100 text-black font-semibold text-[15px] px-6 py-3.5 rounded-[3px] transition-all shadow-lg hover:shadow-white/10 flex items-center gap-2 group tracking-tight"
               >
                 Start for free
                 <span className="text-zinc-600 group-hover:translate-x-0.5 transition-transform font-bold text-sm">
@@ -98,49 +100,67 @@ export default function Home() {
               </Link>
               <Link
                 href="/docs"
-                className="border border-zinc-700/80 hover:border-zinc-500 bg-transparent text-white font-medium text-[14.5px] px-5 py-3 rounded-[2px] hover:bg-zinc-900/60 transition-colors tracking-tight"
+                className="border border-zinc-700/90 hover:border-zinc-500 bg-zinc-950/40 hover:bg-zinc-900/60 text-white font-medium text-[15px] px-6 py-3.5 rounded-[3px] transition-all tracking-tight"
               >
                 Talk to sales
               </Link>
             </div>
+
+            {/* ── Mid-Scroll Feature Section (Aligned with Middle/Lower Architecture Nodes) ── */}
+            <div className="mt-36 sm:mt-48 lg:mt-56 flex items-start gap-4 sm:gap-6 w-full pt-6">
+              {/* Vertical Rail Indicator Track (matching Railway signature style) */}
+              <div className="hidden sm:flex flex-col items-center pt-1.5 select-none shrink-0" aria-hidden="true">
+                <div className="w-4 h-4 rounded-full border-2 border-zinc-400 bg-zinc-950 flex items-center justify-center shadow-[0_0_8px_rgba(255,255,255,0.15)]">
+                  <div className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
+                </div>
+                <div className="w-[1.5px] h-10 bg-gradient-to-b from-zinc-600 via-zinc-800 to-zinc-800" />
+                <div className="w-3.5 h-12 rounded-full border border-zinc-700/90 bg-[#12141a] flex flex-col items-center justify-around py-1 shadow-inner">
+                  <div className="w-1 h-1 rounded-full bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.8)]" />
+                  <div className="w-1 h-1 rounded-full bg-zinc-600" />
+                  <div className="w-1 h-1 rounded-full bg-zinc-700" />
+                </div>
+                <div className="w-[1.5px] h-32 bg-gradient-to-b from-zinc-800 to-transparent" />
+              </div>
+
+              {/* Text & Content Block */}
+              <div className="flex flex-col items-start max-w-[460px]">
+                {/* Pill Tag */}
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#14171f] border border-zinc-700/60 text-xs sm:text-[13px] font-medium text-zinc-300 tracking-tight mb-5">
+                  Build and deploy
+                </div>
+
+                {/* Stylish Serif Headline */}
+                <h2 className="font-serif-display text-[36px] sm:text-[44px] md:text-[48px] lg:text-[52px] font-normal text-white leading-[1.12] tracking-[-0.015em] mb-4">
+                  Deploy anything
+                  <span className="block text-zinc-200">without the complexity</span>
+                </h2>
+
+                {/* Subtitle in Deployra Project Context */}
+                <p className="text-[15px] sm:text-[16px] text-zinc-400 font-normal leading-[1.65] tracking-tight">
+                  Connect your repo, Deployra handles the rest. Auto-detect frameworks, instant preview environments, multi-region telemetry, and autonomous AI remediation. No new tools to learn.{" "}
+                  <Link
+                    href="/docs"
+                    className="inline-flex items-center gap-1 text-white hover:text-emerald-400 font-medium transition-colors group ml-1"
+                  >
+                    Learn more
+                    <span className="group-hover:translate-x-0.5 transition-transform text-zinc-400 group-hover:text-emerald-400">
+                      &rarr;
+                    </span>
+                  </Link>
+                </p>
+              </div>
+            </div>
           </div>
 
-          {/* Right Column: Massive vertical topology graph — responsive layout */}
+          {/* Right Column: Massive vertical topology graph — 100% full size untouched */}
           <div className="lg:col-span-8 flex items-start justify-end relative w-full overflow-visible -mr-4 sm:-mr-8 lg:-mr-16 xl:-mr-24 -mt-4 sm:-mt-7 lg:-mt-10 xl:-mt-14 translate-x-4 sm:translate-x-8 lg:translate-x-14 xl:translate-x-18">
             <TopologyGraph />
           </div>
         </div>
       </section>
-
-
-      {/* ── Sub-Section: Seamlessly connected without top border ───────────── */}
-      <section className="w-full bg-black py-12 sm:py-16 relative z-10">
-        <div className="max-w-[1440px] mx-auto px-6 sm:px-10 lg:px-14">
-          <div className="mb-10">
-            <h2 className="text-xl sm:text-2xl font-semibold text-white tracking-tight">
-              Enterprise primitives for modern engineering teams
-            </h2>
-            <p className="mt-2 text-zinc-400 text-sm sm:text-base max-w-xl">
-              Automatic framework detection, zero-config CI/CD pipelines, and multi-cloud split topologies.
-            </p>
-          </div>
-
-          <div className="max-w-md">
-            <div className="border border-zinc-800/80 bg-[#0c0d10] p-7 rounded-[2px] flex flex-col justify-between hover:border-zinc-700 transition-colors">
-              <div>
-                <Zap className="h-5 w-5 text-purple-400 mb-4" />
-                <h3 className="text-lg font-medium text-white mb-2">Zero-Config Deployment</h3>
-                <p className="text-zinc-400 text-sm leading-relaxed">
-                  Automatic project inspection, environment sync, and automated Dockerfile generation for Next.js, Vite, Express, and Go.
-                </p>
-              </div>
-              <div className="mt-6 pt-4 border-t border-zinc-900 text-xs font-mono text-zinc-500">
-                MULTI-CLOUD • VERCEL • RENDER • RAILWAY
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      
+      {/* ── UPTIME MONITORING SHOWCASE SECTION ────────────────────────────── */}
+      <UptimeMonitoringSection />
     </main>
   );
 }

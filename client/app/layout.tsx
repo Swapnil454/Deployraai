@@ -3,13 +3,35 @@ import "./globals.css";
 import 'rrweb-player/dist/style.css';
 import Header from "./components/Header";
 import { Toaster } from 'sonner';
-import { DM_Sans } from "next/font/google";
+import { DM_Sans, Outfit, Plus_Jakarta_Sans, Newsreader } from "next/font/google";
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
   weight: ['400', '500', '700'],
   display: 'swap',
   variable: '--font-dm-sans',
+});
+
+const outfit = Outfit({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  display: 'swap',
+  variable: '--font-outfit',
+});
+
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  display: 'swap',
+  variable: '--font-jakarta',
+});
+
+const serifDisplay = Newsreader({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  style: ['normal', 'italic'],
+  display: 'swap',
+  variable: '--font-serif-display',
 });
 
 export const metadata: Metadata = {
@@ -25,10 +47,10 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`h-full antialiased dark ${dmSans.variable} font-sans`}
+      className={`h-full antialiased dark ${dmSans.variable} ${outfit.variable} ${jakarta.variable} ${serifDisplay.variable} font-sans`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col bg-black text-white selection:bg-indigo-500 selection:text-white">
+      <body className="min-h-full flex flex-col bg-[#111111] text-white selection:bg-indigo-500 selection:text-white">
         <Header />
         {children}
         <Toaster 
