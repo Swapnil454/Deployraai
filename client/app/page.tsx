@@ -54,7 +54,7 @@ export default function Home() {
   }, [displayText, isDeleting, featureIndex]);
 
   return (
-    <main className="flex-1 flex flex-col w-full bg-[#111111] text-white relative overflow-hidden font-sans select-none">
+    <main className="flex-1 flex flex-col w-full bg-[#111111] text-white relative overflow-hidden font-sans">
       {/* ── Background Matrix Grid ────────────────────────────────────────── */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f1f2820_1px,transparent_1px),linear-gradient(to_bottom,#1f1f2820_1px,transparent_1px)] bg-[size:76px_76px] pointer-events-none z-0" />
 

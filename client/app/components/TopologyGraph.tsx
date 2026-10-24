@@ -34,6 +34,7 @@ interface NodeItem {
 interface RibbonStrand {
   id: string;
   path: string;
+  reversedPath: string;
   width: number;
   opacity: number;
   hasArrow?: boolean;
@@ -2475,6 +2476,96 @@ const CONNECTIONS: ConnectionDef[] = [
   { from: "kafka-pipeline", to: "s3-store",       strands: 4,  baseWidth: 0.9,  startDelay: 8550, duration: 1000, curvature: 0.28, spread: 3.6, bendDir: 1,  bowDepth: 44, curveType: "s-curve" },
 ];
 
+function reverseSvgPath(d: string): string {
+  const commands: { type: string; points: number[] }[] = [];
+  const regex = /([MCQLA])([^MCQLA]*)/gi;
+  let match;
+  while ((match = regex.exec(d)) !== null) {
+    const type = match[1].toUpperCase();
+    const numbers = match[2]
+      .trim()
+      .replace(/([0-9])-/g, "$1 -")
+      .split(/[\s,]+/)
+      .filter(Boolean)
+      .map(Number);
+    commands.push({ type, points: numbers });
+  }
+
+  if (commands.length < 2 || commands[0].type !== "M") return d;
+
+  let current = [commands[0].points[0], commands[0].points[1]];
+  interface Segment {
+    type: string;
+    from: [number, number];
+    to: [number, number];
+    controls: number[];
+  }
+  const segments: Segment[] = [];
+
+  for (let i = 1; i < commands.length; i++) {
+    const cmd = commands[i];
+    if (cmd.type === "C" && cmd.points.length >= 6) {
+      for (let p = 0; p < cmd.points.length; p += 6) {
+        const cp1x = cmd.points[p];
+        const cp1y = cmd.points[p + 1];
+        const cp2x = cmd.points[p + 2];
+        const cp2y = cmd.points[p + 3];
+        const endX = cmd.points[p + 4];
+        const endY = cmd.points[p + 5];
+        segments.push({
+          type: "C",
+          from: [current[0], current[1]],
+          to: [endX, endY],
+          controls: [cp1x, cp1y, cp2x, cp2y],
+        });
+        current = [endX, endY];
+      }
+    } else if (cmd.type === "Q" && cmd.points.length >= 4) {
+      const qx = cmd.points[0];
+      const qy = cmd.points[1];
+      const endX = cmd.points[2];
+      const endY = cmd.points[3];
+      segments.push({
+        type: "Q",
+        from: [current[0], current[1]],
+        to: [endX, endY],
+        controls: [qx, qy],
+      });
+      current = [endX, endY];
+    } else if (cmd.type === "L" && cmd.points.length >= 2) {
+      const endX = cmd.points[0];
+      const endY = cmd.points[1];
+      segments.push({
+        type: "L",
+        from: [current[0], current[1]],
+        to: [endX, endY],
+        controls: [],
+      });
+      current = [endX, endY];
+    }
+  }
+
+  if (segments.length === 0) return d;
+
+  const newStart = segments[segments.length - 1].to;
+  let res = `M ${newStart[0]} ${newStart[1]}`;
+
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const seg = segments[i];
+    if (seg.type === "C") {
+      const [cp1x, cp1y, cp2x, cp2y] = seg.controls;
+      res += ` C ${cp2x} ${cp2y}, ${cp1x} ${cp1y}, ${seg.from[0]} ${seg.from[1]}`;
+    } else if (seg.type === "Q") {
+      const [qx, qy] = seg.controls;
+      res += ` Q ${qx} ${qy}, ${seg.from[0]} ${seg.from[1]}`;
+    } else if (seg.type === "L") {
+      res += ` L ${seg.from[0]} ${seg.from[1]}`;
+    }
+  }
+
+  return res;
+}
+
 function generateAllRibbons(): RibbonStrand[] {
   const ribbons: RibbonStrand[] = [];
   let counter = 0;
@@ -2642,9 +2733,12 @@ function generateAllRibbons(): RibbonStrand[] {
         ? generateIrregularSyntheticToAppBackendCurve(src.x, src.y, tgt.x, tgt.y, i, conn.strands, spread, 0.12, bowDepth, bendDir)
         : generateBezier(src.x, src.y, tgt.x, tgt.y, ox, oy, curv, bendDir, bowDepth, curveType);
 
+      const reversedPath = reverseSvgPath(path);
+
       ribbons.push({
         id: `ribbon-${counter++}`,
         path,
+        reversedPath,
         width: w,
         opacity,
         hasArrow,
@@ -2755,11 +2849,11 @@ export default function TopologyGraph() {
             <stop offset="100%" stopColor="#d1fae5" />
           </radialGradient>
 
-          {/* Highlight ribbon gradient - rich emerald stream */}
+          {/* Highlight ribbon gradient - subtle, refined muted emerald stream */}
           <linearGradient id="streamGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#047857" stopOpacity="0.85" />
+            <stop offset="0%" stopColor="#047857" stopOpacity="0.75" />
             <stop offset="50%" stopColor="#059669" stopOpacity="0.80" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0.75" />
+            <stop offset="100%" stopColor="#0d9488" stopOpacity="0.72" />
           </linearGradient>
 
           {/* Organic graphite/smoke ribbon gradient */}
@@ -2791,16 +2885,16 @@ export default function TopologyGraph() {
             markerHeight="3.5"
             orient="auto"
           >
-            <path d="M 0 1.2 L 4.5 3 L 0 4.8 z" fill="#059669" opacity="0.85" />
+            <path d="M 0 1.2 L 4.5 3 L 0 4.8 z" fill="#059669" opacity="0.82" />
           </marker>
         </defs>
 
         {/* ── CONNECTION RIBBONS (Outward cascading streams) ── */}
-        <g>
+        <g className="pointer-events-none" style={{ pointerEvents: "none" }}>
           {ALL_RIBBONS.map((ribbon, idx) => {
-            const isHighlighted =
-              activeNode &&
-              (activeNode.id === ribbon.sourceId || activeNode.id === ribbon.targetId);
+            const isForwardHighlighted = activeNode?.id === ribbon.sourceId;
+            const isReverseHighlighted = activeNode?.id === ribbon.targetId;
+            const isHighlighted = isForwardHighlighted || isReverseHighlighted;
 
             return (
               <g key={ribbon.id}>
@@ -2808,15 +2902,50 @@ export default function TopologyGraph() {
                 <path
                   d={ribbon.path}
                   fill="none"
-                  stroke={isHighlighted ? "url(#streamGrad)" : "url(#greyRibbon)"}
-                  strokeWidth={isHighlighted ? ribbon.width + 0.45 : ribbon.width}
+                  stroke="url(#greyRibbon)"
+                  strokeWidth={ribbon.width}
                   strokeLinecap="round"
-                  strokeOpacity={animationStarted ? (isHighlighted ? 0.75 : ribbon.opacity) : 0}
-                  markerEnd={ribbon.hasArrow ? (isHighlighted ? "url(#arr-emerald)" : "url(#arr)") : undefined}
+                  strokeOpacity={animationStarted ? ribbon.opacity : 0}
+                  markerEnd={!isHighlighted && ribbon.hasArrow ? "url(#arr)" : undefined}
                   style={{
                     strokeDasharray: ribbon.pathLength,
                     strokeDashoffset: animationStarted ? 0 : ribbon.pathLength,
-                    transition: `stroke-dashoffset ${ribbon.duration}ms cubic-bezier(0.25, 0.1, 0.25, 1) ${ribbon.startDelay}ms, stroke-opacity 0.5s ease ${ribbon.startDelay}ms, stroke-width 0.2s ease`,
+                    transition: `stroke-dashoffset ${ribbon.duration}ms cubic-bezier(0.25, 0.1, 0.25, 1) ${ribbon.startDelay}ms, stroke-opacity 0.5s ease ${ribbon.startDelay}ms`,
+                  }}
+                />
+
+                {/* Stage 3: Highlighting Emerald Stream - Forward (starts immediately at 80ms and draws outward slowly over 1.35s) */}
+                <path
+                  d={ribbon.path}
+                  fill="none"
+                  stroke="url(#streamGrad)"
+                  strokeWidth={ribbon.width + 0.65}
+                  strokeLinecap="round"
+                  markerEnd={isForwardHighlighted && ribbon.hasArrow ? "url(#arr-emerald)" : undefined}
+                  style={{
+                    strokeDasharray: ribbon.pathLength,
+                    strokeDashoffset: isForwardHighlighted ? 0 : ribbon.pathLength,
+                    opacity: isForwardHighlighted ? 0.85 : 0,
+                    transition: isForwardHighlighted
+                      ? `stroke-dashoffset 1.35s cubic-bezier(0.25, 0.1, 0.25, 1) ${80 + (idx % 3) * 15}ms, opacity 0.25s ease 80ms`
+                      : "stroke-dashoffset 0.22s ease-out 0ms, opacity 0.2s ease-out 0ms",
+                  }}
+                />
+
+                {/* Stage 3: Highlighting Emerald Stream - Reverse (starts immediately at 80ms and draws outward slowly over 1.35s) */}
+                <path
+                  d={ribbon.reversedPath}
+                  fill="none"
+                  stroke="url(#streamGrad)"
+                  strokeWidth={ribbon.width + 0.65}
+                  strokeLinecap="round"
+                  style={{
+                    strokeDasharray: ribbon.pathLength,
+                    strokeDashoffset: isReverseHighlighted ? 0 : ribbon.pathLength,
+                    opacity: isReverseHighlighted ? 0.85 : 0,
+                    transition: isReverseHighlighted
+                      ? `stroke-dashoffset 1.35s cubic-bezier(0.25, 0.1, 0.25, 1) ${80 + (idx % 3) * 15}ms, opacity 0.25s ease 80ms`
+                      : "stroke-dashoffset 0.22s ease-out 0ms, opacity 0.2s ease-out 0ms",
                   }}
                 />
 
@@ -2866,7 +2995,7 @@ export default function TopologyGraph() {
         </g>
 
         {/* ── STATIC HUD TOOLTIPS ── */}
-        <g>
+        <g className="pointer-events-none" style={{ pointerEvents: "none" }}>
           {/* Tooltip 1: ai-remediation-agent */}
           <g
             filter="drop-shadow(0 4px 12px rgba(0,0,0,0.6))"
@@ -2929,6 +3058,7 @@ export default function TopologyGraph() {
                 key={node.id}
                 id={`node-${node.id}`}
                 className="cursor-pointer"
+                style={{ pointerEvents: "all" }}
                 transform={`translate(${node.x}, ${node.y})`}
                 onMouseEnter={() => setHoveredNode(node)}
                 onMouseLeave={() => setHoveredNode(null)}
@@ -2989,6 +3119,16 @@ export default function TopologyGraph() {
                     transition: `opacity 0.45s ease-out ${delay}ms, transform 0.85s cubic-bezier(0.34, 1.45, 0.64, 1) ${delay}ms`,
                   }}
                 >
+                  {/* Dedicated full-disc interactive hit target: guarantees instantaneous, rock-solid hover hit testing */}
+                  <circle
+                    cx={0}
+                    cy={0}
+                    r={Math.max(node.r + 6, 22)}
+                    fill="#ffffff"
+                    fillOpacity={0}
+                    className="cursor-pointer"
+                    style={{ pointerEvents: "all" }}
+                  />
                   {/* Orbit ring (Root Hub) */}
                   {node.dashedRing && (
                     <circle
@@ -3000,6 +3140,11 @@ export default function TopologyGraph() {
                       strokeWidth={isHovered ? "1.6" : "1.3"}
                       strokeDasharray="6 5"
                       opacity={isHovered ? 0.95 : 0.6}
+                      style={{
+                        transition: isHovered
+                          ? "stroke 0.4s ease-out 80ms, opacity 0.4s ease-out 80ms, stroke-width 0.4s ease-out 80ms"
+                          : "stroke 0.2s ease-out 0ms, opacity 0.2s ease-out 0ms",
+                      }}
                     >
                       <animateTransform
                         attributeName="transform"
@@ -3023,11 +3168,16 @@ export default function TopologyGraph() {
                       stroke={isHovered ? "#10b981" : "#a1a1aa"}
                       strokeWidth="0.8"
                       opacity={isHovered ? 0.6 - i * 0.1 : 0.35 - i * 0.1}
+                      style={{
+                        transition: isHovered
+                          ? "stroke 0.4s ease-out 0ms, opacity 0.4s ease-out 0ms"
+                          : "stroke 0.2s ease-out 0ms, opacity 0.2s ease-out 0ms",
+                      }}
                     />
                   ))}
 
-                  {/* Active hover rotating orbit ring */}
-                  {isHovered && !node.dashedRing && (
+                  {/* Stage 2: Active hover rotating orbit ring (starts at 80ms once node turns green) */}
+                  {!node.dashedRing && (
                     <circle
                       cx={0}
                       cy={0}
@@ -3036,7 +3186,12 @@ export default function TopologyGraph() {
                       stroke="#10b981"
                       strokeWidth="1.6"
                       strokeDasharray="5 4"
-                      opacity={0.9}
+                      opacity={isHovered ? 0.9 : 0}
+                      style={{
+                        transition: isHovered
+                          ? "opacity 0.4s ease-out 80ms"
+                          : "opacity 0.2s ease-out 0ms",
+                      }}
                     >
                       <animateTransform
                         attributeName="transform"
@@ -3049,44 +3204,85 @@ export default function TopologyGraph() {
                     </circle>
                   )}
 
-                  {/* Hover outer glow halo */}
-                  {isHovered && (
-                    <circle
-                      cx={0}
-                      cy={0}
-                      r={node.r + 14}
-                      fill="none"
-                      stroke="#059669"
-                      strokeWidth="1"
-                      opacity={0.25}
-                    />
-                  )}
+                  {/* Stage 1: Hover outer glow halo (slow motion bloom 0ms - 400ms) */}
+                  <circle
+                    cx={0}
+                    cy={0}
+                    r={node.r + 14}
+                    fill="none"
+                    stroke="#059669"
+                    strokeWidth="1"
+                    opacity={isHovered ? 0.32 : 0}
+                    style={{
+                      transition: isHovered
+                        ? "opacity 0.45s ease-out 0ms"
+                        : "opacity 0.2s ease-out 0ms",
+                    }}
+                    className="pointer-events-none select-none"
+                  />
 
-                  {/* Dark green accent ring for connected nodes */}
-                  {!isHovered && isConnected && (
-                    <circle
-                      cx={0}
-                      cy={0}
-                      r={node.r + 5}
-                      fill="none"
-                      stroke="#047857"
-                      strokeWidth="1.8"
-                      opacity={0.85}
-                      style={{ transition: "opacity 0.25s ease, stroke 0.25s ease" }}
-                    />
-                  )}
+                  {/* Stage 4: Dark green accent ring for connected nodes (slow motion unfurl 1430ms once lines arrive) */}
+                  <circle
+                    cx={0}
+                    cy={0}
+                    r={node.r + 5}
+                    fill="none"
+                    stroke="#047857"
+                    strokeWidth="1.8"
+                    opacity={!isHovered && isConnected ? 0.95 : 0}
+                    style={{
+                      transform: !isHovered && isConnected ? "scale(1)" : "scale(0.82)",
+                      transformOrigin: "0 0",
+                      transition: !isHovered && isConnected
+                        ? "opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1) 1430ms, transform 0.65s cubic-bezier(0.16, 1, 0.3, 1) 1430ms"
+                        : "opacity 0.2s ease-out 0ms, transform 0.2s ease-out 0ms",
+                    }}
+                  />
 
-                  {/* 3D Spherical Volume Body */}
+                  {/* Base 3D Spherical Volume Body */}
                   <circle
                     cx={0}
                     cy={0}
                     r={node.r}
-                    fill={isHovered ? "url(#sphereHoverGrad)" : isConnected ? "url(#sphereConnectedGrad)" : "url(#sphereGrad)"}
-                    stroke={isHovered ? "#047857" : isConnected ? "#065f46" : "#0f172a"}
-                    strokeWidth={isHovered ? 2.8 : isConnected ? 2.4 : 2.0}
+                    fill="url(#sphereGrad)"
+                    stroke="#0f172a"
+                    strokeWidth="2.0"
+                    className="cursor-pointer select-none"
+                    style={{ pointerEvents: "all" }}
+                  />
+
+                  {/* Stage 4: 3D Connected Node Accent Sphere Layer (slow motion tint 1430ms) */}
+                  <circle
+                    cx={0}
+                    cy={0}
+                    r={node.r}
+                    fill="url(#sphereConnectedGrad)"
+                    stroke="#065f46"
+                    strokeWidth="2.4"
+                    opacity={!isHovered && isConnected ? 1 : 0}
                     style={{
-                      transition: "fill 0.25s ease, stroke 0.25s ease, stroke-width 0.25s ease",
+                      transition: !isHovered && isConnected
+                        ? "opacity 0.65s ease-out 1430ms"
+                        : "opacity 0.2s ease-out 0ms",
                     }}
+                    className="pointer-events-none select-none"
+                  />
+
+                  {/* Stage 1: 3D Hover Emerald Gloss Sphere Layer (slow motion bloom 0ms - 500ms) */}
+                  <circle
+                    cx={0}
+                    cy={0}
+                    r={node.r}
+                    fill="url(#sphereHoverGrad)"
+                    stroke="#047857"
+                    strokeWidth="2.8"
+                    opacity={isHovered ? 1 : 0}
+                    style={{
+                      transition: isHovered
+                        ? "opacity 0.55s ease-out 0ms"
+                        : "opacity 0.25s ease-out 0ms",
+                    }}
+                    className="pointer-events-none select-none"
                   />
 
                   {/* 3D Specular Highlight Crescent */}

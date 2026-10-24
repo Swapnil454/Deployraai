@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
+import DeployraDashboardMockup from "./DeployraDashboardMockup";
 import { useRouter } from "next/navigation";
 
 export default function UptimeMonitoringSection() {
@@ -36,7 +36,7 @@ export default function UptimeMonitoringSection() {
         </h2>
 
         {/* Feature Checkmarks Row: Refined proportions & spacing */}
-        <div className="flex flex-wrap items-center justify-center gap-x-5 sm:gap-x-7 gap-y-2.5 mt-6 sm:mt-7 text-[13px] sm:text-[14px] lg:text-[14.5px] font-medium select-none tracking-tight">
+        <div className="flex flex-wrap items-center justify-center gap-x-5 sm:gap-x-7 gap-y-2.5 mt-6 sm:mt-7 text-[13px] sm:text-[14px] lg:text-[14.5px] font-medium tracking-tight">
           <div className="inline-flex items-center gap-2 text-zinc-300">
             <svg className="w-3.5 h-3.5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -68,7 +68,7 @@ export default function UptimeMonitoringSection() {
 
         {/* URL Input Form (Clean, perfectly balanced proportions) */}
         <form onSubmit={handleStartMonitoring} className="mt-7 sm:mt-9 w-full max-w-[500px]">
-          <div className="relative flex items-center p-1.5 rounded-full bg-[#0c1017] border border-zinc-800/80 focus-within:border-emerald-500/70 focus-within:ring-2 focus-within:ring-emerald-500/20 shadow-[0_4px_24px_rgba(0,0,0,0.6)] transition-all">
+          <div className="relative flex items-center p-1.5 rounded-full bg-[#161616] border border-zinc-800/80 focus-within:border-emerald-500/70 focus-within:ring-2 focus-within:ring-emerald-500/20 shadow-[0_4px_24px_rgba(0,0,0,0.6)] transition-all">
             <input
               type="text"
               value={targetUrl}
@@ -85,21 +85,9 @@ export default function UptimeMonitoringSection() {
           </div>
         </form>
 
-        {/* High-Resolution Dashboard Mockup */}
-        <div className="mt-12 sm:mt-16 lg:mt-20 w-full max-w-[1240px] relative">
-          {/* Subtle Ambient Backlight Glow */}
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] h-[70%] bg-emerald-500/10 blur-[100px] pointer-events-none rounded-full" />
-
-          <div className="relative overflow-hidden group">
-            <Image
-              src="/images/deployra_dashboard_preview.webp"
-              alt="Deployra Uptime Monitoring Dashboard"
-              width={1376}
-              height={768}
-              className="w-full h-auto rounded-2xl sm:rounded-3xl shadow-[0_24px_80px_rgba(0,0,0,0.9)] transition-transform duration-700 ease-out group-hover:scale-[1.004]"
-              priority
-            />
-          </div>
+        {/* Interactive Code-Built Dashboard Mockup */}
+        <div className="mt-10 sm:mt-14 lg:mt-16 w-full max-w-[1040px] relative">
+          <DeployraDashboardMockup />
         </div>
       </div>
     </section>
