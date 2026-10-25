@@ -137,7 +137,7 @@ func executeIncidentWrite(ctx context.Context, pool *pgxpool.Pool, evt core.Inci
 				WHERE monitor_id = $1 AND resolved_at IS NULL
 			`
 			var res pgconn.CommandTag
-			res, err = tx.Exec(queryCtx, query, evt.ID, evt.OccurredAt)
+			res, err = tx.Exec(queryCtx, query, evt.ID, incidentResolvedAt(evt))
 			finalErr = err
 			if err == nil {
 				finalRows = res.RowsAffected()
@@ -300,4 +300,11 @@ func processReplayingFile(ctx context.Context, pool *pgxpool.Pool, filename stri
 		os.Rename(tempFile, deadLetterFile)
 		os.Remove(filename)
 	}
+}
+
+func incidentResolvedAt(evt core.IncidentEvent) time.Time {
+    if !evt.IncidentEnd.IsZero() {
+        return evt.IncidentEnd
+    }
+    return evt.OccurredAt
 }

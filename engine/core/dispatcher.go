@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/petermattis/goid"
 	"github.com/valyala/fasthttp"
 	"github.com/your-org/uptime-engine/netsec"
 )
@@ -236,7 +237,17 @@ func stepDNSTemporaryEvaluationFallback(monitorID string, intervalSec int, errCl
 	return 0, false
 }
 
+// getGID returns the current goroutine ID in a few nanoseconds (goid reads it from the
+// runtime's g struct). The previous implementation parsed runtime.Stack output, which
+// cost 2-35 us per call depending on stack depth and was ~11% of CPU on connections
+// that dial a new socket per check.
 func getGID() uint64 {
+	return uint64(goid.Get())
+}
+
+// getGIDSlow is the portable reference implementation. It is only used by tests to
+// cross-check getGID.
+func getGIDSlow() uint64 {
 	var buf [64]byte
 	n := runtime.Stack(buf[:], false)
 	str := strings.TrimPrefix(string(buf[:n]), "goroutine ")
@@ -1279,8 +1290,8 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 						remainingBudget := time.Until(deadline)
 						if err != nil && reused && remainingBudget > 200*time.Millisecond && isStaleSocketError(err) {
 							probeKind = "warm_retry"
-							reused = false      // retry is always executed on a fresh connection
-							didResumeVal = 0    // observed from TLS handshake on fresh dial
+							reused = false   // retry is always executed on a fresh connection
+							didResumeVal = 0 // observed from TLS handshake on fresh dial
 							if errors.Is(err, io.EOF) || errors.Is(err, fasthttp.ErrConnectionClosed) {
 								WarmRetryEOF.Add(1)
 							} else if strings.Contains(strings.ToLower(err.Error()), "reset") {
@@ -1359,7 +1370,6 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 								mon.StaleSocketCount = 0
 							})
 						}
-
 
 						if err != nil {
 							errClass = classifyNetError(err, false)
@@ -1842,4 +1852,3 @@ func executeFullPhaseProbe(ctx context.Context, p *atomic.Pointer[Monitor], m *M
 		Generation:     m.CheckGeneration,
 	})
 }
-

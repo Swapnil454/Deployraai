@@ -317,5 +317,7 @@ export async function initializeUptimeCronSchema() {
       total_response_time_ms BIGINT NOT NULL DEFAULT 0,
       PRIMARY KEY (monitor_id, date)
     );
+    ALTER TABLE uptime_monitors SET (fillfactor = 70);
+    ALTER TABLE uptime_daily_metrics SET (fillfactor = 70);
   `);
 }

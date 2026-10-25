@@ -335,7 +335,12 @@ func main() {
 	select {
 	case <-done:
 		log.Printf("[SHUTDOWN_TIMING] All core routines exited cleanly in %.3fs", time.Since(shutdownStart).Seconds())
-	case <-time.After(1500 * time.Millisecond):
+	case <-time.After(func() time.Duration {
+		if d := 5*time.Second - time.Since(shutdownStart); d > 1500*time.Millisecond {
+			return d
+		}
+		return 1500 * time.Millisecond
+	}()):
 		log.Printf("[SHUTDOWN_TIMING] Core routines wait timed out after %.3fs", time.Since(shutdownStart).Seconds())
 	}
 

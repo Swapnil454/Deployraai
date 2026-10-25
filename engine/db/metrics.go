@@ -19,15 +19,25 @@ func StartMetricsFlushLoop(ctx context.Context, wg *sync.WaitGroup, pool *pgxpoo
 	for {
 		select {
 		case <-ctx.Done():
-			fctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			fctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 			flushMetrics(fctx, pool)
 			cancel()
 			return
 		case <-ticker.C:
-			flushMetrics(ctx, pool)
+			// A flush that is already running when shutdown starts gets 3s to finish instead of
+			// being cancelled: cancelling rolls the whole statement back and loses a minute of counts.
+			pctx, pcancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			stopGrace := context.AfterFunc(ctx, func() { time.AfterFunc(3*time.Second, pcancel) })
+			flushMetrics(pctx, pool)
+			stopGrace()
+			pcancel()
 		}
 	}
 }
+
+// flushChunkSize bounds each INSERT/UPDATE pair. Chunks that complete before a deadline stay
+// persisted; the rest keep their counts in memory for the next flush.
+const flushChunkSize = 5000
 
 func flushMetrics(ctx context.Context, pool *pgxpool.Pool) {
 	core.Store.Mu.RLock()
@@ -71,6 +81,40 @@ func flushMetrics(ctx context.Context, pool *pgxpool.Pool) {
 		return
 	}
 
+	t0 := time.Now()
+	skipped := 0
+	for start := 0; start < len(ids); start += flushChunkSize {
+		end := start + flushChunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		if ctx.Err() != nil {
+			restoreCounts(ids[start:end], totals[start:end], oks[start:end], latencies[start:end])
+			skipped += end - start
+			continue
+		}
+		flushChunk(ctx, pool, ids[start:end], dates[start:end], totals[start:end], oks[start:end], latencies[start:end], currentIntervals[start:end])
+	}
+	log.Printf("[METRICS_FLUSH] rows=%d chunks=%d skipped_rows=%d elapsed=%s", len(ids), (len(ids)+flushChunkSize-1)/flushChunkSize, skipped, time.Since(t0).Round(time.Millisecond))
+}
+
+// restoreCounts puts counts that were taken for a flush back into the in-memory monitors.
+func restoreCounts(ids []string, totals []int, oks []int, latencies []int64) {
+	for i, id := range ids {
+		core.Store.Mu.RLock()
+		p, ok := core.Store.Monitors[id]
+		core.Store.Mu.RUnlock()
+		if ok {
+			core.CASUpdate(p, func(m *core.Monitor) {
+				m.ChecksTotal += uint64(totals[i])
+				m.ChecksOK += uint64(oks[i])
+				m.LatencySumMs += uint64(latencies[i])
+			})
+		}
+	}
+}
+
+func flushChunk(ctx context.Context, pool *pgxpool.Pool, ids []string, dates []time.Time, totals []int, oks []int, latencies []int64, currentIntervals []int) {
 	query := `
 		INSERT INTO uptime_daily_metrics (monitor_id, date, total_checks, successful_checks, total_response_time_ms)
 		SELECT * FROM unnest($1::uuid[], $2::date[], $3::int[], $4::int[], $5::bigint[])
