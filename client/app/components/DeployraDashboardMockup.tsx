@@ -25,7 +25,6 @@ import {
 } from "lucide-react";
 
 export default function DeployraDashboardMockup() {
-  const [activeTab, setActiveTab] = useState("Monitoring");
   const [isPaused, setIsPaused] = useState(false);
   const [selectedRange, setSelectedRange] = useState("Last 30 days");
 
@@ -65,91 +64,43 @@ export default function DeployraDashboardMockup() {
                   <span className="text-white font-bold text-[17px] tracking-tight">Deployra</span>
                 </div>
 
-                {/* Nav Menu */}
-                <nav className="space-y-1">
-                  {/* Monitoring (Active) */}
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("Monitoring")}
-                    className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[12.5px] font-medium transition-all cursor-pointer ${
-                      activeTab === "Monitoring"
-                        ? "bg-[#262a34] border border-[#363c4a] text-white shadow-sm"
-                        : "text-zinc-400 hover:text-zinc-200 hover:bg-[#22252e]"
-                    }`}
-                  >
+                {/* Nav Menu - Pure text list, Monitoring hardcoded active */}
+                <nav className="space-y-3 px-1">
+                  {/* Monitoring (Hardcoded Active) */}
+                  <div className="flex items-center gap-2.5 text-[12.5px] font-medium text-white select-none">
                     <Activity className="w-3.5 h-3.5 text-[#10b981]" />
                     <span>Monitoring</span>
-                  </button>
+                  </div>
 
                   {/* Incidents */}
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("Incidents")}
-                    className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[12.5px] font-medium transition-all cursor-pointer ${
-                      activeTab === "Incidents"
-                        ? "bg-[#262a34] border border-[#363c4a] text-white"
-                        : "text-zinc-400 hover:text-zinc-200 hover:bg-[#22252e]"
-                    }`}
-                  >
-                    <AlertTriangle className="w-3.5 h-3.5 text-zinc-400" />
+                  <div className="flex items-center gap-2.5 text-[12.5px] font-medium text-zinc-400 select-none">
+                    <AlertTriangle className="w-3.5 h-3.5 text-zinc-500" />
                     <span>Incidents</span>
-                  </button>
+                  </div>
 
                   {/* Status pages */}
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("Status pages")}
-                    className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[12.5px] font-medium transition-all cursor-pointer ${
-                      activeTab === "Status pages"
-                        ? "bg-[#262a34] border border-[#363c4a] text-white"
-                        : "text-zinc-400 hover:text-zinc-200 hover:bg-[#22252e]"
-                    }`}
-                  >
-                    <Layers className="w-3.5 h-3.5 text-zinc-400" />
+                  <div className="flex items-center gap-2.5 text-[12.5px] font-medium text-zinc-400 select-none">
+                    <Layers className="w-3.5 h-3.5 text-zinc-500" />
                     <span>Status pages</span>
-                  </button>
+                  </div>
 
                   {/* Maintenance */}
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("Maintenance")}
-                    className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[12.5px] font-medium transition-all cursor-pointer ${
-                      activeTab === "Maintenance"
-                        ? "bg-[#262a34] border border-[#363c4a] text-white"
-                        : "text-zinc-400 hover:text-zinc-200 hover:bg-[#22252e]"
-                    }`}
-                  >
-                    <Wrench className="w-3.5 h-3.5 text-zinc-400" />
+                  <div className="flex items-center gap-2.5 text-[12.5px] font-medium text-zinc-400 select-none">
+                    <Wrench className="w-3.5 h-3.5 text-zinc-500" />
                     <span>Maintenance</span>
-                  </button>
+                  </div>
 
                   {/* Team members */}
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("Team members")}
-                    className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[12.5px] font-medium transition-all cursor-pointer ${
-                      activeTab === "Team members"
-                        ? "bg-[#262a34] border border-[#363c4a] text-white"
-                        : "text-zinc-400 hover:text-zinc-200 hover:bg-[#22252e]"
-                    }`}
-                  >
-                    <Users className="w-3.5 h-3.5 text-zinc-400" />
+                  <div className="flex items-center gap-2.5 text-[12.5px] font-medium text-zinc-400 select-none">
+                    <Users className="w-3.5 h-3.5 text-zinc-500" />
                     <span>Team members</span>
-                  </button>
+                  </div>
 
                   {/* Integrations & API */}
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("Integrations & API")}
-                    className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[12.5px] font-medium transition-all cursor-pointer ${
-                      activeTab === "Integrations & API"
-                        ? "bg-[#262a34] border border-[#363c4a] text-white"
-                        : "text-zinc-400 hover:text-zinc-200 hover:bg-[#22252e]"
-                    }`}
-                  >
-                    <Sliders className="w-3.5 h-3.5 text-zinc-400" />
+                  <div className="flex items-center gap-2.5 text-[12.5px] font-medium text-zinc-400 select-none">
+                    <Sliders className="w-3.5 h-3.5 text-zinc-500" />
                     <span>Integrations &amp; API</span>
-                  </button>
+                  </div>
                 </nav>
               </div>
 
