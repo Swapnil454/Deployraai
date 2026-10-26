@@ -110,6 +110,11 @@ func NewDialer() *net.Dialer {
 	}
 }
 
+// NewDialerWith creates a dialer guarded by a custom block function.
+func NewDialerWith(blocked func(netip.Addr) bool) *net.Dialer {
+	return &net.Dialer{Control: ControlWith(blocked)}
+}
+
 // SafeRedirectPolicy ensures that customer headers are stripped if a redirect
 // crosses a domain, drops to HTTP, or changes ports.
 func SafeRedirectPolicy(req *http.Request, via []*http.Request) error {

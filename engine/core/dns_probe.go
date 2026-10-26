@@ -110,10 +110,8 @@ func ProbeDNSWithConfig(ctx context.Context, targetNameserver, queryDomain strin
 		}
 	}
 
-	dialer := &net.Dialer{
-		Timeout: timeout,
-		Control: netsec.ControlWith(blockedFn),
-	}
+	dialer := netsec.NewDialerWith(blockedFn)
+	dialer.Timeout = timeout
 
 	rawConn, err := dialer.DialContext(ctx, "udp", net.JoinHostPort(targetIP.String(), port))
 	if err != nil {
@@ -210,10 +208,8 @@ func ProbeUDP(ctx context.Context, target string, payload []byte, timeout time.D
 		}
 	}
 
-	dialer := &net.Dialer{
-		Timeout: timeout,
-		Control: netsec.SSRFControl,
-	}
+	dialer := netsec.NewDialer()
+	dialer.Timeout = timeout
 
 	conn, err := dialer.DialContext(ctx, "udp", net.JoinHostPort(targetIP.String(), port))
 	if err != nil {

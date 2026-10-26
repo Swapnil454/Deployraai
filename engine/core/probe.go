@@ -86,9 +86,7 @@ type Executor struct {
 func NewExecutor(opts *TransportOptions, pop string) *Executor {
 	var d *net.Dialer
 	if opts != nil && opts.BlockedIPFunc != nil {
-		d = &net.Dialer{
-			Control: netsec.ControlWith(opts.BlockedIPFunc),
-		}
+		d = netsec.NewDialerWith(opts.BlockedIPFunc)
 	} else {
 		d = netsec.NewDialer()
 	}

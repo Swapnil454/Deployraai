@@ -17,9 +17,7 @@ import (
 )
 
 // Reusable single dialer to eliminate per-call allocation overhead.
-var portDialer = &net.Dialer{
-	Control: netsec.SSRFControl,
-}
+var portDialer = netsec.NewDialer()
 
 // LingerErrorCount tracks any silent failures when setting SO_LINGER{1, 0}.
 var LingerErrorCount uint64
@@ -192,9 +190,7 @@ func ProbeTCPPortWithConfig(ctx context.Context, rawTarget string, cfg PortProbe
 
 		candCtx, candCancel := context.WithTimeout(ctxTimeout, candTimeout)
 		connectStart := time.Now()
-		dialer := &net.Dialer{
-			Control: netsec.ControlWith(blockedFn),
-		}
+		dialer := netsec.NewDialerWith(blockedFn)
 		conn, dialErr := dialer.DialContext(candCtx, "tcp", dialAddr)
 		candCancel()
 		lastLatency = time.Since(connectStart)

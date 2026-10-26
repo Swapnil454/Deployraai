@@ -904,7 +904,9 @@ func SpoolBatchWithPreimage(c *Cols, preimage DedupTokenPreimage) {
 }
 
 func SpoolBatchWithPreimageAndName(c *Cols, preimage DedupTokenPreimage, segName string) {
-	_ = os.MkdirAll(telemetrySpoolDir, 0755)
+	if err := os.MkdirAll(telemetrySpoolDir, 0755); err != nil {
+		log.Printf("[ERROR] telemetry spool dir %s cannot be created: %v", telemetrySpoolDir, err)
+	}
 	enforceSpoolSizeLimit()
 
 	seq := globalSpoolSequence.Add(1)

@@ -13,8 +13,10 @@ func TestNoRawDialer(t *testing.T) {
 
 	out, err := cmd.Output()
 	if err != nil {
-		// git grep returns exit status 1 if no matches are found, which is what we want
-		return
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return
+		}
+		t.Skipf("git grep unavailable, lint not performed: %v", err)
 	}
 
 	lines := strings.Split(string(out), "\n")
