@@ -82,7 +82,7 @@ export async function initializeUptimeCronSchema() {
     );
 
     -- Algorithm 4: Optimized partial index excluding heartbeat monitors to preserve Heap-Only Tuples (HOT)
-    CREATE INDEX IF NOT EXISTS uptime_monitors_due_idx ON uptime_monitors (is_paused, last_checked_at) WHERE monitor_type != 'heartbeat';
+    -- due index is created in the index migration below, after managed_by exists
     CREATE INDEX IF NOT EXISTS uptime_checks_monitor_time_idx ON uptime_checks_log (monitor_id, checked_at DESC);
     CREATE INDEX IF NOT EXISTS uptime_checks_success_idx ON uptime_checks_log (monitor_id, checked_at DESC) WHERE success = TRUE;
     CREATE INDEX IF NOT EXISTS uptime_checks_fail_idx ON uptime_checks_log (monitor_id, checked_at DESC) WHERE success = FALSE;
@@ -150,8 +150,9 @@ export async function initializeUptimeCronSchema() {
         DROP INDEX uptime_monitors_due_idx;
       END IF;
     END $$;
-    CREATE INDEX IF NOT EXISTS uptime_monitors_due_idx
-      ON uptime_monitors (is_paused, last_checked_at) WHERE monitor_type <> 'heartbeat';
+    DROP INDEX IF EXISTS uptime_monitors_due_idx;
+    CREATE INDEX IF NOT EXISTS uptime_monitors_node_due_idx
+      ON uptime_monitors (is_paused) WHERE monitor_type <> 'heartbeat' AND managed_by <> 'engine';
 
     -- Algorithm 4: Dedicated Narrow Heartbeat State Table (~34MB heap + 19MB index for 125k monitors)
     -- Drops sequential scan time from 200ms to ~20ms, achieves 98-100% HOT updates with fillfactor 80

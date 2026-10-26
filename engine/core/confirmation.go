@@ -131,9 +131,9 @@ func SubmitCheckResult(monitorID string, ev EventCheckResult) {
 		return // Drop canceled checks completely
 	}
 	if ev.Ok || isConnectLevelError(ev.ErrClass) {
-		Health.RecordResult(ev.Ok)
+		Health.RecordResult(ev.Ok || ev.ErrClass == ErrRefused)
 	}
-	if !Health.IsHealthy() && !ev.Ok && isConnectLevelError(ev.ErrClass) {
+	if !Health.IsHealthy() && !ev.Ok && (ev.ErrClass == ErrTimeout || ev.ErrClass == ErrDNS) && !localNetworkCanaryOK() {
 		// Suppress primary failure if local node is suffering a network glitch
 		return
 	}
