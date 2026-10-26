@@ -1,11 +1,13 @@
 package core
 
 import (
+	"bytes"
 	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime/pprof"
 	"testing"
 	"time"
 )
@@ -92,6 +94,9 @@ func TestTelemetryConnByteCountingAndTLSClassification(t *testing.T) {
 	aggPlain := &connAggs[0][0] // cohort 0, plain (isTLS=false)
 	if aggPlain.conns.Load() != 1 {
 		t.Errorf("expected 1 plain connection, got %d", aggPlain.conns.Load())
+		var gb bytes.Buffer
+		pprof.Lookup("goroutine").WriteTo(&gb, 1)
+		t.Logf("goroutines at failure:\n%s", gb.String())
 	}
 	if aggPlain.bytesIn.Load() <= 0 || aggPlain.bytesOut.Load() <= 0 {
 		t.Errorf("expected positive bytes for plain conn, got in=%d out=%d", aggPlain.bytesIn.Load(), aggPlain.bytesOut.Load())

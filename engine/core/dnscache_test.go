@@ -400,6 +400,7 @@ func TestMiekgResolver_ContextDeadlinePropagation(t *testing.T) {
 		Servers: []string{addr},
 		Timeout: 2 * time.Second,
 	})
+	t.Cleanup(resolver.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
@@ -428,6 +429,7 @@ func TestMiekgResolver_RecursorOutageReturnsInconclusive(t *testing.T) {
 		Servers: []string{"127.0.0.1:53999"},
 		Timeout: 80 * time.Millisecond,
 	})
+	t.Cleanup(resolver.Close)
 	resolver.SetCanaryHealthy(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -481,6 +483,7 @@ func TestMiekgResolver_FailoverBackoffOnBlackholedServer(t *testing.T) {
 		Servers: []string{blackholeAddr, healthyAddr},
 		Timeout: 600 * time.Millisecond,
 	})
+	t.Cleanup(resolver.Close)
 
 	ctx1, cancel1 := context.WithTimeout(context.Background(), 700*time.Millisecond)
 	defer cancel1()
@@ -533,6 +536,7 @@ func TestMiekgResolver_IPv6OnlyHostReturnsUnsupported(t *testing.T) {
 		Servers:     []string{addr},
 		DisableIPv6: true,
 	})
+	t.Cleanup(resolver.Close)
 
 	_, _, err := resolver.Resolve(context.Background(), "ipv6only.example.com")
 	if err == nil {
@@ -577,6 +581,7 @@ func TestMiekgResolver_TruncationFallback(t *testing.T) {
 		Servers: []string{addr},
 		Timeout: 500 * time.Millisecond,
 	})
+	t.Cleanup(resolver.Close)
 
 	addrs, _, err := resolver.Resolve(context.Background(), "trunc.example.com")
 	if err != nil {
@@ -620,6 +625,7 @@ func TestMiekgResolver_LargeUDPNoTruncationFallback(t *testing.T) {
 		Servers: []string{addr},
 		Timeout: 500 * time.Millisecond,
 	})
+	t.Cleanup(resolver.Close)
 
 	addrs, _, err := resolver.Resolve(context.Background(), "large-udp.example.com")
 	if err != nil {
@@ -654,6 +660,7 @@ func TestMiekgResolver_AAAABrokenDoesNotDiscardA(t *testing.T) {
 		Servers: []string{addr},
 		Timeout: 300 * time.Millisecond,
 	})
+	t.Cleanup(resolver.Close)
 	resolver.hasIPv6Cached.Store(true)
 
 	addrs, _, err := resolver.Resolve(context.Background(), "mixed.example.com")
@@ -691,6 +698,7 @@ func TestMiekgResolver_NXDOMAINImmediatelyCancelsAAAA(t *testing.T) {
 		Servers: []string{addr},
 		Timeout: 500 * time.Millisecond,
 	})
+	t.Cleanup(resolver.Close)
 	resolver.hasIPv6Cached.Store(true)
 
 	start := time.Now()
@@ -712,6 +720,7 @@ func TestMiekgResolver_SemaphoreSaturation(t *testing.T) {
 		SemConcurrency: 1,
 		Timeout:        100 * time.Millisecond,
 	})
+	t.Cleanup(resolver.Close)
 
 	resolver.sem <- struct{}{}
 	defer func() { <-resolver.sem }()
@@ -829,6 +838,7 @@ func TestMiekgResolver_ParallelResolution_StartBarrier(t *testing.T) {
 	resolver := NewMiekgResolver(MiekgResolverConfig{
 		Servers: []string{addr},
 	})
+	t.Cleanup(resolver.Close)
 	resolver.hasIPv6Cached.Store(true)
 
 	type result struct {
@@ -886,6 +896,7 @@ func TestMiekgResolver_EDNS0(t *testing.T) {
 	resolver := NewMiekgResolver(MiekgResolverConfig{
 		Servers: []string{addr},
 	})
+	t.Cleanup(resolver.Close)
 
 	_, _, err := resolver.Resolve(context.Background(), "edns0.example.com")
 	if err != nil {
@@ -1558,6 +1569,7 @@ func TestRecursorCanary(t *testing.T) {
 		Servers:       []string{"127.0.0.1:53999"},
 		CanaryDomains: []string{"canary-ns1.checkuptime.org.", "canary-ns2.checkuptime.org."},
 	})
+	t.Cleanup(resolver.Close)
 
 	// 1. Canary Down -> lookups return inconclusive ErrRecursorUnavailable
 	resolver.SetCanaryHealthy(false)
@@ -1761,6 +1773,7 @@ func TestSemaphoreSaturationThroughClassifier(t *testing.T) {
 		Servers:        []string{"127.0.0.1:53999"},
 		SemConcurrency: 1,
 	})
+	t.Cleanup(resolver.Close)
 
 	// Saturated semaphore: occupy the 1 slot
 	resolver.sem <- struct{}{}
