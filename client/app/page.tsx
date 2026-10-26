@@ -6,7 +6,7 @@ import TopologyGraph from "./components/TopologyGraph";
 import UptimeMonitoringSection from "./components/UptimeMonitoringSection";
 import OutagePreventionSection from "./components/OutagePreventionSection";
 import StatusPagesSection from "./components/StatusPagesSection";
-import WhyDeployraSection from "./components/WhyDeployraSection";
+import ZeroCodeObservabilitySection from "./components/ZeroCodeObservabilitySection";
 
 const ROTATING_FEATURES = [
   "autonomous self-healing",
@@ -171,8 +171,8 @@ export default function Home() {
       {/* ── REAL-TIME STATUS PAGES SHOWCASE SECTION ───────────────────────── */}
       <StatusPagesSection />
 
-      {/* ── WHY TEAMS CHOOSE DEPLOYRA (AUTONOMOUS RELIABILITY) ─────────────── */}
-      <WhyDeployraSection />
+      {/* ── ZERO-CODE OBSERVABILITY & ANALYTICS PIPELINE SECTION ──────────── */}
+      <ZeroCodeObservabilitySection />
     </main>
   );
 }

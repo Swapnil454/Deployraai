@@ -126,3 +126,8 @@ func (s *StateStore) GarbageCollectAndSweep(ttl time.Duration, onActive func(mon
 	})
 	return removed
 }
+
+// SeedDown restores DOWN state from the datastore at boot so recovery after a restart emits UP.
+func (s *StateStore) SeedDown(id string, start time.Time) {
+s.monitors.LoadOrStore(id, &monitorEntry{state: MonitorState{ID: id, Status: StatusDown, Epoch: 1, IncidentStart: start}, lastAccess: time.Now()})
+}

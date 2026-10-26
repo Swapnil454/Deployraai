@@ -106,14 +106,15 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	// A1: Query open incidents on boot to restore DOWN state
-	openIncidents := make(map[string]bool)
-	incQuery := `SELECT DISTINCT monitor_id FROM uptime_incidents WHERE resolved_at IS NULL`
+	openIncidents := make(map[string]time.Time)
+	incQuery := `SELECT monitor_id, MIN(started_at) FROM uptime_incidents WHERE resolved_at IS NULL GROUP BY monitor_id`
 	iRows, err := pool.Query(ctx, incQuery)
 	if err == nil {
 		for iRows.Next() {
 			var mid string
-			if iRows.Scan(&mid) == nil {
-				openIncidents[mid] = true
+			var st time.Time
+if iRows.Scan(&mid, &st) == nil {
+				openIncidents[mid] = st
 			}
 		}
 		iRows.Close()
@@ -153,7 +154,8 @@ func HydrateMonitors(ctx context.Context, pool *pgxpool.Pool) error {
 			}
 
 			// A1: Restore DOWN state if an incident is open
-			if openIncidents[r.ID] {
+			if openStart, isOpen := openIncidents[r.ID]; isOpen {
+core.States.SeedDown(r.ID, openStart)
 				m.LastStatus = "DOWN"
 				m.ConfidenceScore = 0.0
 				m.CurrentInterval = r.Interval
