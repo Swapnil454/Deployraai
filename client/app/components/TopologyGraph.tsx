@@ -2756,6 +2756,8 @@ function generateAllRibbons(): RibbonStrand[] {
 }
 
 const ALL_RIBBONS = generateAllRibbons();
+// Pre-curated primary traffic routes: 1 clean, high-performance photon per key semantic corridor
+const TRAFFIC_RIBBONS = ALL_RIBBONS.filter((r, idx) => r.isPrimary && idx % 2 === 0);
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ── TOPOLOGY COMPONENT
@@ -2763,6 +2765,7 @@ const ALL_RIBBONS = generateAllRibbons();
 
 export default function TopologyGraph() {
   const [animationStarted, setAnimationStarted] = useState(false);
+  const [growthComplete, setGrowthComplete] = useState(false);
   const [hoveredNode, setHoveredNode] = useState<NodeItem | null>(null);
   const [selectedNode, setSelectedNode] = useState<NodeItem | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -2792,6 +2795,14 @@ export default function TopologyGraph() {
     }
   }, []);
 
+  // Unmount one-shot growth helpers after the tree finishes blossoming (9.8s) to release SMIL resources
+  useEffect(() => {
+    if (animationStarted) {
+      const timer = setTimeout(() => setGrowthComplete(true), 9800);
+      return () => clearTimeout(timer);
+    }
+  }, [animationStarted]);
+
   const activeNode = hoveredNode || selectedNode;
 
   const activeConnections = useMemo(() => {
@@ -2817,7 +2828,6 @@ export default function TopologyGraph() {
         viewBox="0 0 896 1180"
         className="w-full h-auto overflow-visible"
         preserveAspectRatio="xMidYMin meet"
-        style={{ filter: "drop-shadow(0 25px 50px rgba(0,0,0,0.85))" }}
       >
         <defs>
           {/* 3D Deep Elevation Drop Shadow */}
@@ -2949,8 +2959,8 @@ export default function TopologyGraph() {
                   }}
                 />
 
-                {/* Visible Growth Lead Photon: Guides the line tip slowly in real time */}
-                {animationStarted && ribbon.isPrimary && (
+                {/* Visible Growth Lead Photon: Guides the line tip slowly in real time during initial reveal */}
+                {!growthComplete && animationStarted && ribbon.isPrimary && (
                   <g opacity={0}>
                     <animateMotion
                       path={ribbon.path}
@@ -2974,24 +2984,33 @@ export default function TopologyGraph() {
                     <circle r={1.2} fill="#ffffff" />
                   </g>
                 )}
-
-                {/* Post-Growth Steady Traffic Photons */}
-                {idx % 7 === 0 && (
-                  <g style={{ opacity: animationStarted ? 1 : 0, transition: `opacity 0.5s ease ${ribbon.startDelay + ribbon.duration}ms` }}>
-                    <animateMotion
-                      path={ribbon.path}
-                      dur={`${3.2 + (idx % 6) * 0.4}s`}
-                      repeatCount="indefinite"
-                      begin={`${(ribbon.startDelay + ribbon.duration + 300) / 1000}s`}
-                    />
-                    <circle r={3.8} fill="#059669" opacity={0.25} />
-                    <circle r={2.2} fill="#10b981" opacity={0.8} />
-                    <circle r={1.1} fill="#e6fffa" />
-                  </g>
-                )}
               </g>
             );
           })}
+        </g>
+
+        {/* ── ISOLATED HARDWARE-ACCELERATED STEADY TRAFFIC PHOTONS LAYER ── */}
+        <g className="pointer-events-none" style={{ pointerEvents: "none", willChange: "transform" }}>
+          {TRAFFIC_RIBBONS.map((ribbon, i) => (
+            <g
+              key={`traffic-${ribbon.id}`}
+              style={{
+                opacity: animationStarted ? 1 : 0,
+                transition: `opacity 0.6s ease ${ribbon.startDelay + ribbon.duration}ms`,
+                willChange: "transform",
+              }}
+            >
+              <animateMotion
+                path={ribbon.path}
+                dur={`${3.2 + (i % 5) * 0.45}s`}
+                repeatCount="indefinite"
+                begin={`${(ribbon.startDelay + ribbon.duration + 200) / 1000}s`}
+              />
+              <circle r={3.8} fill="#059669" opacity={0.25} />
+              <circle r={2.2} fill="#10b981" opacity={0.85} />
+              <circle r={1.1} fill="#e6fffa" />
+            </g>
+          ))}
         </g>
 
         {/* ── STATIC HUD TOOLTIPS ── */}
@@ -3068,7 +3087,7 @@ export default function TopologyGraph() {
                 }}
               >
                 {/* 3D Real-time Arrival Concentric Shockwaves: burst radially from center (0,0) on the spot */}
-                {animationStarted && (
+                {!growthComplete && animationStarted && (
                   <g>
                     {/* Primary energy burst */}
                     <circle cx={0} cy={0} fill="none" stroke="#10b981" strokeWidth="2.5" opacity="0">
@@ -3176,8 +3195,8 @@ export default function TopologyGraph() {
                     />
                   ))}
 
-                  {/* Stage 2: Active hover rotating orbit ring (starts at 80ms once node turns green) */}
-                  {!node.dashedRing && (
+                  {/* Stage 2: Active hover rotating orbit ring (only animated when hovered) */}
+                  {!node.dashedRing && isHovered && (
                     <circle
                       cx={0}
                       cy={0}
@@ -3186,12 +3205,7 @@ export default function TopologyGraph() {
                       stroke="#10b981"
                       strokeWidth="1.6"
                       strokeDasharray="5 4"
-                      opacity={isHovered ? 0.9 : 0}
-                      style={{
-                        transition: isHovered
-                          ? "opacity 0.4s ease-out 80ms"
-                          : "opacity 0.2s ease-out 0ms",
-                      }}
+                      opacity={0.9}
                     >
                       <animateTransform
                         attributeName="transform"

@@ -7,6 +7,7 @@ import UptimeMonitoringSection from "./components/UptimeMonitoringSection";
 import OutagePreventionSection from "./components/OutagePreventionSection";
 import StatusPagesSection from "./components/StatusPagesSection";
 import ZeroCodeObservabilitySection from "./components/ZeroCodeObservabilitySection";
+import AutoFixShowcaseSection from "./components/AutoFixShowcaseSection";
 
 const ROTATING_FEATURES = [
   "autonomous self-healing",
@@ -173,6 +174,9 @@ export default function Home() {
 
       {/* ── ZERO-CODE OBSERVABILITY & ANALYTICS PIPELINE SECTION ──────────── */}
       <ZeroCodeObservabilitySection />
+
+      {/* ── SELF-HEALING AUTOFIX & DYNAMIC PR REPAIR SECTION ──────────────── */}
+      <AutoFixShowcaseSection />
     </main>
   );
 }

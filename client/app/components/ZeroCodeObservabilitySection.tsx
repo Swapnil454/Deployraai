@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   ChevronDown,
   ArrowRight,
-  ShieldCheck,
+  GitPullRequest,
   Radio,
 } from "lucide-react";
 
@@ -13,7 +13,7 @@ export default function ZeroCodeObservabilitySection() {
   const [inputUrl, setInputUrl] = useState("https://yourwebsite.com");
 
   return (
-    <section className="relative w-full bg-[#111111] pt-24 sm:pt-28 lg:pt-32 pb-24 sm:pb-32 overflow-hidden z-10 font-sans">
+    <section className="relative w-full bg-[#111111] pt-20 sm:pt-24 lg:pt-28 pb-14 sm:pb-16 lg:pb-20 overflow-hidden z-10 font-sans">
       {/* ── Background Matrix Grid ── */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f1f2820_1px,transparent_1px),linear-gradient(to_bottom,#1f1f2820_1px,transparent_1px)] bg-[size:76px_76px] pointer-events-none z-0" />
 
@@ -21,40 +21,48 @@ export default function ZeroCodeObservabilitySection() {
       <div className="absolute top-1/4 left-1/4 w-[700px] h-[400px] bg-[#00e599]/[0.035] blur-[160px] pointer-events-none z-0" />
       <div className="absolute top-1/2 right-1/4 w-[600px] h-[380px] bg-cyan-500/[0.03] blur-[150px] pointer-events-none z-0" />
 
-      <div className="relative z-10 max-w-[1440px] mx-auto px-5 sm:px-8 lg:px-12">
-        {/* ── Headline: Exact matching typography from Image ── */}
-        <div className="mb-14 sm:mb-20">
-          <h2 className="text-[34px] sm:text-[44px] md:text-[50px] lg:text-[54px] font-bold tracking-tight leading-[1.12]">
-            <span className="text-[#00e599] drop-shadow-[0_0_28px_rgba(0,229,153,0.4)]">
-              Zero-Code
-            </span>{" "}
-            <span className="text-white">Observability</span>
-            <br />
-            <span className="text-white">&amp; analytics pipeline</span>{" "}
-            <span className="text-[#00e599] font-mono text-[22px] sm:text-[28px] md:text-[32px] font-normal tracking-normal ml-1 sm:ml-2">
-              step by step
-            </span>
-          </h2>
+      <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 lg:px-14">
+        {/* ── Headline & Right Side Description: Matching 2-column grid ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 xl:gap-12 items-start mb-12 sm:mb-16">
+          {/* Left Title Column */}
+          <div className="lg:col-span-7 xl:col-span-7 text-center lg:text-left">
+            <h2 className="font-serif-display text-[28px] sm:text-[36px] md:text-[42px] lg:text-[40px] xl:text-[48px] 2xl:text-[56px] font-normal leading-[1.1] tracking-[-0.02em]">
+              <span className="text-[#00e599] drop-shadow-[0_0_28px_rgba(0,229,153,0.4)]">
+                Zero-Code
+              </span>{" "}
+              <span className="text-white">Observability</span>
+              <br />
+              <span className="text-white">&amp; analytics pipeline</span>
+              <span className="text-emerald-400">.</span>
+            </h2>
+          </div>
+
+          {/* Right Description Column - Aligned to right container edge */}
+          <div className="lg:col-span-5 xl:col-span-5 lg:pt-2 xl:pt-3 text-center lg:text-left flex lg:justify-end">
+            <p className="text-[14px] sm:text-[15.5px] lg:text-[15px] xl:text-[16px] text-zinc-400 font-normal leading-[1.65] tracking-tight max-w-xl text-left">
+              Transform passive websites into fully monitored nodes with zero configuration. Auto-probe global latency, stream real-time user session telemetry, and auto-dispatch AI root-cause alerts before users notice downtime.
+            </p>
+          </div>
         </div>
 
         {/* ── 4-STEP PIPELINE CARDS ── */}
         <div className="relative">
-          {/* Cards Grid: items-start so Card 1 and Card 2 retain their natural compact proportions */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[250px_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1fr)] gap-6 lg:gap-5 items-start relative z-10">
+          {/* Cards Grid: 4-column balanced layout vertically and horizontally centered */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1fr_1.1fr_1.35fr_1.1fr] gap-6 lg:gap-4.5 justify-center items-center relative z-10">
             {/* ══════════════════════════════════════════════════════════════════
                 STEP 1: Zero-Code Setup (Exact Match to Cropped Image)
             ══════════════════════════════════════════════════════════════════ */}
-            <div className="flex flex-col justify-start">
+            <div className="flex flex-col items-center justify-center">
               {/* Header Label: Zero-Code Setup */}
-              <div className="mb-3.5 select-none">
+              <div className="mb-3.5 select-none text-center">
                 <h3 className="text-white text-[16px] sm:text-[17px] font-semibold tracking-tight">
                   Zero-Code Setup
                 </h3>
               </div>
 
-              {/* Outer Card with Soft Right Emerald Aura */}
+              {/* Outer Card with Soft Right Emerald Aura (Horizontally Centered) */}
               <div
-                className="relative rounded-[22px] p-4 select-none overflow-visible shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85)] group transition-all duration-300"
+                className="relative w-full max-w-[265px] mx-auto rounded-[22px] p-4 select-none overflow-visible shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85)] group transition-all duration-300"
                 style={{
                   background:
                     "radial-gradient(circle at 88% 50%, rgba(0, 229, 153, 0.16) 0%, rgba(13, 20, 18, 0.72) 42%, rgba(10, 14, 18, 0.95) 100%)",
@@ -86,7 +94,7 @@ export default function ZeroCodeObservabilitySection() {
                   }}
                 >
                   {/* Two-Line Title */}
-                  <p className="text-[13px] font-medium text-white/95 leading-[1.3] mb-3 tracking-tight">
+                  <p className="text-[13px] font-medium text-white/95 leading-[1.3] mb-3 tracking-tight text-center">
                     Enter your website URL or
                     <br />
                     connect your cloud
@@ -104,7 +112,7 @@ export default function ZeroCodeObservabilitySection() {
                       type="text"
                       value={inputUrl}
                       onChange={(e) => setInputUrl(e.target.value)}
-                      className="bg-transparent text-[12px] text-zinc-300 outline-none w-full font-sans tracking-tight placeholder-zinc-500"
+                      className="bg-transparent text-[12px] text-zinc-300 outline-none w-full font-sans tracking-tight placeholder-zinc-500 text-center"
                       placeholder="https://yourwebsite.com"
                     />
                   </div>
@@ -130,25 +138,25 @@ export default function ZeroCodeObservabilitySection() {
             </div>
 
             {/* ══════════════════════════════════════════════════════════════════
-                STEP 2: Automated Global Probing (Vector Sharp, Solid Dark Card)
+                STEP 2: Real-Time Web Analytics (Vector Sharp, Solid Dark Card)
             ══════════════════════════════════════════════════════════════════ */}
-            <div className="flex flex-col justify-start">
+            <div className="flex flex-col items-center justify-center">
               {/* Step Label */}
-              <div className="mb-3.5 select-none">
+              <div className="mb-3.5 select-none text-center">
                 <h3 className="text-white text-[16px] sm:text-[17px] font-semibold tracking-tight">
-                  Automated Global Probing
+                  Real-Time Web Analytics
                 </h3>
               </div>
 
-              {/* Solid Matte Dark Card (No Glassy Effect, 100% Vector Sharp) */}
+              {/* Solid Matte Dark Card */}
               <div className="relative w-full rounded-[20px] bg-[#0c1017] border border-white/[0.08] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col justify-between group transition-all duration-300 hover:border-[#00e599]/30">
-                {/* Top Text (Native Vector Typography) */}
+                {/* Top Text */}
                 <div className="text-center pt-5 pb-1 px-4 select-none">
                   <p className="text-[14px] sm:text-[14.5px] font-semibold text-white tracking-tight">
-                    Multi-region probe voters locations
+                    Global visitor traffic &amp; sessions
                   </p>
                   <p className="text-[12px] sm:text-[12.5px] text-zinc-300 font-normal tracking-tight mt-0.5">
-                    DNS, SSL, HTTP status &amp; API health
+                    Live page views, user locations &amp; telemetry
                   </p>
                 </div>
 
@@ -185,7 +193,7 @@ export default function ZeroCodeObservabilitySection() {
 
                   <img
                     src="/world-map-dark.svg"
-                    alt="Global Probe Voting Mesh"
+                    alt="Global Web Analytics Mesh"
                     className="w-full h-auto object-contain select-none pointer-events-none block opacity-95"
                   />
 
@@ -208,7 +216,7 @@ export default function ZeroCodeObservabilitySection() {
                       style={{ left: node.left, top: node.top }}
                       title={node.name}
                     >
-                      {/* Slow expanding radar wave (transparent fill, crisp delicate green border) */}
+                      {/* Slow expanding radar wave */}
                       <span
                         className="absolute inset-0 rounded-full border border-[#00e599]/60 bg-transparent pointer-events-none"
                         style={{
@@ -241,15 +249,15 @@ export default function ZeroCodeObservabilitySection() {
                   ))}
                 </div>
 
-                {/* Bottom Text (Native Vector Typography) */}
+                {/* Bottom Text */}
                 <div className="text-center pb-5 pt-1 px-4 select-none">
                   <p className="text-[#00e599] text-[13px] sm:text-[13.5px] font-semibold tracking-tight">
-                    Multi-region probe voter nodes
+                    Real-time session telemetry
                   </p>
                   <p className="text-zinc-300 text-[11.5px] sm:text-[12px] leading-snug tracking-tight mt-1 max-w-[240px] mx-auto">
-                    Executing checks for DNS, SSL, HTTP
+                    Tracking live user clicks, page views,
                     <br />
-                    status, and API health
+                    referrers, and geo distribution
                   </p>
                 </div>
               </div>
@@ -258,9 +266,9 @@ export default function ZeroCodeObservabilitySection() {
             {/* ══════════════════════════════════════════════════════════════════
                 STEP 3: Dashboard (Exact 1:1 Mirror of Reference Image)
             ══════════════════════════════════════════════════════════════════ */}
-            <div className="flex flex-col justify-start">
+            <div className="flex flex-col items-center justify-center">
               {/* Label */}
-              <div className="mb-3.5 select-none">
+              <div className="mb-3.5 select-none text-center">
                 <h3 className="text-white text-[16px] sm:text-[17px] font-semibold tracking-tight">
                   Dashboard
                 </h3>
@@ -300,11 +308,14 @@ export default function ZeroCodeObservabilitySection() {
                   </div>
                 </div>
 
-                {/* Sub-panel 1: Sub-second latency (p50, p95, p80) */}
+                {/* Sub-panel 1: CPU & Memory Allocation (p95) */}
                 <div className="bg-[#051017]/75 border border-white/[0.09] backdrop-blur-md rounded-xl p-2.5 sm:p-3 mb-2 relative overflow-hidden select-none">
-                  <p className="text-[11.5px] font-medium text-zinc-200 tracking-tight mb-1">
-                    Sub-second latency (p50, p95, p80)
-                  </p>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[11.5px] font-medium text-zinc-200 tracking-tight">
+                      CPU &amp; Memory Usage (p95)
+                    </p>
+                    <span className="text-[9px] font-mono text-[#00e599]">Peak: 74%</span>
+                  </div>
 
                   <div className="flex items-center relative">
                     {/* Y-Axis numbers */}
@@ -382,11 +393,14 @@ export default function ZeroCodeObservabilitySection() {
                   </div>
                 </div>
 
-                {/* Sub-panel 2: Time to First Byte (TTFB) */}
+                {/* Sub-panel 2: Page Views & User Clicks */}
                 <div className="bg-[#051017]/75 border border-white/[0.09] backdrop-blur-md rounded-xl p-2.5 sm:p-3 mb-2 relative overflow-hidden select-none">
-                  <p className="text-[11.5px] font-medium text-zinc-200 tracking-tight mb-1">
-                    Time to First Byte (TTFB)
-                  </p>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[11.5px] font-medium text-zinc-200 tracking-tight">
+                      Page Views &amp; User Clicks
+                    </p>
+                    <span className="text-[9px] font-mono text-[#06b6d4]">1.4k clicks/min</span>
+                  </div>
 
                   <div className="flex items-center relative">
                     {/* Y-Axis numbers */}
@@ -446,11 +460,11 @@ export default function ZeroCodeObservabilitySection() {
                 </div>
 
                 {/* Sub-panel 3: Middle Split Row (Calendar + Global Uptime 99.99%) */}
-                <div className="grid grid-cols-12 gap-2 mb-2 select-none">
-                  {/* 90 day Availability Calendar */}
-                  <div className="col-span-8 bg-[#051017]/75 border border-white/[0.09] backdrop-blur-md rounded-xl p-2.5 flex flex-col justify-between">
-                    <p className="text-[10px] text-zinc-300 font-medium mb-1 truncate">
-                      90 day Availability Calendar
+                <div className="grid grid-cols-12 gap-1.5 sm:gap-2 mb-2 select-none items-stretch">
+                  {/* Memory Heap Allocation */}
+                  <div className="col-span-7 bg-[#051017]/75 border border-white/[0.09] backdrop-blur-md rounded-xl p-2 sm:p-2.5 flex flex-col justify-between min-w-0">
+                    <p className="text-[9px] sm:text-[10px] text-zinc-300 font-medium mb-1 truncate">
+                      Memory Heap Usage
                     </p>
 
                     <div className="flex items-center">
@@ -493,36 +507,36 @@ export default function ZeroCodeObservabilitySection() {
                     </div>
                   </div>
 
-                  {/* Global Uptime 99.99% Stat Card */}
-                  <div className="col-span-4 bg-[#051017]/75 border border-white/[0.09] backdrop-blur-md rounded-xl p-2.5 flex flex-col justify-center items-start">
-                    <p className="text-[9.5px] text-zinc-400 font-medium leading-tight mb-1">
-                      Global Uptime
+                  {/* CPU Usage Stat Card */}
+                  <div className="col-span-5 bg-[#051017]/75 border border-white/[0.09] backdrop-blur-md rounded-xl p-2 sm:p-2.5 flex flex-col justify-center items-start min-w-0 overflow-hidden">
+                    <p className="text-[9px] sm:text-[9.5px] text-zinc-400 font-medium leading-tight mb-1 truncate w-full">
+                      CPU Usage
                     </p>
-                    <p className="text-[20px] sm:text-[22px] font-bold text-[#00e599] font-mono tracking-tight leading-none drop-shadow-[0_0_12px_rgba(0,229,153,0.7)]">
-                      99.99%
+                    <p className="text-[16px] sm:text-[18px] min-[1400px]:text-[22px] font-bold text-[#00e599] font-mono tracking-tight leading-none drop-shadow-[0_0_12px_rgba(0,229,153,0.7)] whitespace-nowrap">
+                      18.4%
                     </p>
                   </div>
                 </div>
 
-                {/* Sub-panel 4: 90-day Availability Region Bars */}
+                {/* Sub-panel 4: Page Clicks by Route */}
                 <div className="bg-[#051017]/75 border border-white/[0.09] backdrop-blur-md rounded-xl p-2.5 sm:p-3 select-none">
                   <div className="flex items-center justify-between text-[11px] mb-2 font-medium">
-                    <span className="text-zinc-200">90-day Availability</span>
-                    <span className="text-zinc-400 font-mono text-[9.5px]">90 day</span>
+                    <span className="text-zinc-200">Page Clicks by Route</span>
+                    <span className="text-zinc-400 font-mono text-[9.5px]">Live Clicks</span>
                   </div>
 
-                  {/* 6 Region Bars Matching Reference */}
+                  {/* 6 Route Bars */}
                   <div className="flex flex-col gap-1.5">
                     {[
-                      { code: "US-E", pct: "100%" },
-                      { code: "US-W", pct: "100%" },
-                      { code: "EU-C", pct: "82%" },
-                      { code: "AP-S", pct: "76%" },
-                      { code: "AP-N", pct: "88%" },
-                      { code: "SA-E", pct: "100%" },
+                      { code: "/dashboard", pct: "100%" },
+                      { code: "/checkout", pct: "92%" },
+                      { code: "/api/trc", pct: "84%" },
+                      { code: "/pricing", pct: "76%" },
+                      { code: "/auth", pct: "88%" },
+                      { code: "/events", pct: "65%" },
                     ].map((row, idx) => (
                       <div key={idx} className="flex items-center gap-2">
-                        <span className="text-[7.5px] font-mono text-zinc-400 w-5 shrink-0 text-right">
+                        <span className="text-[7.5px] font-mono text-zinc-400 w-12 shrink-0 text-right truncate">
                           {row.code}
                         </span>
                         <div className="flex-1 h-2 rounded-full bg-[#15222c] border border-white/[0.04] overflow-hidden">
@@ -536,35 +550,33 @@ export default function ZeroCodeObservabilitySection() {
                   </div>
 
                   {/* Bottom Timeline Axis */}
-                  <div className="flex justify-between text-[7px] font-mono text-zinc-500 mt-2 pl-7 pr-0.5">
-                    <span>0</span>
-                    <span>30 days</span>
-                    <span>60 days</span>
-                    <span>90 d</span>
+                  <div className="flex justify-between text-[7px] font-mono text-zinc-500 mt-2 pl-12 pr-0.5">
+                    <span>0 clicks</span>
+                    <span>500 clicks</span>
+                    <span>1k clicks</span>
+                    <span>2.5k</span>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* ══════════════════════════════════════════════════════════════════
-                STEP 4: Instant Automated Protection (Exact 1:1 Mirror)
+                STEP 4: TracePilot SDK Observability (Exact 1:1 Mirror)
             ══════════════════════════════════════════════════════════════════ */}
-            <div className="flex flex-col justify-start">
+            <div className="flex flex-col items-center justify-center">
               {/* Label */}
-              <div className="mb-3.5 select-none">
+              <div className="mb-3.5 select-none text-center">
                 <h3 className="text-white text-[16px] sm:text-[17px] font-semibold tracking-tight">
-                  Instant Automated Protection
+                  TracePilot SDK Observability
                 </h3>
               </div>
 
               {/* Exact Mirror Card */}
               <div className="relative w-full rounded-[20px] bg-[#0c1017] border border-white/[0.08] p-4 sm:p-5 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] flex flex-col justify-between group transition-all duration-300 hover:border-[#00e599]/30">
-                {/* Top Section: Multi-Channel Alert Badges */}
+                {/* Top Section: TracePilot Alert Channels */}
                 <div className="select-none">
                   <p className="text-[14px] sm:text-[15px] font-semibold text-white text-center tracking-tight leading-snug">
-                    Instant multi-channel
-                    <br />
-                    alert badges
+                    TracePilot Alert Channels
                   </p>
 
                   {/* 3-Lobed Scalloped Pod Tray (Exact 1:1 Match to Reference) */}
@@ -615,13 +627,11 @@ export default function ZeroCodeObservabilitySection() {
                   </div>
 
                   <p className="text-zinc-400 text-[12px] text-center tracking-tight leading-snug mt-2 mb-3.5 select-none">
-                    Instant multi-channel alert
-                    <br />
-                    alert badges
+                    Instant exception &amp; crash alerts
                   </p>
                 </div>
 
-                {/* Bottom Section: Cascading Glassy Tabs / macOS Public Status Windows */}
+                {/* Bottom Section: Cascading Glassy Tabs / TracePilot Telemetry Engine */}
                 <div className="relative w-full pt-1 pb-3 select-none">
                   {/* Secondary Tab Peeking Below (Centered along bottom border) */}
                   <div
@@ -642,7 +652,7 @@ export default function ZeroCodeObservabilitySection() {
                     }}
                   />
 
-                  {/* Front Main macOS Status Window (Centered) */}
+                  {/* Front Main macOS Telemetry Window (Centered) */}
                   <div
                     className="relative z-10 w-full rounded-2xl p-3 sm:p-3.5"
                     style={{
@@ -654,59 +664,59 @@ export default function ZeroCodeObservabilitySection() {
                       backdropFilter: "blur(24px)",
                     }}
                   >
-                    {/* Muted Window Dots (Exact to Image 1) */}
+                    {/* Muted Window Dots */}
                     <div className="flex items-center gap-1.5 mb-2.5">
                       <span className="w-2 h-2 rounded-full bg-[#48564b] border border-white/[0.08]" />
                       <span className="w-2 h-2 rounded-full bg-[#5b7360] border border-white/[0.08]" />
                       <span className="w-2 h-2 rounded-full bg-[#3e5f48] border border-white/[0.08]" />
                     </div>
 
-                    {/* Status Page Title & Subtitle */}
+                    {/* Telemetry Engine Title & Subtitle */}
                     <div className="text-center mb-3">
                       <p className="text-[13.5px] font-semibold text-white tracking-tight">
-                        Public status page
+                        TracePilot Telemetry Engine
                       </p>
                       <p className="text-[8px] sm:text-[8.5px] text-zinc-400 font-normal tracking-tight mt-0.5 leading-tight max-w-[210px] mx-auto">
-                        Real-time status updates &amp; incident communication
+                        Continuous distributed tracing, runtime diagnostics
                         <br />
-                        about the infrastructure
+                        &amp; autonomous AI bug fixes
                       </p>
                     </div>
 
-                    {/* Total Monitors & Incidents Dual Status Badges */}
+                    {/* Active Traces & Exceptions Dual Status Badges */}
                     <div className="grid grid-cols-2 gap-2 mb-2.5">
-                      {/* Total Monitors */}
+                      {/* Active Traces */}
                       <div className="bg-[#071813]/90 border border-[#00e599]/30 rounded-xl p-2 flex flex-col justify-between">
                         <div className="flex items-center gap-1.5">
                           <span className="w-2 h-2 rounded-full bg-[#00e599] shadow-[0_0_6px_#00e599]" />
-                          <span className="text-[9px] sm:text-[9.5px] font-medium text-zinc-200 tracking-tight">Total Monitors</span>
+                          <span className="text-[9px] sm:text-[9.5px] font-medium text-zinc-200 tracking-tight">Active Traces</span>
                         </div>
                         <div className="w-full h-1 rounded-full bg-[#00e599]/40 mt-2" />
                       </div>
 
-                      {/* Incidents */}
+                      {/* Exceptions */}
                       <div className="bg-[#1c0e10]/90 border border-red-500/30 rounded-xl p-2 flex flex-col justify-between">
                         <div className="flex items-center gap-1.5">
                           <span className="w-2 h-2 rounded-full bg-[#ef4444] shadow-[0_0_6px_#ef4444]" />
-                          <span className="text-[9px] sm:text-[9.5px] font-medium text-zinc-200 tracking-tight">Incidents</span>
+                          <span className="text-[9px] sm:text-[9.5px] font-medium text-zinc-200 tracking-tight">Exceptions</span>
                         </div>
                         <div className="w-full h-1 rounded-full bg-[#ef4444]/40 mt-2" />
                       </div>
                     </div>
 
-                    {/* Historical Incidents Row */}
+                    {/* Historical Traces Row */}
                     <div className="flex items-center justify-between text-[7.5px] font-mono text-zinc-500 mb-2 px-0.5">
-                      <span>Historical incidents</span>
-                      <span className="text-[#00e599] font-sans">View status ↗</span>
+                      <span>Runtime error traces</span>
+                      <span className="text-[#00e599] font-sans">View trace ↗</span>
                     </div>
 
-                    {/* Automated Resolution Item Tile */}
+                    {/* TracePilot AI Fixer Tile */}
                     <div className="bg-white/[0.04] border border-white/[0.07] rounded-lg p-2 flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-[#00e599]" />
-                        <span className="text-[8.5px] text-zinc-300 font-medium">Automated resolution</span>
+                        <span className="text-[8.5px] text-zinc-300 font-medium">TracePilot AI Fixer</span>
                       </div>
-                      <span className="text-[7.5px] font-mono text-zinc-500">Resolved in 32s</span>
+                      <span className="text-[7.5px] font-mono text-zinc-500">PR raised in 18s</span>
                     </div>
                   </div>
                 </div>
@@ -714,38 +724,36 @@ export default function ZeroCodeObservabilitySection() {
 
               {/* Bottom Subtitle Text (Outside of box) */}
               <p className="text-zinc-400 text-[12px] sm:text-[12.5px] leading-snug tracking-tight text-center mt-3.5 select-none">
-                Automated public status page
+                TracePilot SDK auto-instruments runtime errors
                 <br />
-                updates automatically based
+                and dispatches instant alerts
                 <br />
-                on the detected incidents
+                with AI root-cause fixes
               </p>
             </div>
           </div>
         </div>
 
-        {/* ── Bottom Quick Action Bar ── */}
-        <div className="mt-14 sm:mt-18 flex flex-col sm:flex-row items-center justify-between p-6 sm:p-7 rounded-2xl bg-gradient-to-r from-white/[0.02] via-[#00e599]/[0.035] to-white/[0.02] border border-white/[0.08] gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-[#00e599]/10 border border-[#00e599]/25 flex items-center justify-center text-[#00e599] shrink-0">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-white">
-                Protect your infrastructure with zero code
+        {/* ── Compact Bottom Action Strip: Automated Telemetry PR Promotion ── */}
+        <div className="mt-10 sm:mt-12 max-w-3xl mx-auto flex flex-col sm:flex-row items-center justify-between py-3 px-5 sm:py-3.5 sm:px-6 rounded-2xl bg-[#0c1219]/90 border border-white/[0.09] shadow-[0_16px_40px_rgba(0,0,0,0.7)] gap-3 sm:gap-4 select-none">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <GitPullRequest className="w-4 h-4 text-[#00e599] shrink-0" />
+            <div className="min-w-0">
+              <h4 className="text-[13px] sm:text-[13.5px] font-semibold text-white tracking-tight">
+                Auto-raise PR with tracing code &amp; Web Vitals
               </h4>
-              <p className="text-xs text-zinc-400 mt-0.5">
-                Set up automated synthetic monitoring and hosted status pages in under 60 seconds.
+              <p className="text-[11px] sm:text-[11.5px] text-zinc-400 leading-snug">
+                Connect your repository to auto-inject telemetry — stream Core Web Vitals and deep analytics.
               </p>
             </div>
           </div>
 
           <Link
             href="/signup"
-            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-[#00e599] hover:bg-[#00c885] text-black font-semibold text-xs sm:text-sm transition-all shadow-[0_0_20px_rgba(0,229,153,0.3)] hover:shadow-[0_0_28px_rgba(0,229,153,0.5)] cursor-pointer whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 px-4 sm:px-5 py-2 rounded-full bg-[#00e599] hover:bg-[#00c885] text-black font-semibold text-xs transition-all shadow-[0_0_16px_rgba(0,229,153,0.3)] hover:shadow-[0_0_24px_rgba(0,229,153,0.5)] cursor-pointer whitespace-nowrap shrink-0 group"
           >
-            <span>Start zero-code monitoring</span>
-            <ArrowRight className="w-3.5 h-3.5" />
+            <span>Auto-raise telemetry PR</span>
+            <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
           </Link>
         </div>
       </div>
