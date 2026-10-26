@@ -84,11 +84,11 @@ func main() {
 
 	host1 := os.Getenv("CLICKHOUSE_HOST1")
 	if host1 == "" {
-		host1 = "172.18.0.2"
+		host1 = "ch_node1"
 	}
 	host2 := os.Getenv("CLICKHOUSE_HOST2")
 	if host2 == "" {
-		host2 = "172.18.0.3"
+		host2 = "ch_node2"
 	}
 
 	testTable := "gate31e_telemetry_" + strings.ReplaceAll(uuid.New().String(), "-", "_")

@@ -19,7 +19,7 @@ docker rm -f gate31a_engine 2>$null | Out-Null
 
 $targetRows = 3200000
 Write-Host "[Orchestrator] Launching engine stream at 33,333 checks/s in detached container (Target: $targetRows checks)..."
-$containerId = docker run -d --name gate31a_engine --network ch_cluster_net -v "C:\mini Desktop\AI_Agents\engine:/engine" -v go-pkg-mod:/go/pkg/mod -v go-build-cache:/root/.cache/go-build -w /engine engine-ci:latest bash -c "go run -tags killhook ./loadtest/gate31a/main.go --target-rows=$targetRows | tee /engine/gate_31a_raw.log"
+$containerId = docker run -d --name gate31a_engine --network ch_cluster_net -v "C:\mini Desktop\AI_Agents\engine:/engine" -v go-pkg-mod:/go/pkg/mod -v go-build-cache:/root/.cache/go-build -w /engine engine-ci:latest bash -c "set -o pipefail; go run -tags killhook ./loadtest/gate31a/main.go --target-rows=$targetRows | tee /engine/gate_31a_raw.log"
 
 if (-not $containerId) {
     Write-Host "Failed to start gate31a_engine container!" -ForegroundColor Red

@@ -1,0 +1,4 @@
+<clickhouse>
+<zookeeper><node><host>ch_keeper</host><port>9181</port></node></zookeeper>
+<macros><shard>01</shard><replica>ch_node1</replica></macros>
+</clickhouse>

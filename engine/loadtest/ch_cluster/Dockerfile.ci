@@ -1,0 +1,2 @@
+FROM golang:1.25
+RUN apt-get update && apt-get install -y --no-install-recommends iptables && rm -rf /var/lib/apt/lists/*
