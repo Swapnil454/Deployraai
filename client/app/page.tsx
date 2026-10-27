@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import TopologyGraph from "./components/TopologyGraph";
+import InteractiveDeployCanvasSection from "./components/InteractiveDeployCanvasSection";
 import UptimeMonitoringSection from "./components/UptimeMonitoringSection";
 import OutagePreventionSection from "./components/OutagePreventionSection";
 import StatusPagesSection from "./components/StatusPagesSection";
@@ -163,6 +164,9 @@ export default function Home() {
         </div>
       </section>
       
+      {/* ── INTERACTIVE 5-STAGE CLOUD DEPLOY CANVAS (Deploy -> Network -> Scale -> Monitor -> Evolve) ── */}
+      <InteractiveDeployCanvasSection />
+
       {/* ── UPTIME MONITORING SHOWCASE SECTION ────────────────────────────── */}
       <UptimeMonitoringSection />
 
