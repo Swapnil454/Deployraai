@@ -100,7 +100,6 @@ export async function initializeUptimeCronSchema() {
   await uptimeDb.query(`
     ALTER TABLE uptime_checks_log
       ADD COLUMN IF NOT EXISTS is_slow BOOLEAN NOT NULL DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS suppressed_by_window_id UUID REFERENCES uptime_maintenance_windows(id) ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS response_headers_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb;
 
     ALTER TABLE uptime_incidents
@@ -309,6 +308,9 @@ export async function initializeUptimeCronSchema() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_uptime_maintenance_window_monitors ON uptime_maintenance_window_monitors(monitor_id);
+
+    ALTER TABLE uptime_checks_log
+      ADD COLUMN IF NOT EXISTS suppressed_by_window_id UUID REFERENCES uptime_maintenance_windows(id) ON DELETE SET NULL;
 
     CREATE TABLE IF NOT EXISTS uptime_daily_metrics (
       monitor_id UUID REFERENCES uptime_monitors(id) ON DELETE CASCADE,
