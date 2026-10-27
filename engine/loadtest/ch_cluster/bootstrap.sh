@@ -23,6 +23,13 @@ echo "PASS: table created on both replicas"
 docker exec ch_node1 $CC -q "ALTER TABLE default.uptime_checks_telemetry_harness ADD COLUMN IF NOT EXISTS run_id UUID ALIAS monitor_id, ADD COLUMN IF NOT EXISTS probe_seq UInt64 ALIAS generation" || { echo "FAIL: alias columns"; exit 1; }
 docker exec ch_node2 $CC -q "SYSTEM SYNC REPLICA default.uptime_checks_telemetry_harness"
 echo "PASS: test-only alias columns run_id->monitor_id, probe_seq->generation"
+python3 ddl.py ../../../server/src/uptime-cron/clickhouseSchema.js test_dedup_ci_telemetry > dedup.sql || { echo "FAIL: ddl dedup"; exit 1; }
+for n in ch_node1 ch_node2; do
+  docker exec -i $n $CC --multiquery < dedup.sql || { echo "FAIL: create dedup table on $n"; exit 1; }
+done
+docker exec ch_node1 $CC -q "ALTER TABLE default.test_dedup_ci_telemetry ADD COLUMN IF NOT EXISTS run_id UUID ALIAS monitor_id, ADD COLUMN IF NOT EXISTS probe_seq UInt64 ALIAS generation" || { echo "FAIL: dedup aliases"; exit 1; }
+docker exec ch_node2 $CC -q "SYSTEM SYNC REPLICA default.test_dedup_ci_telemetry"
+echo "PASS: test_dedup_ci_telemetry created on both replicas"
 R="SELECT replica_name,is_readonly,total_replicas,active_replicas FROM system.replicas WHERE table='uptime_checks_telemetry_harness' FORMAT TSV"
 docker exec ch_node1 $CC -q "$R"
 docker exec ch_node2 $CC -q "$R"
