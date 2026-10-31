@@ -38,20 +38,20 @@ func (h *LocalHealthTracker) IsHealthy() bool {
 	var t, f uint32
 	s := now.Unix()
 	for i := range h.sec {
-		if s-h.sec[i] < 30 {
+		if s-h.sec[i] < hc.window {
 			t += h.tot[i]
 			f += h.fail[i]
 		}
 	}
-	if t < 500 {
+	if t < hc.minSample {
 		return true // not enough data, assume healthy
 	}
 	r := float64(f) / float64(t)
 	if h.unhealthy {
-		if r < 0.30 {
+		if r < hc.recoverBelow {
 			h.unhealthy = false
 		}
-	} else if r > 0.60 {
+	} else if r > hc.unhealthy {
 		h.unhealthy = true
 	}
 	return !h.unhealthy
