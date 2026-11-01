@@ -133,7 +133,7 @@ func SubmitCheckResult(monitorID string, ev EventCheckResult) {
 	if countsTowardLocalHealth(ev) {
 		Health.RecordResult(ev.Ok || ev.ErrClass == ErrRefused)
 	}
-	if shouldSuppressFailure(ev, !Health.IsHealthy(), localNetworkCanaryOK) {
+	if guardDecision(ev, !Health.IsHealthy(), localNetworkCanaryOK) {
 		// Suppress primary failure if local node is suffering a network glitch
 		return
 	}
