@@ -42,6 +42,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -253,6 +254,9 @@ func writeGzip(w http.ResponseWriter, body []byte) {
 // injectFailure returns true ~3.5% of the time (within 2-5% Goal 2 requirement)
 // with a mix of 500, 503, and timeouts.
 func injectFailure(w http.ResponseWriter, idx uint64) bool {
+	if os.Getenv("DISABLE_INJECTED_FAILURES") == "true" {
+		return false
+	}
 	roll := idx % 200 // resolution of 0.5%
 	switch {
 	case roll < 4: // 2.0% → 500
@@ -279,39 +283,65 @@ func injectFailure(w http.ResponseWriter, idx uint64) bool {
 }
 
 func main() {
-	// Generate self-signed cert on the fly (wildcard *.mock.local + SANs)
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		log.Fatal(err)
-	}
-	template := x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			Organization: []string{"Brutal Soak Mock Farm"},
-		},
-		DNSNames:              []string{"mock", "*.mock.local", "localhost"},
-		NotBefore:             time.Now().Add(-time.Minute),
-		NotAfter:              time.Now().Add(24 * time.Hour),
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-	}
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
-	if err != nil {
-		log.Fatal(err)
-	}
+	// Persist cert: only generate if cert.pem or key.pem does not exist
+	if _, err1 := os.Stat("cert.pem"); os.IsNotExist(err1) {
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			log.Fatal(err)
+		}
+		template := x509.Certificate{
+			SerialNumber: big.NewInt(1),
+			Subject: pkix.Name{
+				Organization: []string{"Brutal Soak Mock Farm"},
+			},
+			DNSNames:              []string{"mock", "*.mock.local", "localhost"},
+			NotBefore:             time.Now().Add(-time.Minute),
+			NotAfter:              time.Now().Add(24 * time.Hour),
+			KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			BasicConstraintsValid: true,
+		}
+		derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	certOut, _ := os.Create("cert.pem")
-	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-	certOut.Close()
+		certOut, _ := os.Create("cert.pem")
+		pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+		certOut.Close()
 
-	keyOut, _ := os.Create("key.pem")
-	privBytes, _ := x509.MarshalECPrivateKey(priv)
-	pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
-	keyOut.Close()
+		keyOut, _ := os.Create("key.pem")
+		privBytes, _ := x509.MarshalECPrivateKey(priv)
+		pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
+		keyOut.Close()
+		log.Println("Generated fresh TLS certificate and key.")
+	} else {
+		log.Println("Reusing existing persisted TLS certificate and key.")
+	}
 
 	var overrides sync.Map
 	var reqIndex atomic.Uint64
+	var tsFileMu sync.Mutex
+	tsFile, err := os.OpenFile("check_timestamps.csv", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+	if err == nil {
+		defer tsFile.Close()
+	}
+
+	recordSampleHost := func(host string) {
+		if tsFile == nil {
+			return
+		}
+		// Record check timestamps for mock-0.mock.local through mock-99.mock.local
+		if strings.HasPrefix(host, "mock-") {
+			parts := strings.Split(host, ".")
+			idxStr := strings.TrimPrefix(parts[0], "mock-")
+			if idNum, err := strconv.Atoi(idxStr); err == nil && idNum < 100 {
+				tsFileMu.Lock()
+				fmt.Fprintf(tsFile, "%s,%d\n", host, time.Now().UnixNano())
+				tsFileMu.Unlock()
+			}
+		}
+	}
 
 	checkOverride := func(r *http.Request) string {
 		host, _, _ := net.SplitHostPort(r.Host)
@@ -352,6 +382,11 @@ func main() {
 
 	// ── /mock/up ──────────────────────────────────────────────────────────
 	mux.HandleFunc("/mock/up", func(w http.ResponseWriter, r *http.Request) {
+		host, _, _ := net.SplitHostPort(r.Host)
+		if host == "" {
+			host = r.Host
+		}
+		recordSampleHost(host)
 		idx := reqIndex.Add(1)
 
 		if checkOverride(r) == "down" {

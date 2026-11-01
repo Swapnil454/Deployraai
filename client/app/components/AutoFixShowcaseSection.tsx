@@ -510,8 +510,8 @@ function Stage2ToStage3Connector({
       />
       <circle cx={midX - 2} cy="75" r="1.3" fill="#ffffff" />
 
-      {/* Entry Aura behind Arrowhead (shifted slightly top to match pipeline) */}
-      <circle cx={w - 1} cy="71" r="9" fill="url(#s2s3-entry-glow)" />
+      {/* Entry Aura behind Arrowhead (aligned with pipeline centerline at y=75) */}
+      <circle cx={w - 1} cy="75" r="9" fill="url(#s2s3-entry-glow)" />
 
       {/* Sharp Cyan Arrowhead hitting Stage 3 */}
       <polygon
@@ -909,8 +909,8 @@ function Stage4ToStage5Connector({
       />
       <circle cx={midX - 2} cy={laserY} r="1.3" fill="#ffffff" />
 
-      {/* Entry Aura behind Arrowhead hitting Stage 5 (moved slightly top to align with pipeline) */}
-      <circle cx={w - 1} cy={laserY - 4} r="8.5" fill="url(#s4s5-entry-glow)" />
+      {/* Entry Aura behind Arrowhead hitting Stage 5 (aligned with pipeline centerline at laserY) */}
+      <circle cx={w - 1} cy={laserY} r="8.5" fill="url(#s4s5-entry-glow)" />
 
       {/* Sharp Cyan Arrowhead hitting Stage 5 */}
       <polygon
@@ -1192,8 +1192,15 @@ export default function AutoFixShowcaseSection() {
   }, []);
 
   return (
-    <section className="relative w-full bg-transparent pt-4 sm:pt-6 lg:pt-8 pb-16 sm:pb-20 overflow-hidden z-10">
-      <div className="relative z-10 max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-8 2xl:px-12">
+    <section className="relative w-full bg-[#111111] pt-4 sm:pt-6 lg:pt-8 pb-16 sm:pb-20 overflow-hidden z-10 font-sans">
+      {/* ── Background Matrix Grid (Matches Homepage Hero & Other Sections) ── */}
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f1f2820_1px,transparent_1px),linear-gradient(to_bottom,#1f1f2820_1px,transparent_1px)] bg-[size:76px_76px] pointer-events-none z-0" />
+
+      {/* ── Atmospheric Ambient Diffuse Glows ── */}
+      <div className="absolute top-1/4 left-1/4 w-[600px] h-[350px] bg-emerald-500/[0.03] blur-[160px] pointer-events-none z-0" />
+      <div className="absolute bottom-1/4 right-1/4 w-[600px] h-[350px] bg-cyan-500/[0.025] blur-[150px] pointer-events-none z-0" />
+
+      <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 lg:px-14">
         {/* ── Top Header Section (Aligned strictly to max container width) ── */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 xl:gap-12 items-start mb-8 sm:mb-12">
           {/* Left Title Column - Strictly 2 lines */}
@@ -1294,7 +1301,7 @@ export default function AutoFixShowcaseSection() {
           {/* ── COLUMN 1: STAGE 1 (Failure Ingestion) ── */}
           <div
             ref={stage1Ref}
-            className="relative order-1 min-[1140px]:order-1 w-full min-[1140px]:w-[260px] xl:w-[280px] 2xl:w-[325px] max-w-[330px] min-h-[450px] min-[1140px]:h-[475px] shrink-0 flex flex-col justify-between rounded-[18px] bg-[#1a1f29] border border-white/[0.18] shadow-[0_20px_50px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.22)] p-3 sm:p-3.5 select-none overflow-hidden group"
+            className="relative order-1 min-[1140px]:order-1 w-full min-[1140px]:w-[260px] xl:w-[280px] 2xl:w-[325px] max-w-[330px] min-h-[450px] min-[1140px]:h-[475px] shrink-0 flex flex-col justify-between rounded-[18px] bg-[#12141c]/95 border border-white/[0.12] backdrop-blur-md shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),inset_0_1px_0_rgba(255,255,255,0.08)] p-3 sm:p-3.5 select-none overflow-hidden group"
           >
             {/* Custom embedded keyframe for ultra-slow, elegant breathing pulse */}
             <style
@@ -1345,7 +1352,7 @@ export default function AutoFixShowcaseSection() {
             </div>
 
             {/* Refined Error Badge: Docker Build Exit Code 1 with solid lighter container */}
-            <div className="relative rounded-xl py-2.5 px-3 bg-[#242b38] border border-white/[0.16] shadow-[0_2px_10px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.14)] flex items-center justify-center gap-2.5 transition-all duration-300 hover:border-white/30">
+            <div className="relative rounded-xl py-2.5 px-3 bg-[#181a24] border border-white/[0.1] shadow-[0_2px_10px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.08)] flex items-center justify-center gap-2.5 transition-all duration-300 hover:border-white/20">
               {/* Slow, gentle glowing red droplet / beacon */}
               <div className="relative w-3.5 h-3.5 flex items-center justify-center shrink-0">
                 {/* Slow outer radar ripple */}
@@ -1414,9 +1421,9 @@ export default function AutoFixShowcaseSection() {
             </div>
 
             {/* Nested Log Stream Window (Solid refined terminal window) */}
-            <div className="rounded-xl bg-[#11151e] border border-white/[0.14] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)] overflow-hidden flex-1 flex flex-col mt-1">
+            <div className="rounded-xl bg-[#0d0f17] border border-white/[0.1] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)] overflow-hidden flex-1 flex flex-col mt-1">
               {/* Terminal Titlebar with solid lighter slate finish */}
-              <div className="flex items-center justify-between px-3.5 py-2 bg-[#181d28] border-b border-white/[0.1] shrink-0">
+              <div className="flex items-center justify-between px-3.5 py-2 bg-[#13151f] border-b border-white/[0.08] shrink-0">
                 <div className="flex items-center gap-1.5">
                   <span className="text-zinc-100 text-[11.5px] sm:text-[12px] font-medium tracking-tight">
                     Log stream
@@ -1492,7 +1499,7 @@ export default function AutoFixShowcaseSection() {
             {/* ── STAGE 2: AI AST & REPO TREE ANALYSIS CARD (Reduced Compact Height) ── */}
             <div
               ref={stage2Ref}
-              className="relative order-2 w-full min-[1140px]:w-[320px] xl:w-[345px] 2xl:w-[380px] max-w-[380px] h-[200px] rounded-[18px] bg-[#1a1f29] border border-white/[0.18] shadow-[0_20px_50px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.22)] p-2.5 sm:p-3 select-none overflow-hidden group"
+              className="relative order-2 w-full min-[1140px]:w-[320px] xl:w-[345px] 2xl:w-[380px] max-w-[380px] h-[200px] rounded-[18px] bg-[#12141c]/95 border border-white/[0.12] backdrop-blur-md shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),inset_0_1px_0_rgba(255,255,255,0.08)] p-2.5 sm:p-3 select-none overflow-hidden group"
             >
               {/* Top Crisp White Edge Sheen */}
               <div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-cyan-400/35 to-transparent pointer-events-none" />
@@ -1687,7 +1694,7 @@ export default function AutoFixShowcaseSection() {
           {/* ── STAGE 4: SEMANTIC CODE DIFF & AST PATCH CARD (Reduced Compact Height) ── */}
           <div
             ref={stage4Ref}
-            className="relative order-4 w-full min-w-0 min-[1140px]:w-[365px] xl:w-[395px] 2xl:w-[465px] max-w-[475px] rounded-[18px] bg-[#1a1f29] border border-white/[0.18] shadow-[0_20px_50px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.22)] p-2.5 sm:p-3 select-none overflow-hidden group"
+            className="relative order-4 w-full min-w-0 min-[1140px]:w-[365px] xl:w-[395px] 2xl:w-[465px] max-w-[475px] rounded-[18px] bg-[#12141c]/95 border border-white/[0.12] backdrop-blur-md shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),inset_0_1px_0_rgba(255,255,255,0.08)] p-2.5 sm:p-3 select-none overflow-hidden group"
           >
             {/* Top Crisp White Edge Sheen */}
             <div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-cyan-400/35 to-transparent pointer-events-none" />
@@ -1700,10 +1707,10 @@ export default function AutoFixShowcaseSection() {
             </div>
 
             {/* Outer Editor Window Frame */}
-            <div className="relative rounded-xl bg-[#10141d] border border-white/[0.12] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)] overflow-hidden">
+            <div className="relative rounded-xl bg-[#0d0f17] border border-white/[0.1] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)] overflow-hidden">
               {/* Tab Header Bar */}
-              <div className="flex items-center px-2.5 pt-1.5 border-b border-white/[0.08] bg-[#141923]">
-                <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-t-md bg-[#10141d] border-t border-l border-r border-white/[0.12] -mb-[1px]">
+              <div className="flex items-center px-2.5 pt-1.5 border-b border-white/[0.08] bg-[#13151f]">
+                <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-t-md bg-[#0d0f17] border-t border-l border-r border-white/[0.1] -mb-[1px]">
                   {/* React/Component Atom Icon */}
                   <svg className="w-3 h-3 text-cyan-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(30 12 12)" />
@@ -1723,7 +1730,7 @@ export default function AutoFixShowcaseSection() {
               </div>
 
               {/* Floating AST Validation Status Overlay (Right side with extensive horizontal clearance) */}
-              <div className="absolute top-6 right-3 z-20 rounded-xl bg-[#161d28]/95 backdrop-blur-md border border-white/[0.14] shadow-[0_8px_24px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.12)] py-1.5 px-3 flex flex-col gap-1 pointer-events-none">
+              <div className="absolute top-6 right-3 z-20 rounded-xl bg-[#141722]/95 backdrop-blur-md border border-white/[0.12] shadow-[0_8px_24px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.12)] py-1.5 px-3 flex flex-col gap-1 pointer-events-none">
                 {/* Row 1: Syntax tokens, and commit guards */}
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-zinc-300 text-[8px] font-sans font-medium tracking-tight whitespace-nowrap">
@@ -1824,7 +1831,7 @@ export default function AutoFixShowcaseSection() {
             {/* ── STAGE 3: ISOLATED GIT BRANCHING CARD (Reduced Height Match with Stage 2) ── */}
             <div
               ref={stage3Ref}
-              className="relative order-3 w-full min-[1140px]:w-[305px] xl:w-[325px] 2xl:w-[355px] max-w-[360px] h-[200px] flex flex-col justify-between rounded-[18px] bg-[#1a1f29] border border-white/[0.18] shadow-[0_20px_50px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.22)] p-2.5 sm:p-3 select-none overflow-hidden group"
+              className="relative order-3 w-full min-[1140px]:w-[305px] xl:w-[325px] 2xl:w-[355px] max-w-[360px] h-[200px] flex flex-col justify-between rounded-[18px] bg-[#12141c]/95 border border-white/[0.12] backdrop-blur-md shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),inset_0_1px_0_rgba(255,255,255,0.08)] p-2.5 sm:p-3 select-none overflow-hidden group"
             >
               {/* Top Crisp White Edge Sheen */}
             <div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-emerald-400/35 to-transparent pointer-events-none" />
@@ -1837,7 +1844,7 @@ export default function AutoFixShowcaseSection() {
             </div>
 
             {/* Inner Header Pill: Git commit graph */}
-            <div className="rounded-xl py-1 px-2.5 bg-[#131720]/90 border border-white/[0.1] shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)] flex items-center justify-between mb-1">
+            <div className="rounded-xl py-1 px-2.5 bg-[#13151f]/90 border border-white/[0.08] shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)] flex items-center justify-between mb-1">
               <span className="text-zinc-200 text-[10.5px] font-medium tracking-tight">
                 Git commit graph
               </span>
@@ -2055,7 +2062,7 @@ export default function AutoFixShowcaseSection() {
           {/* ── STAGE 5: AUTONOMOUS GITHUB PR & VERIFICATION CARD (Reduced Compact Height) ── */}
           <div
             ref={stage5Ref}
-            className="relative order-5 w-full min-[1140px]:w-[295px] xl:w-[315px] 2xl:w-[335px] max-w-[340px] rounded-[18px] bg-[#1a1f29] border border-white/[0.18] shadow-[0_20px_50px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.22)] p-2.5 sm:p-3 select-none overflow-hidden group"
+            className="relative order-5 w-full min-[1140px]:w-[295px] xl:w-[315px] 2xl:w-[335px] max-w-[340px] rounded-[18px] bg-[#12141c]/95 border border-white/[0.12] backdrop-blur-md shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),inset_0_1px_0_rgba(255,255,255,0.08)] p-2.5 sm:p-3 select-none overflow-hidden group"
           >
             {/* Top Crisp White Edge Sheen */}
             <div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-emerald-400/35 to-transparent pointer-events-none" />
@@ -2068,7 +2075,7 @@ export default function AutoFixShowcaseSection() {
             </div>
 
             {/* Inner GitHub PR Preview Container */}
-            <div className="rounded-xl bg-[#111620] border border-white/[0.12] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)] p-2.5 sm:p-3">
+            <div className="rounded-xl bg-[#0d0f17] border border-white/[0.1] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)] p-2.5 sm:p-3">
               {/* Header Row: Octocat + GitHub PR ... Preview */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">

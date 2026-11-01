@@ -1,0 +1,6 @@
+label,ts,rss_kb,goroutines,heap_inuse
+start,2026-10-30T17:21:35Z,182920,3767,N/A
+post_warmup,2026-10-30T17:26:36Z,473428,2649,N/A
+steady_end,2026-10-30T17:57:03Z,517740,2693,N/A
+post_outage,2026-10-30T18:03:20Z,515544,2630,N/A
+end,2026-10-30T18:08:20Z,530340,2658,N/A
