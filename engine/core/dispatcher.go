@@ -1114,6 +1114,10 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 					if ctx.Err() != nil {
 						return
 					}
+					if jobIsStale(job) {
+						ChecksStaleSkipped.Add(1)
+						continue
+					}
 					ChecksInFlight.Add(1)
 					m := job.m
 					p := job.ptr
