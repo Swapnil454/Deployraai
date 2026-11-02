@@ -771,9 +771,11 @@ func HandleFailureDetailed(id string, p *atomic.Pointer[Monitor], errClass ErrCl
 			current = Store.Get(id)
 		}
 		if current != nil && current.CheckGeneration != meta.ExpectedGeneration {
+			noteStaleFailureHealth(errClass)
 			return // stale: generation advanced by reaper or next dispatch
 		}
 		if current != nil && !current.AwaitingResult {
+			noteStaleFailureHealth(errClass)
 			return // reaper already cleared the slot; not our result to write
 		}
 	}
@@ -898,9 +900,11 @@ func HandleSuccessDetailed(id string, p *atomic.Pointer[Monitor], latencyUs uint
 			current = Store.Get(id)
 		}
 		if current != nil && current.CheckGeneration != meta.ExpectedGeneration {
+			noteStaleSuccessHealth()
 			return // stale: generation advanced by reaper or next dispatch
 		}
 		if current != nil && !current.AwaitingResult {
+			noteStaleSuccessHealth()
 			return // reaper already cleared the slot; not our result to write
 		}
 	}
