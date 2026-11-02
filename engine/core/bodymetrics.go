@@ -187,6 +187,7 @@ func StartAdminServer(addr string) {
 		fmt.Fprintf(w, "telemetry_dropped %d\n", TelemetryDropped.Load())
 		fmt.Fprintf(w, "telemetry_in_flight %d\n", len(TelemetryQueue)+int(ActiveBufRows.Load()))
 		fmt.Fprintf(w, "checks_in_flight %d\n", ChecksInFlight.Load())
+		fmt.Fprintf(w, "checks_stale_skipped %d\n", ChecksStaleSkipped.Load())
 		fmt.Fprintf(w, "mock_net_bytes_in %d\n", MockNetBytesIn.Load())
 		fmt.Fprintf(w, "mock_net_bytes_out %d\n", MockNetBytesOut.Load())
 		fmt.Fprintf(w, "mock_net_bytes_total %d\n", MockNetBytesIn.Load()+MockNetBytesOut.Load())
