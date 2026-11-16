@@ -1,5 +1,6 @@
 import { uptimeDb } from "./db.js";
 import { chWrite } from "../utils/clickhouse.js";
+import { CLICKHOUSE_TELEMETRY_TABLE } from "./clickhouseSchema.js";
 import { runHttpCheck } from "./checker.js";
 import { runPingCheck } from "./pingChecker.js";
 import { runPortCheck } from "./portChecker.js";
@@ -11,12 +12,14 @@ import crypto from "node:crypto";
 const TICK_MS = 15_000;
 let scheduler;
 let running = false;
+let dynamicAutoNativeOverride = null;
 
 // --- HYPER-OPTIMIZED BATCHING BUFFERS ---
 const checksLogBuffer = [];
 const dailyMetricsBuffer = new Map();
 const clickhouseBuffer = [];
-let isFlushing = false;
+let isFlushingPg = false;
+let isFlushingCh = false;
 
 function bufferDailyMetric(monitorId, success, responseTimeMs) {
   const dateStr = new Date().toISOString().split('T')[0];
@@ -30,13 +33,14 @@ function bufferDailyMetric(monitorId, success, responseTimeMs) {
   entry.responseTime += responseTimeMs;
 }
 
-async function flushBuffers() {
-  if (isFlushing) return;
+async function flushPostgresBuffers() {
+  if (isFlushingPg) return;
   if (checksLogBuffer.length === 0 && dailyMetricsBuffer.size === 0) return;
   
-  isFlushing = true;
-  const client = await uptimeDb.connect();
+  isFlushingPg = true;
+  let client;
   try {
+    client = await uptimeDb.connect();
     await client.query("BEGIN");
     
     if (checksLogBuffer.length > 0) {
@@ -45,12 +49,12 @@ async function flushBuffers() {
       const flatArgs = [];
       let i = 1;
       for (const log of batch) {
-        values.push(`($${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++})`);
-        flatArgs.push(log.id, log.monitorId, log.success, log.statusCode, log.responseTimeMs, log.errorMessage, log.location, log.isSlow, log.suppressedByWindowId);
+        values.push(`($${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++})`);
+        flatArgs.push(log.id, log.monitorId, log.success, log.statusCode, log.responseTimeMs, log.errorMessage, log.location, log.isSlow, log.suppressedByWindowId, log.latencyUs || Math.round((log.responseTimeMs || 0) * 1000));
       }
       const query = `
         INSERT INTO uptime_checks_log 
-        (id, monitor_id, success, status_code, response_time_ms, error_message, location, is_slow, suppressed_by_window_id)
+        (id, monitor_id, success, status_code, response_time_ms, error_message, location, is_slow, suppressed_by_window_id, latency_us)
         VALUES ${values.join(", ")}
       `;
       await client.query(query, flatArgs);
@@ -79,26 +83,42 @@ async function flushBuffers() {
     
     await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK");
-    console.error("[Uptime Cron] Batch flush error:", error.message);
-  } finally {
-    isFlushing = false;
-    client.release();
-  }
-
-  // --- ClickHouse Telemetry Flush (Asynchronous, Non-Blocking) ---
-  if (clickhouseBuffer.length > 0) {
-    const chBatch = clickhouseBuffer.splice(0, clickhouseBuffer.length);
-    try {
-      await chWrite.insert({
-        table: 'uptime_telemetry',
-        values: chBatch,
-        format: 'JSONEachRow'
-      });
-    } catch (chErr) {
-      console.error("[Uptime Cron] ClickHouse flush error:", chErr.message);
+    if (client) {
+      try { await client.query("ROLLBACK"); } catch {}
     }
+    console.error("[Uptime Cron] Batch Postgres flush error:", error.message);
+  } finally {
+    isFlushingPg = false;
+    if (client) client.release();
   }
+}
+
+async function flushClickHouseBuffer() {
+  if (isFlushingCh || clickhouseBuffer.length === 0) return;
+  isFlushingCh = true;
+  const chBatch = clickhouseBuffer.splice(0, clickhouseBuffer.length);
+  try {
+    await chWrite.insert({
+      table: CLICKHOUSE_TELEMETRY_TABLE,
+      values: chBatch,
+      format: 'JSONEachRow'
+    });
+  } catch (chErr) {
+    console.error("[Uptime Cron] ClickHouse flush error:", chErr.message);
+    // Put back rows into buffer up to a sensible limit (5,000) so transient hiccups don't lose data
+    if (clickhouseBuffer.length < 5000) {
+      clickhouseBuffer.unshift(...chBatch);
+    }
+  } finally {
+    isFlushingCh = false;
+  }
+}
+
+export async function flushBuffers() {
+  await Promise.allSettled([
+    flushPostgresBuffers(),
+    flushClickHouseBuffer()
+  ]);
 }
 
 // Flush buffers every 5 seconds asynchronously
@@ -115,13 +135,14 @@ async function pruneOldLogs() {
 // Run pruning every 1 hour to protect database size
 setInterval(() => void pruneOldLogs(), 60 * 60 * 1000);
 
-async function claimDueMonitors() {
+async function claimDueMonitors(fallbackMode = false) {
+  const managedClause = fallbackMode ? "" : " AND managed_by != 'engine'";
   const { rows } = await uptimeDb.query(
     "WITH due AS ("
     + " SELECT id FROM uptime_monitors"
     + " WHERE is_paused = FALSE"
     + " AND monitor_type != 'heartbeat'"
-    + " AND managed_by != 'engine'"
+    + managedClause
     + " AND (checking_at IS NULL OR checking_at < NOW() - INTERVAL '2 minutes')"
     + " AND (last_checked_at IS NULL OR last_checked_at + (interval_seconds * INTERVAL '1 second') <= NOW())"
     + " ORDER BY last_checked_at NULLS FIRST LIMIT 100 FOR UPDATE SKIP LOCKED"
@@ -180,6 +201,7 @@ async function persistCheck(monitor, result) {
       success: result.success,
       statusCode: result.statusCode,
       responseTimeMs: result.responseTimeMs,
+      latencyUs: result.latencyUs || Math.round((result.responseTimeMs || 0) * 1000),
       errorMessage: result.errorMessage,
       location: monitor.location ?? "default",
       isSlow,
@@ -188,15 +210,35 @@ async function persistCheck(monitor, result) {
     
     bufferDailyMetric(monitor.id, result.success || isSuppressed, result.responseTimeMs);
 
-    // Buffer ClickHouse Telemetry natively for complex monitors handled by Node.js (V2 Architecture Parity)
+    // Buffer ClickHouse Telemetry natively with full schema parity (V2 Architecture)
+    const nowIso = new Date().toISOString().replace('T', ' ').replace('Z', '');
+    const probeKind = 1; // 1 = Node.js Prober Fallback
+    const monitorTypeNum = monitor.monitor_type === "ping" ? 2 : (monitor.monitor_type === "port" ? 3 : (monitor.monitor_type === "dns" ? 4 : (monitor.monitor_type === "udp" ? 5 : 1)));
+    const respTime = Math.max(0, Math.round(result.responseTimeMs || 0));
+
     clickhouseBuffer.push({
       monitor_id: monitor.id,
-      ts: Date.now(),
-      latency_us: result.responseTimeMs * 1000,
-      interval_s: monitor.interval_seconds || 30,
+      checked_at: nowIso,
+      status_code: result.statusCode || (result.success ? 200 : 0),
+      success: result.success ? 1 : 0,
+      response_time_ms: respTime,
+      error_message: result.errorMessage ? String(result.errorMessage).slice(0, 500) : "",
+      location: monitor.location || "default",
+      suppressed_by_window_id: maintenanceWindowId || null,
+      latency_us: respTime * 1000,
       status: result.success ? 1 : 0,
-      err: result.success ? 0 : (result.cause === 'timeout' ? 1 : 2),
-      kind: 1 // Kind 1 = Node.js Complex Probe
+      err_code: result.success ? 0 : (result.cause === 'timeout' ? 1 : 2),
+      monitor_type: monitorTypeNum,
+      probe_kind: probeKind,
+      interval_s: monitor.interval_seconds || 30,
+      phase_kind: 0,
+      attempts: 1,
+      total_latency_us: respTime * 1000,
+      reused: 0,
+      did_resume: 0,
+      req_method: 1,
+      req_scheme: (monitor.url && monitor.url.startsWith("https")) ? 1 : 0,
+      generation: 1
     });
 
     // ── 2. Core incident management (ONE incident per downtime span) ───────────
@@ -329,37 +371,165 @@ async function persistCheck(monitor, result) {
   }
 }
 
+export function isAutoNativeProberEnabled() {
+  if (dynamicAutoNativeOverride !== null) {
+    return dynamicAutoNativeOverride;
+  }
+  const val = String(process.env.AUTO_NATIVE_PROBER ?? process.env.autonativeprober ?? "").toLowerCase().trim();
+  return val === "true" || val === "1";
+}
+
+export function setAutoNativeProber(enabled) {
+  dynamicAutoNativeOverride = !!enabled;
+  if (dynamicAutoNativeOverride) {
+    startUptimeCronScheduler();
+  } else if (scheduler) {
+    clearInterval(scheduler);
+    scheduler = null;
+    console.log("[Uptime Cron] AUTO_NATIVE_PROBER dynamically disabled. Scheduler halted.");
+  }
+  return isAutoNativeProberEnabled();
+}
+
+let lastEngineHealthCheck = 0;
+let cachedEngineStatus = { alive: false, error: null };
+
+export async function checkGoEngineHealth(force = false) {
+  const now = Date.now();
+  if (!force && (now - lastEngineHealthCheck < 5000)) {
+    return cachedEngineStatus;
+  }
+
+  const adminUrl = process.env.GO_ENGINE_ADMIN_URL || "http://127.0.0.1:9101";
+  const token = process.env.GO_ENGINE_ADMIN_TOKEN || "canary-secret-token-12345";
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const headers = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    const res = await fetch(`${adminUrl}/metrics`, {
+      method: "GET",
+      headers,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    // If HTTP 200 or HTTP 401, server process is active
+    if (res.status === 200 || res.status === 401) {
+      cachedEngineStatus = { alive: true, error: null };
+    } else {
+      cachedEngineStatus = { alive: false, error: `Engine returned status ${res.status}` };
+    }
+  } catch (err) {
+    cachedEngineStatus = { alive: false, error: err.message };
+  }
+  lastEngineHealthCheck = now;
+  return cachedEngineStatus;
+}
+
+export async function getProberSystemStatus() {
+  const autoNative = isAutoNativeProberEnabled();
+  const engineHealth = await checkGoEngineHealth();
+
+  if (engineHealth.alive) {
+    return {
+      healthy: true,
+      engine_status: "online",
+      active_prober: "go_engine",
+      auto_native_prober: autoNative,
+      message: "Go Uptime Engine is running and actively probing monitors.",
+    };
+  }
+
+  if (autoNative) {
+    return {
+      healthy: true,
+      engine_status: "offline",
+      active_prober: "node_fallback",
+      auto_native_prober: true,
+      warning: "Go Uptime Engine is offline. Automatic fallback to Node.js native prober is active.",
+    };
+  }
+
+  return {
+    healthy: false,
+    engine_status: "offline",
+    active_prober: "none",
+    auto_native_prober: false,
+    error: "Go Uptime Engine is offline and AUTO_NATIVE_PROBER is disabled. Checks are NOT currently running.",
+  };
+}
+
 export async function runUptimeCronTick() {
   if (running) return;
+
+  const autoNative = isAutoNativeProberEnabled();
+  if (!autoNative) {
+    // If AUTO_NATIVE_PROBER is false, Node.js tick must never execute prober checks
+    return;
+  }
+
+  // If AUTO_NATIVE_PROBER is true: check whether Go engine is healthy
+  const engineHealth = await checkGoEngineHealth();
+  if (engineHealth.alive) {
+    // Go engine is active. Only claim non-engine monitors (if any) or skip entirely
+    return;
+  }
+
+  // Go engine is offline and autoNative is true => fallback mode
   running = true;
   try {
     await refreshMaintenanceCache();
-    const monitors = await claimDueMonitors();
-    await Promise.allSettled(monitors.map(async (monitor) => {
-      let result;
-      if (monitor.monitor_type === "ping") {
-        result = await runPingCheck(monitor);
-      } else if (monitor.monitor_type === "port") {
-        result = await runPortCheck(monitor);
-      } else if (monitor.monitor_type === "dns") {
-        result = await runDnsCheck(monitor);
-      } else if (monitor.monitor_type === "udp") {
-        result = await runUdpCheck(monitor);
-      } else {
-        result = await runHttpCheck(monitor);
+    let claimedCount = 0;
+    let batchIterations = 0;
+
+    // Drain backlog in chunks of 100 up to 5 iterations (500 monitors max per tick)
+    do {
+      const monitors = await claimDueMonitors(true);
+      claimedCount = monitors.length;
+      if (claimedCount > 0) {
+        await Promise.allSettled(monitors.map(async (monitor) => {
+          let result;
+          if (monitor.monitor_type === "ping") {
+            result = await runPingCheck(monitor);
+          } else if (monitor.monitor_type === "port") {
+            result = await runPortCheck(monitor);
+          } else if (monitor.monitor_type === "dns") {
+            result = await runDnsCheck(monitor);
+          } else if (monitor.monitor_type === "udp") {
+            result = await runUdpCheck(monitor);
+          } else {
+            result = await runHttpCheck(monitor);
+          }
+          return persistCheck(monitor, result);
+        }));
       }
-      return persistCheck(monitor, result);
-    }));
+      batchIterations++;
+    } while (claimedCount === 100 && batchIterations < 5);
   } catch (error) {
-    console.error("[Uptime Cron] Error in runUptimeCronTick:", error);
+    console.error("[Uptime Cron] Error in runUptimeCronTick fallback:", error);
   } finally {
     running = false;
   }
 }
 
 export function startUptimeCronScheduler() {
+  const autoNative = isAutoNativeProberEnabled();
+  if (!autoNative) {
+    console.log("[Uptime Cron] AUTO_NATIVE_PROBER is disabled (false). Node.js native prober scheduler will NOT run.");
+    if (scheduler) {
+      clearInterval(scheduler);
+      scheduler = null;
+    }
+    return;
+  }
+
   if (scheduler) return;
+  console.log("[Uptime Cron] AUTO_NATIVE_PROBER is enabled (true). Fallback Node.js native prober scheduler started (15-second tick).");
   void runUptimeCronTick();
   scheduler = setInterval(() => void runUptimeCronTick(), TICK_MS);
-  console.log("[Uptime Cron] Scheduler started (15-second tick).");
 }
+

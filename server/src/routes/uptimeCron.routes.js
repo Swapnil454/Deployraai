@@ -6,7 +6,8 @@ import {
   listChecks, listGroups, listIncidents, listMonitors,
   pauseMonitor, updateMonitor,
   ingestHeartbeatPing,
-  getMonitorLatency, getMonitorUptime
+  getMonitorLatency, getMonitorUptime,
+  getSystemStatus, toggleAutoNativeProber
 } from "../uptime-cron/controller.js";
 
 import {
@@ -23,6 +24,8 @@ const router = express.Router();
 router.get("/ping/:token", ingestHeartbeatPing);
 router.post("/ping/:token", ingestHeartbeatPing);
 router.get("/status/:slug", getPublicStatusPage);
+router.get("/system-status", getSystemStatus);
+router.post("/system-status/auto-native", toggleAutoNativeProber);
 
 // Protected endpoints
 router.use(requireAuth);

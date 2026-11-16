@@ -49,7 +49,7 @@ func StartIncidentWorkers(ctx context.Context, wg *sync.WaitGroup, pool *pgxpool
 					dbErr, rowsAffected := executeIncidentWrite(ctx, pool, evt)
 					switch {
 					case dbErr == nil:
-						if evt.NewStatus == "UP" && rowsAffected == 0 && time.Since(evt.OccurredAt) <= 24*time.Hour {
+						if evt.NewStatus == "UP" && evt.OldStatus == "DOWN" && rowsAffected == 0 && time.Since(evt.OccurredAt) <= 15*time.Minute {
 							// Phantom UP arrived before DOWN. Store in dead-letter to replay after DOWN.
 							appendDeadLetter(evt)
 						}
@@ -82,10 +82,6 @@ func StartIncidentWorkers(ctx context.Context, wg *sync.WaitGroup, pool *pgxpool
 }
 
 func executeIncidentWrite(ctx context.Context, pool *pgxpool.Pool, evt core.IncidentEvent) (error, int64) {
-	if evt.NewStatus == "UP" && time.Since(evt.OccurredAt) > 24*time.Hour {
-		return nil, 1 // Discard old UPs
-	}
-
 	var finalErr error
 	var finalRows int64
 
@@ -256,7 +252,7 @@ func processReplayingFile(ctx context.Context, pool *pgxpool.Pool, filename stri
 			remaining = append(remaining, pending[i:]...)
 			break
 		}
-		if evt.NewStatus == "UP" && rowsAffected == 0 && time.Since(evt.OccurredAt) <= 24*time.Hour {
+		if evt.NewStatus == "UP" && evt.OldStatus == "DOWN" && rowsAffected == 0 && time.Since(evt.OccurredAt) <= 15*time.Minute {
 			// Still phantom, keep in queue
 			remaining = append(remaining, evt)
 		}

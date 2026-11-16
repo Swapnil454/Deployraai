@@ -58,6 +58,7 @@ interface Check {
   is_slow: boolean;
   status_code: number | null;
   response_time_ms: number;
+  latency_us?: number | null;
   error_message: string | null;
   suppressed_by_window_id?: string | null;
 }
@@ -136,6 +137,15 @@ function mtbfDisplay(hours: number | null): string {
   if (hours >= 720) return `${Math.round(hours / 720)}mo`;
   if (hours >= 24) return `${Math.round(hours / 24)}d`;
   return `${hours}h`;
+}
+
+function formatCheckLatency(ms: number, us?: number | null): string {
+  if (us != null && us > 0) {
+    if (us < 1000) return `${us} µs`;
+    if (us < 10000) return `${(us / 1000).toFixed(2)} ms`;
+  }
+  if (ms === 0) return "< 1 ms";
+  return `${ms} ms`;
 }
 
 function causeBadge(cause: string) {
@@ -230,7 +240,7 @@ function UptimeBar({ checks }: { checks: Check[] }) {
 
 // ─── Response Time Chart ──────────────────────────────────────────────────────
 
-function ResponseTimeChart({ checks, windowH }: { checks: Check[]; windowH: ChartWindow }) {
+function ResponseTimeChart({ checks, windowH, incidents }: { checks: Check[]; windowH: ChartWindow; incidents: Incident[] }) {
   const windowMs: Record<ChartWindow, number> = {
     "1h":  1 * 3600_000,
     "3h":  3 * 3600_000,
@@ -239,6 +249,16 @@ function ResponseTimeChart({ checks, windowH }: { checks: Check[]; windowH: Char
   };
   const cutoff = Date.now() - windowMs[windowH];
   const pts = [...checks].filter((c) => new Date(c.checked_at).getTime() >= cutoff).reverse();
+
+  // Safety net: if a check's timestamp falls inside an open (unresolved) incident window,
+  // treat it as a failure regardless of the success field value. This guards against stale
+  // uptime_checks_log rows (written by Node.js prober) showing green dots while the Go
+  // Engine has the monitor marked DOWN via uptime_incidents.
+  const isInsideOpenIncident = (checkedAtMs: number): boolean =>
+    incidents.some((inc) => {
+      if (inc.resolved_at) return false; // only open incidents
+      return checkedAtMs >= new Date(inc.started_at).getTime();
+    });
 
   if (pts.length === 0) {
     return (
@@ -260,9 +280,17 @@ function ResponseTimeChart({ checks, windowH }: { checks: Check[]; windowH: Char
   const linePts  = pts.map((_, i) => `${tx(times[i])},${ty(rtms[i])}`).join(" ");
   const areaPts  = `${tx(times[0])},${H} ` + pts.map((_, i) => `${tx(times[i])},${ty(rtms[i])}`).join(" ") + ` ${tx(times[times.length - 1])},${H}`;
 
-  const avg = Math.round(rtms.reduce((a, b) => a + b, 0) / rtms.length);
-  const min = Math.min(...rtms);
-  const max = Math.max(...rtms);
+  // Compute latency stats based on valid successful responses
+  const successRtms = pts.filter((c) => c.success).map((c) => c.response_time_ms);
+  const avg = successRtms.length > 0 ? Math.round(successRtms.reduce((a, b) => a + b, 0) / successRtms.length) : null;
+  const min = successRtms.length > 0 ? Math.min(...successRtms) : null;
+  const max = successRtms.length > 0 ? Math.max(...successRtms) : null;
+
+  const formatLatency = (ms: number | null) => {
+    if (ms === null) return "—";
+    if (ms === 0) return "< 1 ms";
+    return `${ms} ms`;
+  };
 
   // Y-axis labels
   const yLabels = [0.25, 0.5, 0.75, 1.0].map((f) => ({
@@ -295,20 +323,27 @@ function ResponseTimeChart({ checks, windowH }: { checks: Check[]; windowH: Char
         {/* Area fill */}
         <polygon points={areaPts} fill="url(#chartGrad)" />
 
-        {/* Down incident vertical lines */}
-        {pts.map((c, i) => (!c.success && !c.suppressed_by_window_id) ? (
-          <line key={`vl${i}`} x1={tx(times[i])} y1={PADY} x2={tx(times[i])} y2={H - PADY}
-            stroke="#ef4444" strokeWidth="2" strokeOpacity="0.45" />
-        ) : null)}
+        {/* Down incident vertical lines — also fires for stale-success dots inside open incident */}
+        {pts.map((c, i) => {
+          const insideIncident = !c.suppressed_by_window_id && isInsideOpenIncident(times[i]);
+          return (!c.success || insideIncident) && !c.suppressed_by_window_id ? (
+            <line key={`vl${i}`} x1={tx(times[i])} y1={PADY} x2={tx(times[i])} y2={H - PADY}
+              stroke="#ef4444" strokeWidth="2" strokeOpacity="0.45" />
+          ) : null;
+        })}
 
         {/* Main line */}
         <polyline points={linePts} fill="none" stroke="#818cf8" strokeWidth="2.5"
           strokeLinejoin="round" strokeLinecap="round" filter="url(#glow)" />
 
-        {/* Dots — green for success, red for failure, gray for maintenance */}
+        {/* Dots — green for success, red for failure/open-incident, gray for maintenance */}
         {pts.map((c, i) => {
-          let fill = c.success ? "#22c55e" : "#ef4444";
-          let stroke = c.success ? "#16a34a" : "#dc2626";
+          // A dot is a failure if: check failed OR it falls inside an open incident window
+          // (guards against stale success=true rows from Node.js prober when Go Engine is active)
+          const insideIncident = !c.suppressed_by_window_id && isInsideOpenIncident(times[i]);
+          const isFailure = !c.success || insideIncident;
+          let fill = isFailure ? "#ef4444" : "#22c55e";
+          let stroke = isFailure ? "#dc2626" : "#16a34a";
           if (c.suppressed_by_window_id) {
             fill = "#6b7280";
             stroke = "#4b5563";
@@ -328,15 +363,15 @@ function ResponseTimeChart({ checks, windowH }: { checks: Check[]; windowH: Char
       {/* Stats row */}
       <div className="mt-4 flex justify-center gap-10">
         <div className="text-center">
-          <p className="text-xl font-bold tabular-nums text-indigo-300">{avg} ms</p>
+          <p className="text-xl font-bold tabular-nums text-indigo-300">{formatLatency(avg)}</p>
           <p className="mt-0.5 text-xs text-zinc-500">Average</p>
         </div>
         <div className="text-center">
-          <p className="text-xl font-bold tabular-nums text-emerald-400">{min} ms</p>
+          <p className="text-xl font-bold tabular-nums text-emerald-400">{formatLatency(min)}</p>
           <p className="mt-0.5 text-xs text-zinc-500">Minimum</p>
         </div>
         <div className="text-center">
-          <p className="text-xl font-bold tabular-nums text-red-400">{max} ms</p>
+          <p className="text-xl font-bold tabular-nums text-red-400">{formatLatency(max)}</p>
           <p className="mt-0.5 text-xs text-zinc-500">Maximum</p>
         </div>
         <div className="text-center">
@@ -575,12 +610,23 @@ export default function MonitorDetailPage() {
   const displayUrl = monitor.monitor_type === "ping" || monitor.monitor_type === "port" ? (monitor.target_host ?? "") : (monitor.monitor_type === "dns" ? (monitor.dns_hostname ?? "") : monitor.url);
   const host = (() => { try { return new URL(displayUrl).hostname; } catch { return displayUrl; } })();
 
+  const latestCheckFailed = monitor.status === "up" && chartChecks.length > 0 && !chartChecks[0].success && !chartChecks[0].suppressed_by_window_id;
+
   let statusConfig = {
     up:      { label: "Up",      dot: "bg-emerald-500",              badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20", icon: <TrendingUp  className="h-5 w-5 text-emerald-400" /> },
     down:    { label: "Down",    dot: "bg-red-500 animate-pulse",    badge: "bg-red-500/15 text-red-400 border-red-500/20",             icon: <TrendingDown className="h-5 w-5 text-red-400" /> },
     paused:  { label: "Paused",  dot: "bg-zinc-500",                 badge: "bg-zinc-700/30 text-zinc-400 border-zinc-600/30",          icon: <Pause       className="h-5 w-5 text-zinc-400" /> },
     pending: { label: "Pending", dot: "bg-yellow-500 animate-pulse", badge: "bg-yellow-500/15 text-yellow-400 border-yellow-500/20",    icon: <Loader2     className="h-5 w-5 animate-spin text-yellow-400" /> },
   }[monitor.status];
+
+  if (latestCheckFailed) {
+    statusConfig = {
+      label: "Degraded",
+      dot: "bg-amber-500 animate-pulse",
+      badge: "bg-amber-500/15 text-amber-400 border-amber-500/20",
+      icon: <TrendingDown className="h-5 w-5 text-amber-400" />
+    };
+  }
 
   if (monitor.under_maintenance) {
     statusConfig = {
@@ -709,19 +755,25 @@ export default function MonitorDetailPage() {
 
             {/* ① Status + Last Check — merged */}
             <div className={`col-span-2 flex flex-col rounded-xl border bg-zinc-950 p-5
-              ${monitor.status === "up" ? "border-emerald-500/30" : monitor.status === "down" ? "border-red-500/30" : "border-zinc-800"}`}>
+              ${latestCheckFailed ? "border-amber-500/30" : monitor.status === "up" ? "border-emerald-500/30" : monitor.status === "down" ? "border-red-500/30" : "border-zinc-800"}`}>
               <div className="flex items-start justify-between gap-3">
                 {/* Status side */}
                 <div>
                   <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Current status</span>
                   <div className="mt-2 flex items-center gap-2">
                     {statusConfig.icon}
-                    <span className={`text-2xl font-bold ${monitor.status === "up" ? "text-emerald-400" : monitor.status === "down" ? "text-red-400" : "text-zinc-300"}`}>
+                    <span className={`text-2xl font-bold ${latestCheckFailed ? "text-amber-400" : monitor.status === "up" ? "text-emerald-400" : monitor.status === "down" ? "text-red-400" : "text-zinc-300"}`}>
                       {statusConfig.label}
                     </span>
                   </div>
-                  {monitor.status === "up" && up_since && (
+                  {monitor.status === "up" && !latestCheckFailed && up_since && (
                     <p className="mt-1.5 text-xs text-zinc-500">Up for <span className="text-zinc-300">{uptimeSinceDuration(up_since)}</span></p>
+                  )}
+                  {latestCheckFailed && (
+                    <div className="mt-1.5 flex flex-col gap-0.5">
+                      <p className="text-xs text-amber-400/90 font-medium">Last check failed</p>
+                      <p className="text-[11px] text-zinc-500">Verification retry in progress</p>
+                    </div>
                   )}
                   {monitor.status === "down" && (
                     <div className="mt-2.5 flex flex-col gap-1.5">
@@ -806,7 +858,7 @@ export default function MonitorDetailPage() {
                 ))}
               </div>
             </div>
-            <ResponseTimeChart checks={chartChecks} windowH={chartWindow} />
+            <ResponseTimeChart checks={chartChecks} windowH={chartWindow} incidents={incidents} />
           </section>
 
           {/* ── Latest incidents ── */}
@@ -968,7 +1020,7 @@ export default function MonitorDetailPage() {
                         : c.response_time_ms > 500 ? "text-yellow-400"
                         : "text-zinc-300"
                       }`}>
-                        {c.response_time_ms} ms
+                        {formatCheckLatency(c.response_time_ms, c.latency_us)}
                         {rowState === "slow" && <span className="ml-1 text-[10px] text-amber-500/70">⚠</span>}
                       </span>
                       {/* Message */}

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -1084,13 +1085,21 @@ type DispatchJob struct {
 	dispatchedAt   time.Time
 }
 
-func doWithContext(ctx context.Context, client *fasthttp.Client, req *fasthttp.Request, res *fasthttp.Response, timeout time.Duration, dialedPtr *bool, didResumePtr *bool) (error, bool, bool) {
+func doWithContext(ctx context.Context, client *fasthttp.Client, req *fasthttp.Request, res *fasthttp.Response, timeout time.Duration, dialedPtr *bool, didResumePtr *bool, followRedirects ...bool) (error, bool, bool) {
 	deadline := time.Now().Add(timeout)
 	doneCh := make(chan error, 1)
+	shouldRedirect := false
+	if len(followRedirects) > 0 && followRedirects[0] {
+		shouldRedirect = true
+	}
 	go func() {
 		gid := setGoroutineDialing(dialedPtr, didResumePtr, deadline)
 		defer clearGoroutineDialing(gid)
-		doneCh <- client.DoTimeout(req, res, timeout)
+		if shouldRedirect {
+			doneCh <- client.DoRedirects(req, res, 10)
+		} else {
+			doneCh <- client.DoTimeout(req, res, timeout)
+		}
 	}()
 	select {
 	case <-ctx.Done():
@@ -1177,22 +1186,49 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 							reqScheme = 1 // 1=HTTPS
 						}
 
-						// HEAD for plain http/api (no keyword, no ForceGET).
-						// GET only when body is needed (keyword match) or learned (ForceGET).
-						if m.Keyword != "" {
-							req.Header.SetMethod("GET")
-							res.SkipBody = false
-							reqMethod = 1 // 1=GET
-						} else if m.ForceGET {
-							req.Header.SetMethod("GET")
-							req.Header.Set("Range", "bytes=0-0") // Learned-GET status check: request 1 byte to avoid downloading full body
-							res.SkipBody = false
-							reqMethod = 1 // 1=GET
-						} else {
-							req.Header.SetMethod("HEAD") // Save bandwidth
+						// Method & Body handling
+						method := strings.ToUpper(strings.TrimSpace(m.HTTPMethod))
+						if method == "" || method == "QUERY" {
+							method = "GET"
+						}
+						// If standard HTTP GET without keyword/forceGET, optimize to HEAD to save bandwidth
+						if m.Type == "http" && method == "GET" && m.Keyword == "" && !m.ForceGET {
+							method = "HEAD"
+						}
+
+						req.Header.SetMethod(method)
+						if method == "HEAD" {
 							res.SkipBody = true
 							reqMethod = 0 // 0=HEAD
+						} else {
+							res.SkipBody = false
+							reqMethod = 1 // 1=GET
+							if m.ForceGET && m.Keyword == "" && method == "GET" {
+								req.Header.Set("Range", "bytes=0-0")
+							}
 						}
+
+						// Custom headers
+						for k, v := range m.Headers {
+							req.Header.Set(k, v)
+						}
+
+						// Auth
+						if m.AuthType == "basic" && (m.AuthUsername != "" || m.AuthPassword != "") {
+							authVal := "Basic " + base64.StdEncoding.EncodeToString([]byte(m.AuthUsername+":"+m.AuthPassword))
+							req.Header.Set("Authorization", authVal)
+						} else if m.AuthType == "bearer" && m.AuthBearerToken != "" {
+							req.Header.Set("Authorization", "Bearer "+m.AuthBearerToken)
+						}
+
+						// Body payload for POST/PUT/PATCH
+						if m.RequestBody != "" && (method == "POST" || method == "PUT" || method == "PATCH") {
+							req.SetBodyString(m.RequestBody)
+							if req.Header.Peek("Content-Type") == nil {
+								req.Header.Set("Content-Type", "application/json")
+							}
+						}
+
 						req.Header.Set("User-Agent", "Uptime-Engine/1.0")
 						initReqID := fmt.Sprintf("%s-%d-1", m.ID, job.generation)
 						if job.isVerification {
@@ -1235,7 +1271,7 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 						deadline := start.Add(timeoutDuration)
 
 						var leaked, abandoned bool
-						err, leaked, abandoned = doWithContext(ctx, client, req, res, time.Until(deadline), &dialed, &didResume)
+						err, leaked, abandoned = doWithContext(ctx, client, req, res, time.Until(deadline), &dialed, &didResume, m.FollowRedirects)
 						if leaked {
 							ChecksInFlight.Add(-1)
 							return
@@ -1274,7 +1310,7 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 								err = fasthttp.ErrTimeout
 							} else {
 								var abandoned2 bool
-								err, leaked2, abandoned2 = doWithContext(ctx, client, req, res, rem, &rDialed, &rDidResume)
+								err, leaked2, abandoned2 = doWithContext(ctx, client, req, res, rem, &rDialed, &rDidResume, m.FollowRedirects)
 								if abandoned2 {
 									errClass = ErrTimeout
 									customMsg = "fasthttp hung on GET retry, abandoned"
@@ -1325,7 +1361,7 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 							var retryDidResume bool
 							rstart := time.Now()
 							var leaked3, abandoned3 bool
-							retryErr, leaked3, abandoned3 := doWithContext(ctx, client, req, res, remainingBudget, &retryDialed, &retryDidResume)
+							retryErr, leaked3, abandoned3 := doWithContext(ctx, client, req, res, remainingBudget, &retryDialed, &retryDidResume, m.FollowRedirects)
 							if leaked3 {
 								ChecksInFlight.Add(-1)
 								return
@@ -1381,9 +1417,7 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 
 						if err != nil {
 							errClass = classifyNetError(err, false)
-							if errClass != ErrTimeout {
-								log.Printf("HTTP error for %s: %v", m.URL, err)
-							}
+							log.Printf("[PROBE_ERR] URL=%s status=%d err=%v class=%v", m.URL, statusCode, err, errClass)
 							DropValidatorState(monKey)
 						} else {
 							statusOK := false
@@ -1397,6 +1431,8 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 										break
 									}
 								}
+							} else if len(m.UpStatusCodes) > 0 {
+								statusOK = CheckStatusAccepted(statusCode, m.UpStatusCodes)
 							} else {
 								statusOK = (statusCode >= 200 && statusCode < 400)
 								if !statusOK && statusCode == fasthttp.StatusRequestedRangeNotSatisfiable && m.ForceGET && m.Keyword == "" {
@@ -1408,6 +1444,11 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 
 							if !statusOK {
 								errClass = ErrStatus
+								if len(m.UpStatusCodes) > 0 {
+									customMsg = fmt.Sprintf("Received %d, expected %s", statusCode, strings.Join(m.UpStatusCodes, "/"))
+								} else {
+									customMsg = fmt.Sprintf("Received %d", statusCode)
+								}
 								DropValidatorState(monKey)
 							} else if conditionalInjected && statusCode == fasthttp.StatusNotModified {
 								// 304 conditional hit: pass check cleanly without body read
@@ -1431,12 +1472,23 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 
 								if m.Keyword != "" {
 									keywordFound := SearchKeywordMonitor(br.Body, m) >= 0
+									cond := m.KeywordCondition
+									if cond == "" {
+										cond = "exists"
+									}
+									matchPassed := false
+									if cond == "exists" {
+										matchPassed = keywordFound
+									} else if cond == "not_exists" {
+										matchPassed = !keywordFound
+									}
+
 									switch {
-									case keywordFound && rerr == nil:
+									case matchPassed && rerr == nil:
 										etag := res.Header.Peek(fasthttp.HeaderETag)
 										lm := res.Header.Peek(fasthttp.HeaderLastModified)
 										StoreValidatorState(monKey, etag, lm, nowS, !conditionalInjected)
-									case keywordFound && rerr != nil:
+									case matchPassed && rerr != nil:
 										// Keyword found in prefix, but response errored/truncated.
 										// Pass the check, but DO NOT store validators for incomplete response.
 										DropValidatorState(monKey)
@@ -1446,7 +1498,11 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 										DropValidatorState(monKey)
 									default:
 										errClass = ErrKeyword
-										customMsg = fmt.Sprintf("keyword %q not found in first %d bytes", m.Keyword, len(br.Body))
+										if cond == "not_exists" {
+											customMsg = fmt.Sprintf("keyword %q was found in response", m.Keyword)
+										} else {
+											customMsg = fmt.Sprintf("keyword %q not found in first %d bytes", m.Keyword, len(br.Body))
+										}
 										DropValidatorState(monKey)
 									}
 								} else if rerr != nil {
@@ -1491,12 +1547,18 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 						errClass = res.ErrClass
 						customMsg = res.ErrorMessage
 					} else if m.Type == "dns" {
-						res := ProbeDNS(ctx, m.URL, "", 0, timeoutDuration)
+						res := ProbeDNSMonitor(ctx, m, timeoutDuration)
 						latency = uint64(res.Latency.Microseconds())
 						errClass = res.ErrClass
 						customMsg = res.ErrorMessage
 					} else if m.Type == "udp" {
-						res := ProbeUDP(ctx, m.URL, nil, timeoutDuration)
+						target := m.URL
+						if m.TargetHost != "" && m.TargetPort > 0 {
+							target = net.JoinHostPort(m.TargetHost, strconv.Itoa(m.TargetPort))
+						} else if !strings.Contains(target, ":") && m.TargetPort > 0 {
+							target = net.JoinHostPort(target, strconv.Itoa(m.TargetPort))
+						}
+						res := ProbeUDP(ctx, target, nil, timeoutDuration)
 						latency = uint64(res.Latency.Microseconds())
 						errClass = res.ErrClass
 						customMsg = res.ErrorMessage
@@ -1545,6 +1607,25 @@ func StartWorkers(ctx context.Context, wg *sync.WaitGroup, workerCount int, jobs
 						DispatchTimeMs:     dispatchTime.UnixMilli(),
 					}
 					ChecksCompleted.Add(1)
+
+					checkErrMsg := customMsg
+					if checkErrMsg == "" && errClass != ErrNone {
+						checkErrMsg = string(errClass)
+					}
+					latencyMs := int(latency / 1000)
+					if latencyMs == 0 && latency > 0 {
+						latencyMs = 1
+					}
+					EmitCheckLog(CheckLogEvent{
+						MonitorID:    m.ID,
+						CheckedAt:    start,
+						Success:      (errClass == ErrNone),
+						StatusCode:   statusCode,
+						LatencyMs:    latencyMs,
+						LatencyUs:    int(latency),
+						ErrorMessage: checkErrMsg,
+						Location:     "default",
+					})
 
 					if errClass == ErrNone {
 						StepDNSTemporaryEvaluationOnMonitor(m, m.Interval, errClass)

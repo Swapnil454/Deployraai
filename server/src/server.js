@@ -8,7 +8,7 @@ import jwt from "jsonwebtoken";
 import HumanSupportCase from "./models/HumanSupportCase.js";
 import { ensureMonitorCheckRetention } from "./models/MonitorCheck.js";
 import { initializeUptimeCronSchema } from "./uptime-cron/schema.js";
-import { startUptimeCronScheduler } from "./uptime-cron/service.js";
+import { startUptimeCronScheduler, flushBuffers } from "./uptime-cron/service.js";
 import { stopHeartbeatBatcher } from "./uptime-cron/controller.js";
 import { stopHeartbeatDetector } from "./uptime-cron/heartbeatDetector.js";
 import { fork } from "child_process";
@@ -192,7 +192,8 @@ connect(process.env.MONGO_URI)
                 flushFailed = true;
                 console.error(`[Server] FATAL: Shutdown flush failed. ${res.remaining} heartbeat pings were lost!`);
               }
-              // Note: Phase 3 ClickHouse buffer flush will also be awaited here
+              // Flush in-flight uptime-cron check logs and ClickHouse telemetry buffers
+              await flushBuffers();
             } catch (err) {
               flushFailed = true;
               console.error("[Server] Error stopping heartbeat batcher:", err.message);

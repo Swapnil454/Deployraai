@@ -17,23 +17,19 @@ export default function ZeroCodeObservabilitySection() {
       {/* ── Background Matrix Grid ── */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f1f2820_1px,transparent_1px),linear-gradient(to_bottom,#1f1f2820_1px,transparent_1px)] bg-[size:76px_76px] pointer-events-none z-0" />
 
-      {/* Deep atmospheric glows matching the image */}
-      <div className="absolute top-1/4 left-1/4 w-[700px] h-[400px] bg-[#00e599]/[0.035] blur-[160px] pointer-events-none z-0" />
-      <div className="absolute top-1/2 right-1/4 w-[600px] h-[380px] bg-cyan-500/[0.03] blur-[150px] pointer-events-none z-0" />
-
       <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 lg:px-14">
         {/* ── Headline & Right Side Description: Matching 2-column grid ── */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 xl:gap-12 items-start mb-12 sm:mb-16">
           {/* Left Title Column */}
           <div className="lg:col-span-7 xl:col-span-7 text-center lg:text-left">
             <h2 className="font-serif-display text-[28px] sm:text-[36px] md:text-[42px] lg:text-[40px] xl:text-[48px] 2xl:text-[56px] font-normal leading-[1.1] tracking-[-0.02em]">
-              <span className="text-[#00e599] drop-shadow-[0_0_28px_rgba(0,229,153,0.4)]">
+              <span className="text-white">
                 Zero-Code
               </span>{" "}
               <span className="text-white">Observability</span>
               <br />
               <span className="text-white">&amp; analytics pipeline</span>
-              <span className="text-emerald-400">.</span>
+              <span className="text-zinc-500">.</span>
             </h2>
           </div>
 
@@ -60,12 +56,12 @@ export default function ZeroCodeObservabilitySection() {
                 </h3>
               </div>
 
-              {/* Outer Card with Soft Right Emerald Aura (Horizontally Centered) */}
+              {/* Outer Card (Horizontally Centered) */}
               <div
-                className="relative w-full max-w-[265px] mx-auto rounded-[22px] p-4 select-none overflow-visible shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85)] group transition-all duration-300"
+                className="relative w-full max-w-[265px] mx-auto rounded-[22px] p-4 select-none overflow-hidden shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85)] group transition-all duration-300"
                 style={{
                   background:
-                    "radial-gradient(circle at 88% 50%, rgba(0, 229, 153, 0.16) 0%, rgba(13, 20, 18, 0.72) 42%, rgba(10, 14, 18, 0.95) 100%)",
+                    "linear-gradient(155deg, rgba(16, 20, 28, 0.94) 0%, rgba(10, 13, 19, 0.98) 100%)",
                   backdropFilter: "blur(24px)",
                   WebkitBackdropFilter: "blur(24px)",
                   border: "1px solid rgba(255, 255, 255, 0.09)",
@@ -102,7 +98,7 @@ export default function ZeroCodeObservabilitySection() {
 
                   {/* Dark Translucent Input Box */}
                   <div
-                    className="w-full rounded-lg px-3 py-2 mb-2 flex items-center transition-all focus-within:border-[#00e599]/60"
+                    className="w-full rounded-lg px-3 py-2 mb-2 flex items-center transition-all focus-within:border-white/30"
                     style={{
                       background: "rgba(10, 15, 20, 0.65)",
                       border: "1px solid rgba(255, 255, 255, 0.09)",
@@ -149,7 +145,7 @@ export default function ZeroCodeObservabilitySection() {
               </div>
 
               {/* Solid Matte Dark Card */}
-              <div className="relative w-full rounded-[20px] bg-[#0c1017] border border-white/[0.08] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col justify-between group transition-all duration-300 hover:border-[#00e599]/30">
+              <div className="relative w-full rounded-[20px] bg-[#0c1017] border border-white/[0.08] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col justify-between group transition-all duration-300 hover:border-white/20">
                 {/* Top Text */}
                 <div className="text-center pt-5 pb-1 px-4 select-none">
                   <p className="text-[14px] sm:text-[14.5px] font-semibold text-white tracking-tight">
@@ -181,10 +177,10 @@ export default function ZeroCodeObservabilitySection() {
                         }
                         @keyframes slowNodePulse {
                           0%, 100% {
-                            box-shadow: 0 0 6px rgba(0, 229, 153, 0.65), inset 0 0 3px rgba(0, 229, 153, 0.4);
+                            box-shadow: 0 0 4px rgba(52, 211, 153, 0.35);
                           }
                           50% {
-                            box-shadow: 0 0 10px rgba(0, 229, 153, 0.95), inset 0 0 5px rgba(0, 229, 153, 0.6);
+                            box-shadow: 0 0 6px rgba(52, 211, 153, 0.55);
                           }
                         }
                       `,
@@ -218,7 +214,7 @@ export default function ZeroCodeObservabilitySection() {
                     >
                       {/* Slow expanding radar wave */}
                       <span
-                        className="absolute inset-0 rounded-full border border-[#00e599]/60 bg-transparent pointer-events-none"
+                        className="absolute inset-0 rounded-full border border-emerald-400/30 bg-transparent pointer-events-none"
                         style={{
                           animation: "slowRadarPing 3.8s cubic-bezier(0.2, 0.6, 0.35, 1) infinite",
                           animationDelay: node.delay,
@@ -227,7 +223,7 @@ export default function ZeroCodeObservabilitySection() {
 
                       {/* Secondary slow echo wave for depth */}
                       <span
-                        className="absolute inset-0 rounded-full border border-[#00e599]/35 bg-transparent pointer-events-none"
+                        className="absolute inset-0 rounded-full border border-emerald-400/20 bg-transparent pointer-events-none"
                         style={{
                           animation: "slowRadarPing 3.8s cubic-bezier(0.2, 0.6, 0.35, 1) infinite",
                           animationDelay: `${(parseFloat(node.delay) + 1.4).toFixed(1)}s`,
@@ -236,14 +232,14 @@ export default function ZeroCodeObservabilitySection() {
 
                       {/* Premium crisp radar beacon circle */}
                       <div
-                        className="relative w-[12px] h-[12px] sm:w-[13.5px] sm:h-[13.5px] rounded-full border border-[#00e599] bg-[#00e599]/25 flex items-center justify-center transition-transform duration-300 group-hover:scale-125"
+                        className="relative w-[12px] h-[12px] sm:w-[13.5px] sm:h-[13.5px] rounded-full border border-emerald-400/70 bg-emerald-500/20 flex items-center justify-center transition-transform duration-300 group-hover:scale-125"
                         style={{
                           animation: "slowNodePulse 3s ease-in-out infinite",
                           animationDelay: node.delay,
                         }}
                       >
                         {/* Inner bright solid white core dot */}
-                        <span className="w-1 h-1 rounded-full bg-white shadow-[0_0_3px_#ffffff]" />
+                        <span className="w-1 h-1 rounded-full bg-white shadow-[0_0_2px_#ffffff]" />
                       </div>
                     </div>
                   ))}
@@ -251,7 +247,7 @@ export default function ZeroCodeObservabilitySection() {
 
                 {/* Bottom Text */}
                 <div className="text-center pb-5 pt-1 px-4 select-none">
-                  <p className="text-[#00e599] text-[13px] sm:text-[13.5px] font-semibold tracking-tight">
+                  <p className="text-zinc-200 text-[13px] sm:text-[13.5px] font-semibold tracking-tight">
                     Real-time session telemetry
                   </p>
                   <p className="text-zinc-300 text-[11.5px] sm:text-[12px] leading-snug tracking-tight mt-1 max-w-[240px] mx-auto">
@@ -279,25 +275,19 @@ export default function ZeroCodeObservabilitySection() {
                 className="relative w-full rounded-[22px] p-3.5 sm:p-4 overflow-hidden group transition-all duration-300 flex flex-col justify-between"
                 style={{
                   background:
-                    "linear-gradient(150deg, rgba(13, 26, 32, 0.82) 0%, rgba(7, 16, 22, 0.88) 45%, rgba(4, 11, 16, 0.95) 100%)",
+                    "linear-gradient(155deg, rgba(16, 20, 28, 0.94) 0%, rgba(10, 13, 19, 0.98) 100%)",
                   backdropFilter: "blur(32px)",
                   WebkitBackdropFilter: "blur(32px)",
-                  border: "1px solid rgba(255, 255, 255, 0.16)",
+                  border: "1px solid rgba(255, 255, 255, 0.14)",
                   boxShadow:
-                    "0 30px 80px -15px rgba(0, 0, 0, 0.95), inset 0 1px 1px rgba(255, 255, 255, 0.28), inset 0 -1px 2px rgba(0, 229, 153, 0.15), 0 0 50px rgba(0, 229, 153, 0.18)",
+                    "0 30px 80px -15px rgba(0, 0, 0, 0.95), inset 0 1px 1px rgba(255, 255, 255, 0.18)",
                 }}
               >
-                {/* Lush Ambient Glass Backlight Halos */}
-                <div className="absolute -top-16 -right-12 w-56 h-56 rounded-full bg-[#00e599]/20 blur-[50px] pointer-events-none -z-10" />
-                <div className="absolute -bottom-16 -left-12 w-56 h-56 rounded-full bg-[#06b6d4]/18 blur-[50px] pointer-events-none -z-10" />
-
                 {/* Top Nav Bar inside card */}
                 <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-white/[0.08] select-none">
-                  {/* Glowing 3D Emerald Sphere Logo */}
-                  <div className="relative w-6 h-6 rounded-full overflow-hidden shadow-[0_0_14px_rgba(0,229,153,0.9)] flex items-center justify-center">
-                    <div className="absolute inset-0 bg-gradient-to-tr from-[#00b074] via-[#00e599] to-[#80ffd0]" />
-                    <div className="absolute inset-y-0 right-0 w-2.5 bg-[#031016]/55 rounded-l-full backdrop-blur-[1px]" />
-                    <div className="absolute top-0.5 left-1 w-2 h-1 bg-white/75 rounded-full blur-[0.4px]" />
+                  {/* Clean Indicator Logo */}
+                  <div className="relative w-5 h-5 rounded-full border border-emerald-400/40 bg-emerald-500/20 flex items-center justify-center">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                   </div>
 
                   {/* Translucent Glass Pill Button */}
@@ -309,12 +299,12 @@ export default function ZeroCodeObservabilitySection() {
                 </div>
 
                 {/* Sub-panel 1: CPU & Memory Allocation (p95) */}
-                <div className="bg-[#051017]/75 border border-white/[0.09] backdrop-blur-md rounded-xl p-2.5 sm:p-3 mb-2 relative overflow-hidden select-none">
+                <div className="bg-[#0e1219] border border-white/[0.08] backdrop-blur-md rounded-xl p-2.5 sm:p-3 mb-2 relative overflow-hidden select-none">
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-[11.5px] font-medium text-zinc-200 tracking-tight">
                       CPU &amp; Memory Usage (p95)
                     </p>
-                    <span className="text-[9px] font-mono text-[#00e599]">Peak: 74%</span>
+                    <span className="text-[9px] font-mono text-zinc-400">Peak: 74%</span>
                   </div>
 
                   <div className="flex items-center relative">
@@ -339,16 +329,16 @@ export default function ZeroCodeObservabilitySection() {
                       <svg className="w-full h-full relative z-10" viewBox="0 0 240 56" preserveAspectRatio="none">
                         <defs>
                           <linearGradient id="p95GradExact" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#00e599" stopOpacity="0.48" />
-                            <stop offset="100%" stopColor="#00e599" stopOpacity="0.0" />
+                            <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
+                            <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
                           </linearGradient>
                           <linearGradient id="p50GradExact" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#a3e635" stopOpacity="0.22" />
-                            <stop offset="100%" stopColor="#a3e635" stopOpacity="0.0" />
+                            <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.12" />
+                            <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.0" />
                           </linearGradient>
                         </defs>
 
-                        {/* Top Smooth Wave Area Fill (p95, Emerald #00e599) */}
+                        {/* Top Smooth Wave Area Fill (p95, Emerald #10b981) */}
                         <path
                           d="M 0,47 C 30,47 60,46 90,46 C 110,46 122,45 128,42 C 132,38 134,18 138,14 C 141,11 144,24 147,32 C 150,38 153,16 156,14 C 159,12 162,28 165,30 C 169,32 173,8 178,6 C 182,5 186,18 190,20 C 194,22 198,13 202,15 C 208,17 212,23 218,25 C 226,27 232,30 240,34 L 240,56 L 0,56 Z"
                           fill="url(#p95GradExact)"
@@ -357,13 +347,13 @@ export default function ZeroCodeObservabilitySection() {
                         <path
                           d="M 0,47 C 30,47 60,46 90,46 C 110,46 122,45 128,42 C 132,38 134,18 138,14 C 141,11 144,24 147,32 C 150,38 153,16 156,14 C 159,12 162,28 165,30 C 169,32 173,8 178,6 C 182,5 186,18 190,20 C 194,22 198,13 202,15 C 208,17 212,23 218,25 C 226,27 232,30 240,34"
                           fill="none"
-                          stroke="#00e599"
-                          strokeWidth="1.8"
+                          stroke="#10b981"
+                          strokeWidth="1.5"
                           strokeLinecap="round"
                           strokeLinejoin="round"
                         />
 
-                        {/* Bottom Smooth Baseline Area Fill (p50, Lime #a3e635) */}
+                        {/* Bottom Smooth Baseline Area Fill (p50, Cyan #06b6d4) */}
                         <path
                           d="M 0,50 C 35,50 70,49 105,49 C 120,49 126,48 130,46 C 133,43 135,36 138,34 C 141,32 144,39 147,42 C 150,44 153,35 156,34 C 159,33 162,40 166,41 C 170,42 173,35 178,34 C 183,33 186,37 190,38 C 196,39 204,38 214,40 C 224,42 232,44 240,46 L 240,56 L 0,56 Z"
                           fill="url(#p50GradExact)"
@@ -372,9 +362,9 @@ export default function ZeroCodeObservabilitySection() {
                         <path
                           d="M 0,50 C 35,50 70,49 105,49 C 120,49 126,48 130,46 C 133,43 135,36 138,34 C 141,32 144,39 147,42 C 150,44 153,35 156,34 C 159,33 162,40 166,41 C 170,42 173,35 178,34 C 183,33 186,37 190,38 C 196,39 204,38 214,40 C 224,42 232,44 240,46"
                           fill="none"
-                          stroke="#a3e635"
-                          strokeWidth="1.3"
-                          strokeOpacity="0.85"
+                          stroke="#06b6d4"
+                          strokeWidth="1.2"
+                          strokeOpacity="0.8"
                           strokeLinecap="round"
                           strokeLinejoin="round"
                         />
@@ -394,7 +384,7 @@ export default function ZeroCodeObservabilitySection() {
                 </div>
 
                 {/* Sub-panel 2: Page Views & User Clicks */}
-                <div className="bg-[#051017]/75 border border-white/[0.09] backdrop-blur-md rounded-xl p-2.5 sm:p-3 mb-2 relative overflow-hidden select-none">
+                <div className="bg-[#0e1219] border border-white/[0.08] backdrop-blur-md rounded-xl p-2.5 sm:p-3 mb-2 relative overflow-hidden select-none">
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-[11.5px] font-medium text-zinc-200 tracking-tight">
                       Page Views &amp; User Clicks
@@ -462,7 +452,7 @@ export default function ZeroCodeObservabilitySection() {
                 {/* Sub-panel 3: Middle Split Row (Calendar + Global Uptime 99.99%) */}
                 <div className="grid grid-cols-12 gap-1.5 sm:gap-2 mb-2 select-none items-stretch">
                   {/* Memory Heap Allocation */}
-                  <div className="col-span-7 bg-[#051017]/75 border border-white/[0.09] backdrop-blur-md rounded-xl p-2 sm:p-2.5 flex flex-col justify-between min-w-0">
+                  <div className="col-span-7 bg-[#0e1219] border border-white/[0.08] backdrop-blur-md rounded-xl p-2 sm:p-2.5 flex flex-col justify-between min-w-0">
                     <p className="text-[9px] sm:text-[10px] text-zinc-300 font-medium mb-1 truncate">
                       Memory Heap Usage
                     </p>
@@ -479,8 +469,8 @@ export default function ZeroCodeObservabilitySection() {
                         <svg className="w-full h-full" viewBox="0 0 160 32" preserveAspectRatio="none">
                           <defs>
                             <linearGradient id="calSparkGradExact" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor="#00e599" stopOpacity="0.45" />
-                              <stop offset="100%" stopColor="#00e599" stopOpacity="0.0" />
+                              <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.25" />
+                              <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.0" />
                             </linearGradient>
                           </defs>
                           <path
@@ -490,8 +480,8 @@ export default function ZeroCodeObservabilitySection() {
                           <path
                             d="M 0,28 L 4,28 L 6,22 L 8,28 L 12,28 L 14,16 L 16,28 L 20,28 L 22,24 L 24,28 L 28,28 L 30,12 L 32,28 L 36,28 L 38,20 L 40,28 L 44,28 L 46,10 L 48,28 L 52,28 L 54,6 L 56,28 L 60,28 L 62,18 L 64,28 L 68,28 L 70,8 L 72,28 L 76,28 L 78,14 L 80,28 L 84,28 L 86,4 L 88,28 L 92,28 L 94,12 L 96,28 L 100,28 L 102,6 L 104,28 L 108,28 L 110,20 L 112,28 L 116,28 L 118,10 L 120,28 L 124,28 L 126,16 L 128,28 L 132,28 L 134,6 L 136,28 L 140,28 L 142,18 L 144,28 L 148,28 L 150,12 L 152,28 L 156,28 L 158,24 L 160,28"
                             fill="none"
-                            stroke="#00e599"
-                            strokeWidth="1.3"
+                            stroke="#38bdf8"
+                            strokeWidth="1.2"
                             strokeLinejoin="round"
                           />
                         </svg>
@@ -508,18 +498,18 @@ export default function ZeroCodeObservabilitySection() {
                   </div>
 
                   {/* CPU Usage Stat Card */}
-                  <div className="col-span-5 bg-[#051017]/75 border border-white/[0.09] backdrop-blur-md rounded-xl p-2 sm:p-2.5 flex flex-col justify-center items-start min-w-0 overflow-hidden">
+                  <div className="col-span-5 bg-[#0e1219] border border-white/[0.08] backdrop-blur-md rounded-xl p-2 sm:p-2.5 flex flex-col justify-center items-start min-w-0 overflow-hidden">
                     <p className="text-[9px] sm:text-[9.5px] text-zinc-400 font-medium leading-tight mb-1 truncate w-full">
                       CPU Usage
                     </p>
-                    <p className="text-[16px] sm:text-[18px] min-[1400px]:text-[22px] font-bold text-[#00e599] font-mono tracking-tight leading-none drop-shadow-[0_0_12px_rgba(0,229,153,0.7)] whitespace-nowrap">
+                    <p className="text-[16px] sm:text-[18px] min-[1400px]:text-[22px] font-bold text-emerald-400 font-mono tracking-tight leading-none whitespace-nowrap">
                       18.4%
                     </p>
                   </div>
                 </div>
 
                 {/* Sub-panel 4: Page Clicks by Route */}
-                <div className="bg-[#051017]/75 border border-white/[0.09] backdrop-blur-md rounded-xl p-2.5 sm:p-3 select-none">
+                <div className="bg-[#0e1219] border border-white/[0.08] backdrop-blur-md rounded-xl p-2.5 sm:p-3 select-none">
                   <div className="flex items-center justify-between text-[11px] mb-2 font-medium">
                     <span className="text-zinc-200">Page Clicks by Route</span>
                     <span className="text-zinc-400 font-mono text-[9.5px]">Live Clicks</span>
@@ -542,7 +532,7 @@ export default function ZeroCodeObservabilitySection() {
                         <div className="flex-1 h-2 rounded-full bg-[#15222c] border border-white/[0.04] overflow-hidden">
                           <div
                             style={{ width: row.pct }}
-                            className="h-full rounded-full bg-[#00e599] shadow-[0_0_8px_rgba(0,229,153,0.7)] transition-all duration-500"
+                            className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-500 transition-all duration-500"
                           />
                         </div>
                       </div>
@@ -572,7 +562,7 @@ export default function ZeroCodeObservabilitySection() {
               </div>
 
               {/* Exact Mirror Card */}
-              <div className="relative w-full rounded-[20px] bg-[#0c1017] border border-white/[0.08] p-4 sm:p-5 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] flex flex-col justify-between group transition-all duration-300 hover:border-[#00e599]/30">
+              <div className="relative w-full rounded-[20px] bg-[#0c1017] border border-white/[0.08] p-4 sm:p-5 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] flex flex-col justify-between group transition-all duration-300 hover:border-white/20">
                 {/* Top Section: TracePilot Alert Channels */}
                 <div className="select-none">
                   <p className="text-[14px] sm:text-[15px] font-semibold text-white text-center tracking-tight leading-snug">
@@ -619,7 +609,7 @@ export default function ZeroCodeObservabilitySection() {
                         </div>
 
                         {/* PagerDuty Badge */}
-                        <div className="bg-[#00c957] rounded-lg py-1 px-1.5 sm:px-2 flex items-center justify-center gap-1 shadow-sm text-white">
+                        <div className="bg-[#048037] rounded-lg py-1 px-1.5 sm:px-2 flex items-center justify-center gap-1 shadow-sm text-white">
                           <span className="text-[11px] font-bold text-white tracking-tight">PagerDuty</span>
                         </div>
                       </div>
@@ -686,12 +676,12 @@ export default function ZeroCodeObservabilitySection() {
                     {/* Active Traces & Exceptions Dual Status Badges */}
                     <div className="grid grid-cols-2 gap-2 mb-2.5">
                       {/* Active Traces */}
-                      <div className="bg-[#071813]/90 border border-[#00e599]/30 rounded-xl p-2 flex flex-col justify-between">
+                      <div className="bg-[#0e1219] border border-white/[0.08] rounded-xl p-2 flex flex-col justify-between">
                         <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-[#00e599] shadow-[0_0_6px_#00e599]" />
+                          <span className="w-2 h-2 rounded-full bg-emerald-400" />
                           <span className="text-[9px] sm:text-[9.5px] font-medium text-zinc-200 tracking-tight">Active Traces</span>
                         </div>
-                        <div className="w-full h-1 rounded-full bg-[#00e599]/40 mt-2" />
+                        <div className="w-full h-1 rounded-full bg-emerald-400/30 mt-2" />
                       </div>
 
                       {/* Exceptions */}
@@ -707,13 +697,13 @@ export default function ZeroCodeObservabilitySection() {
                     {/* Historical Traces Row */}
                     <div className="flex items-center justify-between text-[7.5px] font-mono text-zinc-500 mb-2 px-0.5">
                       <span>Runtime error traces</span>
-                      <span className="text-[#00e599] font-sans">View trace ↗</span>
+                      <span className="text-zinc-400 hover:text-white font-sans cursor-pointer">View trace ↗</span>
                     </div>
 
                     {/* TracePilot AI Fixer Tile */}
                     <div className="bg-white/[0.04] border border-white/[0.07] rounded-lg p-2 flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#00e599]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                         <span className="text-[8.5px] text-zinc-300 font-medium">TracePilot AI Fixer</span>
                       </div>
                       <span className="text-[7.5px] font-mono text-zinc-500">PR raised in 18s</span>
@@ -737,7 +727,7 @@ export default function ZeroCodeObservabilitySection() {
         {/* ── Compact Bottom Action Strip: Automated Telemetry PR Promotion ── */}
         <div className="mt-10 sm:mt-12 max-w-3xl mx-auto flex flex-col sm:flex-row items-center justify-between py-3 px-5 sm:py-3.5 sm:px-6 rounded-2xl bg-[#0c1219]/90 border border-white/[0.09] shadow-[0_16px_40px_rgba(0,0,0,0.7)] gap-3 sm:gap-4 select-none">
           <div className="flex items-center gap-2.5 min-w-0">
-            <GitPullRequest className="w-4 h-4 text-[#00e599] shrink-0" />
+            <GitPullRequest className="w-4 h-4 text-emerald-400 shrink-0" />
             <div className="min-w-0">
               <h4 className="text-[13px] sm:text-[13.5px] font-semibold text-white tracking-tight">
                 Auto-raise PR with tracing code &amp; Web Vitals
@@ -750,7 +740,7 @@ export default function ZeroCodeObservabilitySection() {
 
           <Link
             href="/signup"
-            className="inline-flex items-center gap-1.5 px-4 sm:px-5 py-2 rounded-full bg-[#00e599] hover:bg-[#00c885] text-black font-semibold text-xs transition-all shadow-[0_0_16px_rgba(0,229,153,0.3)] hover:shadow-[0_0_24px_rgba(0,229,153,0.5)] cursor-pointer whitespace-nowrap shrink-0 group"
+            className="inline-flex items-center gap-1.5 px-4 sm:px-5 py-2 rounded-full bg-emerald-400 hover:bg-emerald-300 text-black font-semibold text-xs transition-all shadow-sm cursor-pointer whitespace-nowrap shrink-0 group"
           >
             <span>Auto-raise telemetry PR</span>
             <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />

@@ -67,6 +67,7 @@ export async function initializeUptimeCronSchema() {
       success BOOLEAN NOT NULL,
       status_code INTEGER,
       response_time_ms INTEGER NOT NULL,
+      latency_us INTEGER,
       error_message TEXT,
       location TEXT NOT NULL DEFAULT 'default'
     );
@@ -139,7 +140,9 @@ export async function initializeUptimeCronSchema() {
 
     ALTER TABLE uptime_monitors ADD CONSTRAINT uptime_monitors_monitor_type_check CHECK (monitor_type IN ('http', 'keyword', 'ping', 'port', 'heartbeat', 'dns', 'api', 'udp'));
 
-    ALTER TABLE uptime_monitors ADD COLUMN IF NOT EXISTS managed_by TEXT NOT NULL DEFAULT 'node';
+    ALTER TABLE uptime_monitors ADD COLUMN IF NOT EXISTS managed_by TEXT NOT NULL DEFAULT 'engine';
+    ALTER TABLE uptime_monitors ALTER COLUMN managed_by SET DEFAULT 'engine';
+    UPDATE uptime_monitors SET managed_by = 'engine' WHERE managed_by = 'node' OR managed_by IS NULL;
 
     -- 4. Index Migration: Drop old non-partial index once; preserve partial index across boots
     DROP INDEX IF EXISTS uptime_monitors_heartbeat_idx;
@@ -242,7 +245,16 @@ export async function initializeUptimeCronSchema() {
     WHEN (OLD.url IS DISTINCT FROM NEW.url OR OLD.interval_seconds IS DISTINCT FROM NEW.interval_seconds
        OR OLD.monitor_type IS DISTINCT FROM NEW.monitor_type OR OLD.is_paused IS DISTINCT FROM NEW.is_paused
        OR OLD.managed_by IS DISTINCT FROM NEW.managed_by OR OLD.timeout_seconds IS DISTINCT FROM NEW.timeout_seconds
-       OR OLD.target_host IS DISTINCT FROM NEW.target_host)
+       OR OLD.target_host IS DISTINCT FROM NEW.target_host OR OLD.target_port IS DISTINCT FROM NEW.target_port
+       OR OLD.up_status_codes IS DISTINCT FROM NEW.up_status_codes OR OLD.follow_redirects IS DISTINCT FROM NEW.follow_redirects
+       OR OLD.http_method IS DISTINCT FROM NEW.http_method OR OLD.request_headers IS DISTINCT FROM NEW.request_headers
+       OR OLD.request_body IS DISTINCT FROM NEW.request_body OR OLD.auth_type IS DISTINCT FROM NEW.auth_type
+       OR OLD.auth_username IS DISTINCT FROM NEW.auth_username OR OLD.auth_password IS DISTINCT FROM NEW.auth_password
+       OR OLD.auth_bearer_token IS DISTINCT FROM NEW.auth_bearer_token OR OLD.keyword IS DISTINCT FROM NEW.keyword
+       OR OLD.keyword_condition IS DISTINCT FROM NEW.keyword_condition OR OLD.case_sensitive IS DISTINCT FROM NEW.case_sensitive
+       OR OLD.dns_hostname IS DISTINCT FROM NEW.dns_hostname OR OLD.dns_record_type IS DISTINCT FROM NEW.dns_record_type
+       OR OLD.dns_expected_values IS DISTINCT FROM NEW.dns_expected_values OR OLD.dns_match_mode IS DISTINCT FROM NEW.dns_match_mode
+       OR OLD.status IS DISTINCT FROM NEW.status)
     EXECUTE FUNCTION notify_monitor_change();
 
     CREATE INDEX IF NOT EXISTS uptime_checks_slow_idx

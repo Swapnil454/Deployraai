@@ -129,5 +129,46 @@ func (s *StateStore) GarbageCollectAndSweep(ttl time.Duration, onActive func(mon
 
 // SeedDown restores DOWN state from the datastore at boot so recovery after a restart emits UP.
 func (s *StateStore) SeedDown(id string, start time.Time) {
-s.monitors.LoadOrStore(id, &monitorEntry{state: MonitorState{ID: id, Status: StatusDown, Epoch: 1, IncidentStart: start}, lastAccess: time.Now()})
+	s.SyncStatus(id, "down", start)
 }
+
+// SyncStatus updates or initializes the in-memory state machine to match DB ground truth.
+func (s *StateStore) SyncStatus(id string, status string, incidentStart time.Time) {
+	targetStatus := StatusUp
+	if status == "down" {
+		targetStatus = StatusDown
+	} else if status == "pending" {
+		targetStatus = StatusBlocked
+	}
+
+	val, ok := s.monitors.Load(id)
+	if !ok {
+		s.monitors.Store(id, &monitorEntry{
+			state: MonitorState{
+				ID:            id,
+				Status:        targetStatus,
+				Epoch:         1,
+				IncidentStart: incidentStart,
+			},
+			lastAccess: time.Now(),
+		})
+		return
+	}
+
+	entry := val.(*monitorEntry)
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	entry.lastAccess = time.Now()
+
+	if entry.state.Status != targetStatus {
+		entry.state.Status = targetStatus
+		entry.state.ConsecutiveFails = 0
+		entry.state.ConsecutivePass = 0
+		if targetStatus == StatusDown {
+			entry.state.IncidentStart = incidentStart
+		} else {
+			entry.state.IncidentStart = time.Time{}
+		}
+	}
+}
+

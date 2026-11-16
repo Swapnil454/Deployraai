@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -55,6 +56,25 @@ type Monitor struct {
 	ExpectedStatus  []int
 	ForceGET        bool
 	Headers         map[string]string
+
+	// Extended HTTP / Protocol Configuration
+	UpStatusCodes     []string
+	FollowRedirects   bool
+	HTTPMethod        string
+	RequestBody       string
+	AuthType          string
+	AuthUsername      string
+	AuthPassword      string
+	AuthBearerToken   string
+	KeywordCondition  string
+	TargetHost        string
+	TargetPort        int
+	DNSHostname       string
+	DNSRecordType     string
+	DNSExpectedValues   []string
+	DNSMatchMode        string
+	DNSResolverMode     string
+	DNSCustomResolverIP string
 
 	// Per-monitor randomized full-phase schedule & TLS cert tracking
 	CheckCounter       uint32
@@ -261,4 +281,26 @@ func ResolveTargetIP(ptr *atomic.Pointer[Monitor]) {
 		m.TargetIP = ipStr
 		m.TargetIPResolvedAt = time.Now()
 	})
+}
+
+// CheckStatusAccepted verifies whether an HTTP status code satisfies the accepted patterns.
+// Patterns can be wildcard ranges ("2xx", "3xx", "4xx", "5xx") or explicit codes ("200", "302", "404").
+func CheckStatusAccepted(statusCode int, patterns []string) bool {
+	if len(patterns) == 0 {
+		return statusCode >= 200 && statusCode < 400
+	}
+	for _, p := range patterns {
+		p = strings.TrimSpace(strings.ToLower(p))
+		if len(p) == 3 && p[1] == 'x' && p[2] == 'x' {
+			prefix := p[0] - '0'
+			if prefix >= 1 && prefix <= 5 && statusCode/100 == int(prefix) {
+				return true
+			}
+		} else if code, err := strconv.Atoi(p); err == nil {
+			if code == statusCode {
+				return true
+			}
+		}
+	}
+	return false
 }

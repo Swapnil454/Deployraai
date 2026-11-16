@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -709,6 +710,27 @@ export default function NewUptimeMonitorPage() {
                 )}
               </div>
 
+              {monitorType === "UDP monitoring" && (
+                <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-200 shadow-sm backdrop-blur-sm animate-in fade-in duration-200">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+                  <div className="text-xs leading-relaxed">
+                    <span className="font-semibold text-amber-300">UDP Monitoring Notice:</span>{" "}
+                    UDP is connectionless and does not perform a handshake. Many UDP servers (e.g., DNS on 8.8.8.8, NTP, or proprietary daemons) silently drop unexpected or raw payloads without replying to prevent DDoS amplification attacks, which can trigger false downtime timeouts.
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-amber-300/90">
+                      <span>💡 <strong>Recommendation:</strong> For DNS servers, switch the probe type below to</span>
+                      <button
+                        type="button"
+                        onClick={() => setUdpProbeType("dns")}
+                        className="font-semibold underline hover:text-amber-100"
+                      >
+                        DNS query
+                      </button>
+                      <span>or use the dedicated <strong>DNS monitoring</strong> type.</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {monitorType !== "Cron job / Heartbeat monitoring" && (
                 <div className="mt-6 flex flex-col gap-4 sm:flex-row">
                   <label className="flex-1 block text-sm font-semibold">
@@ -938,7 +960,12 @@ export default function NewUptimeMonitorPage() {
 
               {monitorType === "UDP monitoring" && (
                 <div className="mt-6 space-y-5 rounded-lg border border-zinc-700 bg-zinc-900/50 p-5">
-                  <h3 className="text-sm font-bold text-white">UDP Probe Settings</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-white">UDP Probe Settings</h3>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-300">
+                      <AlertTriangle className="h-3 w-3" /> Silent-drop alert risk
+                    </span>
+                  </div>
                   <div className="grid gap-5 sm:grid-cols-2">
                     <label className="block text-sm font-semibold">
                       Probe Type
@@ -981,6 +1008,13 @@ export default function NewUptimeMonitorPage() {
 
                   {udpProbeType === "raw" && (
                     <div className="space-y-5">
+                      <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/20 bg-amber-950/30 p-3 text-xs text-amber-200/90">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                        <div>
+                          <strong className="text-amber-300">Raw Payload Warning:</strong> Most public UDP services silently discard unformatted payloads. If you expect a response from an external service, make sure it understands the raw data, or switch probe type to <strong>DNS query</strong> or <strong>SNMP</strong>.
+                        </div>
+                      </div>
+
                       <label className="block text-sm font-semibold">
                         Raw UDP Payload (Hex or plain text)
                         <span className="block mt-1 text-xs text-zinc-400 font-normal">Data sent in the UDP packet.</span>

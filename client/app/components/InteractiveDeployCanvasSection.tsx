@@ -425,6 +425,8 @@ export default function InteractiveDeployCanvasSection() {
   const [searchQueryText, setSearchQueryText] = useState<string>("");
   const [showCommandPalette, setShowCommandPalette] = useState<boolean>(false);
   const [showNormalToast, setShowNormalToast] = useState<boolean>(false);
+  const [dismissedWarn1, setDismissedWarn1] = useState<boolean>(false);
+  const [dismissedWarn2, setDismissedWarn2] = useState<boolean>(false);
   const [hoveredFlameFrame, setHoveredFlameFrame] = useState<FlameFrame | null>(null);
 
   // ── Stage 5: Evolve Progressive Architecture (3 -> 8 -> 12 -> 16 -> 18 Nodes)
@@ -743,6 +745,8 @@ export default function InteractiveDeployCanvasSection() {
       setShowCommandPalette(false);
       setShowNormalToast(false);
       setShowDeployToast(false);
+      setDismissedWarn1(false);
+      setDismissedWarn2(false);
       setCursorPos({ x: "50%", y: "50%", opacity: 0 });
 
       // 0.6s: Top right Warning 1 arrives ("High Memory Usage! backend's CPU resource limit reached")
@@ -1198,7 +1202,7 @@ export default function InteractiveDeployCanvasSection() {
             ═════════════════════════════════════════════════════════════ */}
         <div
           ref={shellRef}
-          className="relative w-full rounded-2xl border border-white/[0.08] bg-[#0c0d14] shadow-[0_25px_80px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col min-h-[500px] sm:min-h-[560px] md:min-h-[590px] aspect-[16/11] sm:aspect-[16/10] antialiased [text-rendering:geometricPrecision]"
+          className="relative w-full rounded-2xl border border-white/[0.08] bg-[#0c0d14] shadow-[0_8px_30px_rgba(0,0,0,0.25)] overflow-hidden flex flex-col min-h-[500px] sm:min-h-[560px] md:min-h-[590px] aspect-[16/11] sm:aspect-[16/10] antialiased [text-rendering:geometricPrecision]"
         >
           
           {/* ── Virtual Mouse Cursor & Click Wave Ripple ──────────────── */}
@@ -1509,28 +1513,35 @@ export default function InteractiveDeployCanvasSection() {
 
             {/* ── Top-Right Anchored Warnings & Green Toast (True Top-Right of Canvas Frame) ── */}
             {activeStage === "monitor" && activeHeaderTab === "Architecture" && (
-              <div className="absolute top-3 right-3 sm:top-4 sm:right-5 z-40 flex flex-col gap-2.5 items-end pointer-events-none">
+              <div className="absolute top-2.5 right-2.5 sm:top-3 sm:right-4 z-40 flex flex-col gap-2 items-end pointer-events-none max-w-[calc(100%-24px)]">
                 {/* WARNING CARD 1: High Memory Usage (Visible during warnings & search, unmounted on all-stabilized) */}
                 {(monitorStep === "warning-1" ||
                   monitorStep === "warning-2" ||
                   monitorStep === "create-menu" ||
                   monitorStep === "search-typing" ||
-                  monitorStep === "redis-deployed") && (
-                  <div className="w-72 sm:w-80 p-3 rounded-xl bg-[#14120e]/95 border border-amber-500/40 shadow-[0_12px_36px_rgba(0,0,0,0.85)] backdrop-blur-md pointer-events-auto animate-in fade-in slide-in-from-right-8 duration-500">
-                    <div className="flex items-center justify-between text-xs pb-1 border-b border-amber-500/20">
+                  monitorStep === "redis-deployed") && !dismissedWarn1 && (
+                  <div className="w-52 sm:w-56 md:w-60 p-2 sm:p-2.5 rounded-lg bg-[#14120e]/95 border border-amber-500/40 shadow-[0_8px_24px_rgba(0,0,0,0.85)] backdrop-blur-md pointer-events-auto animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div className="flex items-center justify-between text-[11px] pb-1 border-b border-amber-500/20">
                       <div className="flex items-center gap-1.5 font-bold text-amber-400">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                        <span>High Memory Usage!</span>
+                        <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                        <span className="truncate">High Memory Usage!</span>
                       </div>
-                      <span className="text-zinc-500 hover:text-zinc-300 cursor-pointer text-xs">✕</span>
+                      <button
+                        type="button"
+                        onClick={() => setDismissedWarn1(true)}
+                        className="text-zinc-500 hover:text-zinc-300 transition-colors p-0.5"
+                        title="Dismiss"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
                     </div>
 
-                    <div className="text-[11px] text-zinc-300 py-1.5 leading-snug">
+                    <div className="text-[10px] text-zinc-300 py-1 leading-snug">
                       <span className="font-bold text-white">backend</span>'s CPU resource limit reached — service may degrade
                     </div>
 
                     {/* Yellow Flame Spike Mini Graph */}
-                    <div className="relative w-full h-11 mt-1">
+                    <div className="relative w-full h-7 mt-0.5">
                       <svg className="w-full h-full" viewBox="0 0 200 45" preserveAspectRatio="none">
                         <defs>
                           <linearGradient id="warn1GradTop" x1="0" y1="0" x2="0" y2="1">
@@ -1548,29 +1559,36 @@ export default function InteractiveDeployCanvasSection() {
                           stroke="#eab308"
                           strokeWidth="2"
                         />
-                        <circle cx="200" cy="4" r="2.5" fill="#eab308" className="animate-pulse" />
+                        <circle cx="200" cy="4" r="2" fill="#eab308" className="animate-pulse" />
                       </svg>
                     </div>
                   </div>
                 )}
 
                 {/* WARNING CARD 2: Resource Limit Reached (Slides out on redis-deployed) */}
-                {(monitorStep === "warning-2" || monitorStep === "create-menu" || monitorStep === "search-typing") && (
-                  <div className="w-72 sm:w-80 p-3 rounded-xl bg-[#14120e]/95 border border-amber-500/40 shadow-[0_12px_36px_rgba(0,0,0,0.85)] backdrop-blur-md pointer-events-auto animate-in fade-in slide-in-from-right-8 duration-500">
-                    <div className="flex items-center justify-between text-xs pb-1 border-b border-amber-500/20">
+                {(monitorStep === "warning-2" || monitorStep === "create-menu" || monitorStep === "search-typing") && !dismissedWarn2 && (
+                  <div className="w-52 sm:w-56 md:w-60 p-2 sm:p-2.5 rounded-lg bg-[#14120e]/95 border border-amber-500/40 shadow-[0_8px_24px_rgba(0,0,0,0.85)] backdrop-blur-md pointer-events-auto animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div className="flex items-center justify-between text-[11px] pb-1 border-b border-amber-500/20">
                       <div className="flex items-center gap-1.5 font-bold text-amber-400">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Resource Limit Reached!</span>
+                        <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                        <span className="truncate">Resource Limit Reached!</span>
                       </div>
-                      <span className="text-zinc-500 hover:text-zinc-300 cursor-pointer text-xs">✕</span>
+                      <button
+                        type="button"
+                        onClick={() => setDismissedWarn2(true)}
+                        className="text-zinc-500 hover:text-zinc-300 transition-colors p-0.5"
+                        title="Dismiss"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
                     </div>
 
-                    <div className="text-[11px] text-zinc-300 py-1.5 leading-snug">
+                    <div className="text-[10px] text-zinc-300 py-1 leading-snug">
                       <span className="font-bold text-white">backend</span>'s surpassed memory limit by 23% — service may crash
                     </div>
 
                     {/* Yellow Jagged Spike Mini Graph */}
-                    <div className="relative w-full h-11 mt-1">
+                    <div className="relative w-full h-7 mt-0.5">
                       <svg className="w-full h-full" viewBox="0 0 200 45" preserveAspectRatio="none">
                         <defs>
                           <linearGradient id="warn2GradTop" x1="0" y1="0" x2="0" y2="1">
@@ -1588,7 +1606,7 @@ export default function InteractiveDeployCanvasSection() {
                           stroke="#f59e0b"
                           strokeWidth="2"
                         />
-                        <circle cx="200" cy="8" r="2.5" fill="#f59e0b" className="animate-pulse" />
+                        <circle cx="200" cy="8" r="2" fill="#f59e0b" className="animate-pulse" />
                       </svg>
                     </div>
                   </div>
@@ -2254,100 +2272,100 @@ export default function InteractiveDeployCanvasSection() {
 
                       {/* ── STEP 7: Brand New Ultra-Proper Final Deployment Successfully Flame / Dashboard ── */}
                       {deployStep === "final-success" && (
-                        <div className="w-full max-w-3xl rounded-2xl bg-[#08090e] border border-white/[0.12] shadow-2xl p-5 flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-400 relative overflow-hidden">
+                        <div className="w-full max-w-[460px] sm:max-w-[490px] rounded-xl bg-[#08090e] border border-white/[0.12] shadow-2xl p-2.5 sm:p-3 flex flex-col gap-1.5 sm:gap-2 animate-in fade-in zoom-in-95 duration-400 relative overflow-hidden select-none">
                           {/* Top Header */}
-                          <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
-                            <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-                                <CheckCircle2 className="w-5 h-5" />
+                          <div className="flex items-center justify-between pb-1.5 border-b border-white/[0.08]">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="w-6 h-6 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shrink-0 shadow-[0_0_12px_rgba(16,185,129,0.3)]">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
                               </div>
-                              <div>
-                                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                              <div className="min-w-0">
+                                <h3 className="text-[11px] sm:text-xs font-bold text-white flex flex-wrap items-center gap-1.5">
                                   <span>Production Deployment Live</span>
-                                  <span className="px-2 py-0.5 rounded text-[9.5px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-mono font-bold">
+                                  <span className="px-1.5 py-0.2 rounded text-[7.5px] sm:text-[8px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-mono font-bold">
                                     ZERO-DOWNTIME ROLLOUT #2 ✓
                                   </span>
                                 </h3>
-                                <p className="text-[11px] text-zinc-400 mt-0.5">
-                                  Dual full-stack microservices interconnected, encrypted &amp; verified healthy
+                                <p className="text-[9px] text-zinc-400 mt-0.5 truncate">
+                                  Dual full-stack microservices interconnected &amp; verified healthy
                                 </p>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-white/[0.06] text-emerald-400 border border-white/10 flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+                            <div className="hidden xs:flex items-center gap-1 shrink-0">
+                              <span className="px-1.5 py-0.5 rounded-full text-[8px] font-bold uppercase bg-white/[0.06] text-emerald-400 border border-white/10 flex items-center gap-1">
+                                <span className="w-1 h-1 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.8)]" />
                                 ALL ENVS SYNCED (14ms)
                               </span>
                             </div>
                           </div>
 
                           {/* Dual Interconnected Pods Cards */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                          <div className="grid grid-cols-1 xs:grid-cols-2 gap-1.5 sm:gap-2">
                             {/* Frontend Pod Card */}
-                            <div className="p-3.5 rounded-xl bg-[#0e1017] border border-white/[0.08] flex flex-col gap-2.5">
+                            <div className="p-2 rounded-lg bg-[#0e1017] border border-white/[0.08] flex flex-col gap-1.5">
                               <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <svg className="w-4 h-4 fill-white" viewBox="0 0 116 100"><polygon points="58 0 116 100 0 100" /></svg>
-                                  <span className="text-xs font-bold text-white">Frontend Microservice</span>
+                                <div className="flex items-center gap-1.5">
+                                  <svg className="w-3 h-3 fill-white" viewBox="0 0 116 100"><polygon points="58 0 116 100 0 100" /></svg>
+                                  <span className="text-[10px] font-bold text-white">Frontend Microservice</span>
                                 </div>
-                                <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
+                                <span className="text-[7.5px] font-mono text-emerald-400 bg-emerald-500/10 px-1 py-0.2 rounded border border-emerald-500/20">
                                   Vercel Edge
                                 </span>
                               </div>
 
-                              <div className="p-2 rounded-lg bg-black/50 border border-white/[0.06] flex items-center justify-between text-xs">
-                                <span className="font-mono text-indigo-300 text-[11px] truncate max-w-[220px]">
+                              <div className="p-1 rounded bg-black/50 border border-white/[0.06] flex items-center justify-between text-[9px]">
+                                <span className="font-mono text-indigo-300 text-[9px] truncate max-w-[140px] sm:max-w-[170px]">
                                   https://deployra-core.vercel.app
                                 </span>
-                                <ExternalLink className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                                <ExternalLink className="w-2.5 h-2.5 text-zinc-500 shrink-0" />
                               </div>
 
-                              <div className="text-[10px] font-mono space-y-1 text-zinc-300">
+                              <div className="text-[8.5px] font-mono space-y-0.5 text-zinc-300">
                                 <div className="flex items-center justify-between">
-                                  <span className="text-zinc-500">NEXT_PUBLIC_API_URL:</span>
-                                  <span className="text-emerald-400 font-semibold truncate max-w-[140px]">api.deployra-core...</span>
+                                  <span className="text-zinc-500">API_URL:</span>
+                                  <span className="text-emerald-400 font-semibold truncate max-w-[95px]">api.deployra...</span>
                                 </div>
                                 <div className="flex items-center justify-between">
-                                  <span className="text-zinc-500">Edge Cache Hit:</span>
+                                  <span className="text-zinc-500">Cache Hit:</span>
                                   <span className="text-white font-semibold">99.4% (iad1)</span>
                                 </div>
                                 <div className="flex items-center justify-between">
-                                  <span className="text-zinc-500">TLS Encryption:</span>
+                                  <span className="text-zinc-500">TLS:</span>
                                   <span className="text-emerald-400 font-semibold">TLS 1.3 Active</span>
                                 </div>
                               </div>
                             </div>
 
                             {/* Backend Pod Card */}
-                            <div className="p-3.5 rounded-xl bg-[#0e1017] border border-white/[0.08] flex flex-col gap-2.5">
+                            <div className="p-2 rounded-lg bg-[#0e1017] border border-white/[0.08] flex flex-col gap-1.5">
                               <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-4 h-4 rounded bg-white text-black flex items-center justify-center font-bold text-[9px]">R</div>
-                                  <span className="text-xs font-bold text-white">Backend Microservice</span>
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-3 h-3 rounded bg-white text-black flex items-center justify-center font-bold text-[7.5px]">R</div>
+                                  <span className="text-[10px] font-bold text-white">Backend Microservice</span>
                                 </div>
-                                <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
+                                <span className="text-[7.5px] font-mono text-emerald-400 bg-emerald-500/10 px-1 py-0.2 rounded border border-emerald-500/20">
                                   Render Cluster
                                 </span>
                               </div>
 
-                              <div className="p-2 rounded-lg bg-black/50 border border-white/[0.06] flex items-center justify-between text-xs">
-                                <span className="font-mono text-emerald-300 text-[11px] truncate max-w-[220px]">
+                              <div className="p-1 rounded bg-black/50 border border-white/[0.06] flex items-center justify-between text-[9px]">
+                                <span className="font-mono text-emerald-300 text-[9px] truncate max-w-[140px] sm:max-w-[170px]">
                                   https://api.deployra-core.onrender.com
                                 </span>
-                                <ExternalLink className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                                <ExternalLink className="w-2.5 h-2.5 text-zinc-500 shrink-0" />
                               </div>
 
-                              <div className="text-[10px] font-mono space-y-1 text-zinc-300">
+                              <div className="text-[8.5px] font-mono space-y-0.5 text-zinc-300">
                                 <div className="flex items-center justify-between">
-                                  <span className="text-zinc-500">CORS_ALLOWED_ORIGIN:</span>
-                                  <span className="text-emerald-400 font-semibold truncate max-w-[140px]">deployra-core...</span>
+                                  <span className="text-zinc-500">CORS:</span>
+                                  <span className="text-emerald-400 font-semibold truncate max-w-[95px]">deployra...</span>
                                 </div>
                                 <div className="flex items-center justify-between">
-                                  <span className="text-zinc-500">Database Connection:</span>
+                                  <span className="text-zinc-500">DB Conn:</span>
                                   <span className="text-white font-semibold">Neon DB (0.4ms)</span>
                                 </div>
                                 <div className="flex items-center justify-between">
-                                  <span className="text-zinc-500">Container Replicas:</span>
+                                  <span className="text-zinc-500">Replicas:</span>
                                   <span className="text-emerald-400 font-semibold">2 Active Healthy</span>
                                 </div>
                               </div>
@@ -2355,35 +2373,35 @@ export default function InteractiveDeployCanvasSection() {
                           </div>
 
                           {/* Cross-Service Handshake Sealed Banner */}
-                          <div className="p-2.5 rounded-xl bg-[#0e111a] border border-white/[0.08] flex items-center justify-between text-[11px] font-mono">
-                            <div className="flex items-center gap-2 text-zinc-300">
-                              <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                              <span className="text-white font-semibold">Inter-Service Mutual Handshake:</span>
-                              <span className="text-zinc-400">AES-256 GCM Attested</span>
+                          <div className="p-1.5 px-2 rounded-lg bg-[#0e111a] border border-white/[0.08] flex items-center justify-between text-[9px] font-mono">
+                            <div className="flex items-center gap-1.5 text-zinc-300 truncate">
+                              <Shield className="w-3 h-3 text-emerald-400 shrink-0" />
+                              <span className="text-white font-semibold">Inter-Service Handshake:</span>
+                              <span className="text-zinc-400 truncate">AES-256 GCM</span>
                             </div>
-                            <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
-                              <Check className="w-3 h-3" />
+                            <span className="text-[8px] text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20 flex items-center gap-1 shrink-0">
+                              <Check className="w-2.5 h-2.5" />
                               <span>ZERO DRIFT</span>
                             </span>
                           </div>
 
                           {/* Unified Telemetry Ribbon */}
-                          <div className="p-3 rounded-xl bg-[#05060a] border border-white/[0.06] grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                          <div className="p-1.5 sm:p-2 rounded-lg bg-[#05060a] border border-white/[0.06] grid grid-cols-4 gap-1 sm:gap-1.5 text-center">
                             <div>
-                              <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold block">THROUGHPUT</span>
-                              <span className="text-white font-bold font-mono text-sm mt-0.5 block">1,840 req/s</span>
+                              <span className="text-[7.5px] uppercase tracking-wider text-zinc-500 font-bold block">THROUGHPUT</span>
+                              <span className="text-white font-bold font-mono text-[10px] sm:text-[11px] mt-0.5 block">1,840 req/s</span>
                             </div>
                             <div>
-                              <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold block">LATENCY (P99)</span>
-                              <span className="text-emerald-400 font-bold font-mono text-sm mt-0.5 block">14ms</span>
+                              <span className="text-[7.5px] uppercase tracking-wider text-zinc-500 font-bold block">LATENCY (P99)</span>
+                              <span className="text-emerald-400 font-bold font-mono text-[10px] sm:text-[11px] mt-0.5 block">14ms</span>
                             </div>
                             <div>
-                              <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold block">ERROR RATE</span>
-                              <span className="text-emerald-400 font-bold font-mono text-sm mt-0.5 block">0.00%</span>
+                              <span className="text-[7.5px] uppercase tracking-wider text-zinc-500 font-bold block">ERROR RATE</span>
+                              <span className="text-emerald-400 font-bold font-mono text-[10px] sm:text-[11px] mt-0.5 block">0.00%</span>
                             </div>
                             <div>
-                              <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold block">CANARY HEALTH</span>
-                              <span className="text-white font-bold font-mono text-sm mt-0.5 block">5/5 Passed ✓</span>
+                              <span className="text-[7.5px] uppercase tracking-wider text-zinc-500 font-bold block">CANARY HEALTH</span>
+                              <span className="text-white font-bold font-mono text-[10px] sm:text-[11px] mt-0.5 block">5/5 Passed ✓</span>
                             </div>
                           </div>
                         </div>
@@ -4817,19 +4835,31 @@ export default function InteractiveDeployCanvasSection() {
                 CORRECTLY ANCHORED POPUP TOASTS & ALERTS (TRUE CORNERS, NOT CENTER!)
                 ═══════════════════════════════════════════════════════════════ */}
             
-            {/* 1. Deployment Successful Toast (Anchored to true BOTTOM-RIGHT CORNER - Compact, sleek, crystal clear) */}
+            {/* 1. Deployment Successful Toast (Anchored to true BOTTOM-RIGHT CORNER - Elevated slightly to clear bottom dock bar) */}
             {activeStage === "deploy" && deployToast.show && (
-              <div className="absolute bottom-4 right-4 max-w-[280px] sm:max-w-[310px] p-2 sm:p-2.5 rounded-lg bg-[#0f2e22]/95 border border-emerald-600/40 shadow-xl shadow-black/80 flex items-center gap-2 z-40 animate-in fade-in slide-in-from-bottom-3 duration-300 backdrop-blur-md">
-                <div className="w-4 h-4 rounded-full bg-emerald-500/25 border border-emerald-400/40 flex items-center justify-center text-white shrink-0">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-300" />
+              <div className="absolute bottom-8 right-3 sm:bottom-9 sm:right-4 max-w-[210px] sm:max-w-[230px] p-2 rounded-lg bg-[#0b1b13]/95 border border-emerald-500/40 shadow-[0_8px_30px_rgba(0,0,0,0.85)] flex items-center gap-2 z-40 animate-in fade-in slide-in-from-bottom-2 duration-300 backdrop-blur-xl pointer-events-auto">
+                <div className="w-5 h-5 rounded-md bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-300 shrink-0 shadow-[0_0_8px_rgba(16,185,129,0.3)]">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                 </div>
-                <div className="min-w-0">
-                  <div className="text-[11px] font-bold text-white flex items-center gap-1.5">
-                    <span className="truncate">{deployToast.title}</span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-white truncate">Production Live!</span>
+                    <span className="px-1 py-0.2 rounded text-[7.5px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                      LIVE
+                    </span>
                   </div>
-                  <div className="text-[9.5px] text-white/95 font-medium leading-tight">{deployToast.subtitle}</div>
+                  <p className="text-[8.5px] text-emerald-100/80 font-medium leading-tight mt-0.5 line-clamp-1">
+                    {deployToast.subtitle}
+                  </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDeployToast(false)}
+                  className="text-zinc-500 hover:text-zinc-200 transition-colors p-0.5 rounded hover:bg-white/5 shrink-0"
+                  title="Dismiss"
+                >
+                  <X className="w-3 h-3" />
+                </button>
               </div>
             )}
 
@@ -4856,7 +4886,7 @@ export default function InteractiveDeployCanvasSection() {
             FLOATING DOCK NAVIGATOR (Floating on bottom border on center)
             ═════════════════════════════════════════════════════════════ */}
         <div className="absolute bottom-6 sm:bottom-8 left-1/2 -translate-x-1/2 translate-y-1/2 z-40 flex items-center justify-center max-w-[calc(100%-20px)] pointer-events-auto">
-          <div className="flex items-center gap-0.5 p-1 rounded-xl bg-[#13111c] border border-white/[0.14] shadow-[0_12px_40px_rgba(0,0,0,0.95)] backdrop-blur-md shrink-0 max-w-full overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-0.5 p-1 rounded-xl bg-[#13111c] border border-white/[0.14] shadow-[0_4px_16px_rgba(0,0,0,0.35)] backdrop-blur-md shrink-0 max-w-full overflow-x-auto no-scrollbar">
             {STAGES.map((stage, idx) => {
               const Icon = stage.icon;
               const isActive = activeStage === stage.id;

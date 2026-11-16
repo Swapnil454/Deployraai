@@ -2,6 +2,7 @@ import { uptimeDb } from "./db.js";
 import { validateMonitorPayload } from "./validation.js";
 import { isMonitorUnderMaintenance } from "./maintenanceEvaluation.js";
 import { ch } from "../utils/clickhouse.js";
+import { getProberSystemStatus, setAutoNativeProber } from "./service.js";
 
 const owner = (req) => String(req.user.userId);
 
@@ -111,7 +112,28 @@ export async function listMonitors(req, res) {
     under_maintenance: isMonitorUnderMaintenance(m.id)
   }));
 
-  res.json({ monitors: monitorsWithMaintenance });
+  const system_status = await getProberSystemStatus();
+  res.json({ monitors: monitorsWithMaintenance, system_status });
+}
+
+export async function getSystemStatus(req, res) {
+  try {
+    const system_status = await getProberSystemStatus();
+    res.json({ system_status });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export async function toggleAutoNativeProber(req, res) {
+  try {
+    const { enabled } = req.body;
+    const auto_native = setAutoNativeProber(enabled);
+    const system_status = await getProberSystemStatus();
+    res.json({ success: true, auto_native_prober: auto_native, system_status });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 }
 
 /**
@@ -137,14 +159,7 @@ export async function getMonitorDashboard(req, res) {
 
   monitor.under_maintenance = isMonitorUnderMaintenance(monitor.id);
 
-  const [chartChecks, incidents, summary24h, summary7d, summary30d, upSince] = await Promise.all([
-    // Last 12 hours of checks ordered newest-first for charting (client reverses for display)
-    // We fetch up to 2000 points — the chart will thin them client-side by time window
-    uptimeDb.query(
-      "SELECT checked_at, success, status_code, response_time_ms, error_message, suppressed_by_window_id FROM uptime_checks_log WHERE monitor_id = $1 AND checked_at >= NOW() - INTERVAL '12 hours' ORDER BY checked_at DESC LIMIT 2000",
-      [monitor.id],
-    ),
-
+  const [incidents, summary24h, summary7d, summary30d, upSince] = await Promise.all([
     // Last 20 incidents
     uptimeDb.query(
       "SELECT * FROM uptime_incidents WHERE monitor_id = $1 ORDER BY started_at DESC LIMIT 20",
@@ -204,9 +219,66 @@ export async function getMonitorDashboard(req, res) {
   const { resolved_count, window_hours } = mtbfResult.rows[0];
   const mtbf_hours = resolved_count > 0 ? Math.round(window_hours / resolved_count) : null;
 
+  // ── Chart data: ClickHouse is the primary source (Go Engine writes here on every check).
+  // PostgreSQL uptime_checks_log is only written by the Node.js native prober, so when
+  // the Go Engine is active, postgres rows are stale/missing — causing green dots on a
+  // DOWN monitor. Always prefer ClickHouse; fall back to Postgres only on CH failure.
+  let checksForChart = [];
+  let chChartError = null;
+  try {
+    const rs = await ch.query({
+      query: `
+        SELECT checked_at, success, status_code, response_time_ms, latency_us, error_message, suppressed_by_window_id
+        FROM uptime_checks_telemetry
+        WHERE monitor_id = {id:UUID} AND checked_at >= now() - INTERVAL 12 HOUR
+        ORDER BY checked_at DESC
+        LIMIT 2000
+      `,
+      query_params: { id: monitor.id },
+      format: "JSONEachRow",
+    });
+    const chRows = await rs.json();
+    checksForChart = chRows.map((r) => {
+      let checkedAtStr = r.checked_at;
+      if (typeof checkedAtStr === "string" && !checkedAtStr.includes("T")) {
+        checkedAtStr = checkedAtStr.replace(" ", "T") + "Z";
+      }
+      return {
+        checked_at: checkedAtStr,
+        success: r.success === 1 || r.success === true,
+        status_code: r.status_code || null,
+        response_time_ms: Number(r.response_time_ms) || 0,
+        latency_us: r.latency_us ? Number(r.latency_us) : null,
+        error_message: r.error_message || null,
+        suppressed_by_window_id: r.suppressed_by_window_id || null,
+      };
+    });
+    console.log(`[getMonitorDashboard] ClickHouse chart: ${checksForChart.length} rows for monitor ${monitor.id}`);
+  } catch (err) {
+    chChartError = err.message;
+    console.warn("[getMonitorDashboard] ClickHouse chart query failed, falling back to PostgreSQL:", err.message);
+  }
+
+  // Postgres fallback: used when CH is unreachable, or as a supplement if CH returned 0 rows
+  // but Postgres has recent data (e.g., Go Engine is off and native prober is running).
+  if (checksForChart.length === 0) {
+    try {
+      const pgResult = await uptimeDb.query(
+        "SELECT checked_at, success, status_code, response_time_ms, latency_us, error_message, suppressed_by_window_id FROM uptime_checks_log WHERE monitor_id = $1 AND checked_at >= NOW() - INTERVAL '12 hours' ORDER BY checked_at DESC LIMIT 2000",
+        [monitor.id],
+      );
+      if (pgResult.rows.length > 0) {
+        checksForChart = pgResult.rows;
+        console.log(`[getMonitorDashboard] PG fallback chart: ${checksForChart.length} rows for monitor ${monitor.id}${chChartError ? ` (CH error: ${chChartError})` : " (CH returned 0 rows)"}`);
+      }
+    } catch (pgErr) {
+      console.warn("[getMonitorDashboard] PostgreSQL chart fallback also failed:", pgErr.message);
+    }
+  }
+
   res.json({
     monitor,
-    checks: chartChecks.rows,   // newest first, up to 30d
+    checks: checksForChart,   // newest first, up to 12h
     incidents: incidents.rows,
     summary: {
       "24h": summary24h.rows[0],
@@ -241,7 +313,85 @@ export async function listChecks(req, res) {
   const windowMap = { "1h": "1 hour", "3h": "3 hours", "6h": "6 hours", "12h": "12 hours" };
   const windowInterval = windowMap[window];
 
-  // Build WHERE clause
+  // If window is 'all' or '12h' (or any window > 12h), query ClickHouse which retains full historical telemetry
+  if (window === "all" || window === "12h" || !windowInterval) {
+    try {
+      const chConditions = ["monitor_id = {id:UUID}"];
+      const chParams = { id: req.params.monitorId };
+
+      if (filter === "up") {
+        chConditions.push("success = 1");
+      } else if (filter === "down") {
+        chConditions.push("success = 0");
+      }
+
+      const hoursMap = { "1h": 1, "3h": 3, "6h": 6, "12h": 12, "24h": 24, "7d": 168, "30d": 720 };
+      if (hoursMap[window]) {
+        chConditions.push(`checked_at >= now() - INTERVAL ${hoursMap[window]} HOUR`);
+      }
+
+      const chWhere = chConditions.join(" AND ");
+      const limit = perPage;
+      const offset = (page - 1) * perPage;
+
+      const [rowsRes, countRes] = await Promise.all([
+        ch.query({
+          query: `
+            SELECT checked_at, success, status_code, response_time_ms, latency_us, error_message, suppressed_by_window_id
+            FROM uptime_checks_telemetry
+            WHERE ${chWhere}
+            ORDER BY checked_at DESC
+            LIMIT {limit:UInt32} OFFSET {offset:UInt32}
+          `,
+          query_params: { ...chParams, limit, offset },
+          format: "JSONEachRow",
+        }),
+        ch.query({
+          query: `SELECT count() AS total FROM uptime_checks_telemetry WHERE ${chWhere}`,
+          query_params: chParams,
+          format: "JSONEachRow",
+        }),
+      ]);
+
+      const [rawRows, rawCount] = await Promise.all([
+        rowsRes.json(),
+        countRes.json(),
+      ]);
+
+      const total = Number(rawCount[0]?.total || 0);
+
+      // Format ClickHouse rows to match Postgres uptime_checks_log output format
+      const formattedChecks = rawRows.map((r) => {
+        let checkedAtStr = r.checked_at;
+        if (typeof checkedAtStr === "string" && !checkedAtStr.includes("T")) {
+          checkedAtStr = checkedAtStr.replace(" ", "T") + "Z";
+        }
+        return {
+          checked_at: checkedAtStr,
+          success: Boolean(r.success),
+          status_code: r.status_code || null,
+          response_time_ms: Number(r.response_time_ms) || 0,
+          latency_us: r.latency_us ? Number(r.latency_us) : null,
+          error_message: r.error_message || null,
+          suppressed_by_window_id: r.suppressed_by_window_id || null,
+        };
+      });
+
+      return res.json({
+        checks: formattedChecks,
+        pagination: {
+          total,
+          page,
+          per_page: perPage,
+          total_pages: Math.ceil(total / perPage),
+        },
+      });
+    } catch (chErr) {
+      console.warn("[listChecks] ClickHouse query failed, falling back to PostgreSQL:", chErr.message);
+    }
+  }
+
+  // Build WHERE clause for PostgreSQL (Fallback or short windows 1h/3h/6h)
   const conditions = ["monitor_id = $1"];
   const values = [req.params.monitorId];
 
@@ -257,7 +407,7 @@ export async function listChecks(req, res) {
 
   const [rows, countResult] = await Promise.all([
     uptimeDb.query(
-      `SELECT checked_at, success, status_code, response_time_ms, error_message, suppressed_by_window_id
+      `SELECT checked_at, success, status_code, response_time_ms, latency_us, error_message, suppressed_by_window_id
        FROM uptime_checks_log
        WHERE ${where}
        ORDER BY checked_at DESC
@@ -312,7 +462,8 @@ export async function createMonitor(req, res) {
         dns_match_mode, dns_resolver_mode, dns_custom_resolver_ip,
         api_assertions, api_assertion_logic, api_response_size_limit_kb,
         udp_probe_type, udp_dns_query_name, udp_snmp_oid, udp_snmp_community,
-        udp_raw_payload, udp_expect_any_response, udp_raw_expected_response, udp_response_timeout_ms
+        udp_raw_payload, udp_expect_any_response, udp_raw_expected_response, udp_response_timeout_ms,
+        managed_by
       ) VALUES (
         $1,  $2,  $3,  $4,
         $5,  $6,  $7,  $8,
@@ -328,7 +479,8 @@ export async function createMonitor(req, res) {
         $39, $40, $41,
         $42::jsonb, $43, $44,
         $45, $46, $47, $48,
-        $49, $50, $51, $52
+        $49, $50, $51, $52,
+        $53
       ) RETURNING *`,
       [
         userId,
@@ -383,6 +535,7 @@ export async function createMonitor(req, res) {
         monitor.udp_expect_any_response,
         monitor.udp_raw_expected_response,
         monitor.udp_response_timeout_ms,
+        monitor.managed_by || 'engine',
       ],
     );
     res.status(201).json({ monitor: rows[0] });

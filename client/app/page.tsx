@@ -9,6 +9,8 @@ import OutagePreventionSection from "./components/OutagePreventionSection";
 import StatusPagesSection from "./components/StatusPagesSection";
 import ZeroCodeObservabilitySection from "./components/ZeroCodeObservabilitySection";
 import AutoFixShowcaseSection from "./components/AutoFixShowcaseSection";
+import OutagePreventionTelecastSection from "./components/OutagePreventionTelecastSection";
+import DeepInsightsSection from "./components/DeepInsightsSection";
 
 const ROTATING_FEATURES = [
   "autonomous self-healing",
@@ -181,6 +183,12 @@ export default function Home() {
 
       {/* ── SELF-HEALING AUTOFIX & DYNAMIC PR REPAIR SECTION ──────────────── */}
       <AutoFixShowcaseSection />
+
+      {/* ── OUTAGE PREVENTION & PRE-EMPTIVE INCIDENT TELECAST SECTION ───────── */}
+      <OutagePreventionTelecastSection />
+
+      {/* ── DEEP INSIGHTS & ZERO BLIND SPOTS FEATURE SHOWCASE SECTION ──────── */}
+      <DeepInsightsSection />
     </main>
   );
 }

@@ -217,7 +217,11 @@ func StartConfirmationDispatcher(ctx context.Context, wg *sync.WaitGroup, _ int)
 							cause = string(e.Alert.Status)
 							idemp = e.Alert.IdempotencyKey
 						}
-						evt := buildIncidentEvent(job.monitorID, idemp, string(e.OldState), newStatus, cause, "", e.IncidentStart, e.IncidentEnd)
+						occurredAt := time.Now()
+						if newStatus == "DOWN" && !e.IncidentStart.IsZero() {
+							occurredAt = e.IncidentStart
+						}
+						evt := buildIncidentEvent(job.monitorID, idemp, string(e.OldState), newStatus, cause, "", occurredAt, e.IncidentEnd)
 						deliverOrSpool(evt)
 
 						// NOTE: EventPersistResult feedback intentionally omitted.

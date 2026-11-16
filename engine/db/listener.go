@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"hash/fnv"
 	"log"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/your-org/uptime-engine/core"
@@ -138,18 +140,94 @@ func processNotification(ctx context.Context, pool *pgxpool.Pool, payloadStr str
 	}
 
 	query := `
-        SELECT id, COALESCE(url, target_host, ''), interval_seconds, timeout_seconds, monitor_type, is_paused, managed_by 
+        SELECT
+            id,
+            COALESCE(url, ''),
+            interval_seconds,
+            timeout_seconds,
+            monitor_type,
+            is_paused,
+            managed_by,
+            COALESCE(status, 'up'),
+            COALESCE(keyword, ''),
+            COALESCE(keyword_condition, 'exists'),
+            COALESCE(case_sensitive, FALSE),
+            COALESCE(up_status_codes, ARRAY['2xx', '3xx']),
+            COALESCE(follow_redirects, TRUE),
+            COALESCE(http_method, 'GET'),
+            COALESCE(auth_type, 'none'),
+            COALESCE(auth_username, ''),
+            COALESCE(auth_password, ''),
+            COALESCE(auth_bearer_token, ''),
+            COALESCE(request_body, ''),
+            COALESCE(request_headers, '[]'::jsonb),
+            COALESCE(target_host, ''),
+            COALESCE(target_port, 0),
+            COALESCE(dns_hostname, ''),
+            COALESCE(dns_record_type, 'A'),
+            COALESCE(dns_expected_values, '[]'::jsonb),
+            COALESCE(dns_match_mode, 'any_match')
         FROM uptime_monitors
         WHERE id = $1
     `
 	var r struct {
-		ID, URL, Type, ManagedBy string
-		Interval, Timeout        int
-		IsPaused                 bool
+		ID                   string
+		URL                  string
+		Interval             int
+		Timeout              int
+		Type                 string
+		IsPaused             bool
+		ManagedBy            string
+		Status               string
+		Keyword              string
+		KeywordCondition     string
+		CaseSensitive        bool
+		UpStatusCodes        []string
+		FollowRedirects      bool
+		HTTPMethod           string
+		AuthType             string
+		AuthUsername         string
+		AuthPassword         string
+		AuthBearerToken      string
+		RequestBody          string
+		RequestHeadersRaw    []byte
+		TargetHost           string
+		TargetPort           int
+		DNSHostname          string
+		DNSRecordType        string
+		DNSExpectedValuesRaw []byte
+		DNSMatchMode         string
 	}
 	queryCtx, queryCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer queryCancel()
-	err := pool.QueryRow(queryCtx, query, id).Scan(&r.ID, &r.URL, &r.Interval, &r.Timeout, &r.Type, &r.IsPaused, &r.ManagedBy)
+	err := pool.QueryRow(queryCtx, query, id).Scan(
+		&r.ID,
+		&r.URL,
+		&r.Interval,
+		&r.Timeout,
+		&r.Type,
+		&r.IsPaused,
+		&r.ManagedBy,
+		&r.Status,
+		&r.Keyword,
+		&r.KeywordCondition,
+		&r.CaseSensitive,
+		&r.UpStatusCodes,
+		&r.FollowRedirects,
+		&r.HTTPMethod,
+		&r.AuthType,
+		&r.AuthUsername,
+		&r.AuthPassword,
+		&r.AuthBearerToken,
+		&r.RequestBody,
+		&r.RequestHeadersRaw,
+		&r.TargetHost,
+		&r.TargetPort,
+		&r.DNSHostname,
+		&r.DNSRecordType,
+		&r.DNSExpectedValuesRaw,
+		&r.DNSMatchMode,
+	)
 	if err != nil {
 		if err != pgx.ErrNoRows {
 			log.Printf("Failed to fetch monitor %s: %v", id, err)
@@ -157,8 +235,8 @@ func processNotification(ctx context.Context, pool *pgxpool.Pool, payloadStr str
 		return
 	}
 
-	// Filter capability
-	if r.ManagedBy != "engine" || (r.Type != "http" && r.Type != "port" && r.Type != "ping") {
+	// Filter capability: Only monitor if managed_by == 'engine'
+	if r.ManagedBy != "engine" {
 		// Evict if exists
 		core.Store.Mu.Lock()
 		if p, exists := core.Store.Monitors[id]; exists {
@@ -179,6 +257,16 @@ func processNotification(ctx context.Context, pool *pgxpool.Pool, payloadStr str
 	if r.Timeout <= 0 {
 		r.Timeout = 30
 	}
+	if r.URL == "" && r.TargetHost != "" {
+		if r.TargetPort > 0 && (r.Type == "port" || r.Type == "udp") {
+			r.URL = fmt.Sprintf("%s:%d", r.TargetHost, r.TargetPort)
+		} else {
+			r.URL = r.TargetHost
+		}
+	}
+
+	headerMap := parseHeaders(r.RequestHeadersRaw)
+	expectedVals := parseExpectedValues(r.DNSExpectedValuesRaw)
 
 	core.Store.Mu.RLock()
 	p, exists := core.Store.Monitors[r.ID]
@@ -192,9 +280,32 @@ func processNotification(ctx context.Context, pool *pgxpool.Pool, payloadStr str
 				m.ConfidenceScore = 0.0
 				m.CurrentInterval = r.Interval
 			}
-			m.URL, m.Timeout, m.IsPaused = r.URL, r.Timeout, r.IsPaused
+			m.URL = r.URL
+			m.Timeout = r.Timeout
+			m.IsPaused = r.IsPaused
+			m.Keyword = r.Keyword
+			m.KeywordCondition = r.KeywordCondition
+			m.CaseSensitive = r.CaseSensitive
+			m.UpStatusCodes = r.UpStatusCodes
+			m.FollowRedirects = r.FollowRedirects
+			m.HTTPMethod = r.HTTPMethod
+			m.AuthType = r.AuthType
+			m.AuthUsername = r.AuthUsername
+			m.AuthPassword = r.AuthPassword
+			m.AuthBearerToken = r.AuthBearerToken
+			m.RequestBody = r.RequestBody
+			m.TargetHost = r.TargetHost
+			m.TargetPort = r.TargetPort
+			m.DNSHostname = r.DNSHostname
+			m.DNSRecordType = r.DNSRecordType
+			m.DNSExpectedValues = expectedVals
+			m.DNSMatchMode = r.DNSMatchMode
+			m.Headers = headerMap
+			m.NextCheckAt = time.Now()
 			m.ConfigSyncedAt = time.Now()
 		})
+		core.States.SyncStatus(r.ID, r.Status, time.Time{})
+		log.Printf("[LISTENER] Updated monitor %s (URL: %s, interval: %ds, up_codes: %v, follow_redirects: %v)", r.ID, r.URL, r.Interval, r.UpStatusCodes, r.FollowRedirects)
 		if ok && old.Type != r.Type {
 			core.ReconcileTypeChange(p, r.Type)
 		}
@@ -205,8 +316,19 @@ func processNotification(ctx context.Context, pool *pgxpool.Pool, payloadStr str
 	defer core.Store.Mu.Unlock()
 
 	if _, exists := core.Store.Monitors[r.ID]; !exists {
+		var parsedUUID uuid.UUID
+		if u, err := uuid.Parse(r.ID); err == nil {
+			parsedUUID = u
+		}
+
 		m := &core.Monitor{
-			ID: r.ID, URL: r.URL, Interval: r.Interval, Timeout: r.Timeout, Type: r.Type, IsPaused: r.IsPaused,
+			ID: r.ID, ParsedUUID: parsedUUID, URL: r.URL, Interval: r.Interval, Timeout: r.Timeout, Type: r.Type, IsPaused: r.IsPaused, Keyword: r.Keyword,
+			KeywordCondition: r.KeywordCondition, CaseSensitive: r.CaseSensitive,
+			UpStatusCodes: r.UpStatusCodes, FollowRedirects: r.FollowRedirects, HTTPMethod: r.HTTPMethod,
+			AuthType: r.AuthType, AuthUsername: r.AuthUsername, AuthPassword: r.AuthPassword, AuthBearerToken: r.AuthBearerToken,
+			RequestBody: r.RequestBody, TargetHost: r.TargetHost, TargetPort: r.TargetPort,
+			DNSHostname: r.DNSHostname, DNSRecordType: r.DNSRecordType, DNSExpectedValues: expectedVals, DNSMatchMode: r.DNSMatchMode,
+			Headers: headerMap,
 			LastStatus: "UP", ConfidenceScore: 0.0, CurrentInterval: r.Interval, ConfigSyncedAt: time.Now(),
 			NoKeepAlive: strings.HasPrefix(strings.ToLower(r.URL), "http://"),
 			DNSTempCell: &core.DNSTempCell{},
@@ -217,6 +339,11 @@ func processNotification(ctx context.Context, pool *pgxpool.Pool, payloadStr str
 		h.Write([]byte(r.ID))
 		offset := time.Duration(h.Sum32()%5) * time.Second
 		m.NextCheckAt = time.Now().Add(offset)
+
+		monKey := core.MonitorKey(r.ID)
+		interval := core.GetFullPhaseInterval(monKey, 0)
+		m.LastFullPhaseAt = time.Now()
+		m.FullPhaseInterval = interval
 
 		if core.RequiresAssignedPort(r.Type) {
 			if port, ok := core.PortAllocator.Allocate(r.ID); ok {

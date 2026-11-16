@@ -183,6 +183,9 @@ func main() {
 	// 10 Postgres incident workers to prevent connection stampedes
 	db.StartIncidentWorkers(ctx, &wg, pool, 10)
 
+	// Check log workers to stream check events into PostgreSQL uptime_checks_log
+	db.StartCheckLogWorkers(ctx, &wg, pool)
+
 	wg.Add(1)
 	go db.StartMetricsFlushLoop(ctx, &wg, pool)
 

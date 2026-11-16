@@ -1515,6 +1515,12 @@ func (cd *CachedDialer) DialContext(ctx context.Context, network, addr string) (
 		}
 	} else {
 		totalTimeout = cd.cfg.ConnectTimeout
+		if totalTimeout <= 0 {
+			totalTimeout = cd.ConnectTimeout
+		}
+		if totalTimeout <= 0 {
+			totalTimeout = 5 * time.Second
+		}
 	}
 
 	numAttempts := len(dialList)
@@ -1523,8 +1529,8 @@ func (cd *CachedDialer) DialContext(ctx context.Context, network, addr string) (
 	}
 
 	perAttemptBudget := totalTimeout / time.Duration(numAttempts)
-	if perAttemptBudget < 100*time.Millisecond {
-		perAttemptBudget = 100 * time.Millisecond
+	if perAttemptBudget < 2*time.Second {
+		perAttemptBudget = 2 * time.Second
 	}
 
 	var lastErr error

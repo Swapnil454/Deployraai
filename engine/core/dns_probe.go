@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -175,6 +176,224 @@ func ProbeDNSWithConfig(ctx context.Context, targetNameserver, queryDomain strin
 	}
 }
 
+// ProbeDNSMonitor executes a full DNS check for a monitor, validating DNS records against expected values.
+func ProbeDNSMonitor(ctx context.Context, m *Monitor, timeout time.Duration) DNSProbeResult {
+	start := time.Now()
+	hostname := strings.TrimSpace(m.DNSHostname)
+	if hostname == "" {
+		hostname = strings.TrimSpace(m.URL)
+		hostname = strings.TrimPrefix(hostname, "http://")
+		hostname = strings.TrimPrefix(hostname, "https://")
+		hostname = strings.TrimPrefix(hostname, "dns://")
+		if idx := strings.Index(hostname, "/"); idx != -1 {
+			hostname = hostname[:idx]
+		}
+		if idx := strings.Index(hostname, ":"); idx != -1 {
+			hostname = hostname[:idx]
+		}
+	}
+	if hostname == "" {
+		return DNSProbeResult{
+			Success:      false,
+			Latency:      time.Since(start),
+			ErrClass:     ErrConfig,
+			ErrorMessage: "missing dns hostname",
+		}
+	}
+
+	recordType := strings.ToUpper(strings.TrimSpace(m.DNSRecordType))
+	if recordType == "" {
+		recordType = "A"
+	}
+
+	var qType uint16
+	switch recordType {
+	case "A":
+		qType = dns.TypeA
+	case "AAAA":
+		qType = dns.TypeAAAA
+	case "CNAME":
+		qType = dns.TypeCNAME
+	case "MX":
+		qType = dns.TypeMX
+	case "NS":
+		qType = dns.TypeNS
+	case "TXT":
+		qType = dns.TypeTXT
+	case "SOA":
+		qType = dns.TypeSOA
+	case "PTR":
+		qType = dns.TypePTR
+	case "SRV":
+		qType = dns.TypeSRV
+	default:
+		qType = dns.TypeA
+	}
+
+	resolverAddr := "8.8.8.8:53"
+	if m.DNSResolverMode == "public_resolver" && strings.TrimSpace(m.DNSCustomResolverIP) != "" {
+		ip := strings.TrimSpace(m.DNSCustomResolverIP)
+		if !strings.Contains(ip, ":") {
+			ip = net.JoinHostPort(ip, "53")
+		}
+		resolverAddr = ip
+	}
+
+	msg := new(dns.Msg)
+	msg.SetQuestion(dns.Fqdn(hostname), qType)
+	msg.RecursionDesired = true
+
+	client := &dns.Client{
+		Timeout: timeout,
+		Net:     "udp",
+	}
+
+	in, rtt, err := client.ExchangeContext(ctx, msg, resolverAddr)
+	if err != nil {
+		if resolverAddr == "8.8.8.8:53" {
+			in, rtt, err = client.ExchangeContext(ctx, msg, "1.1.1.1:53")
+		}
+		if err != nil {
+			return DNSProbeResult{
+				Success:      false,
+				Latency:      time.Since(start),
+				ErrClass:     classifyNetError(err, false),
+				ErrorMessage: err.Error(),
+			}
+		}
+	}
+
+	if in.Rcode != dns.RcodeSuccess {
+		return DNSProbeResult{
+			Success:      false,
+			Latency:      rtt,
+			Rcode:        in.Rcode,
+			ErrClass:     ErrDNS,
+			ErrorMessage: fmt.Sprintf("dns server returned rcode %s", dns.RcodeToString[in.Rcode]),
+		}
+	}
+
+	var returned []string
+	for _, ans := range in.Answer {
+		switch t := ans.(type) {
+		case *dns.A:
+			returned = append(returned, t.A.String())
+		case *dns.AAAA:
+			returned = append(returned, t.AAAA.String())
+		case *dns.CNAME:
+			returned = append(returned, strings.ToLower(strings.TrimSuffix(t.Target, ".")))
+		case *dns.NS:
+			returned = append(returned, strings.ToLower(strings.TrimSuffix(t.Ns, ".")))
+		case *dns.MX:
+			returned = append(returned, fmt.Sprintf("%d %s", t.Preference, strings.ToLower(strings.TrimSuffix(t.Mx, "."))))
+		case *dns.TXT:
+			returned = append(returned, strings.Join(t.Txt, ""))
+		case *dns.SOA:
+			returned = append(returned, strings.ToLower(strings.TrimSuffix(t.Ns, ".")))
+		case *dns.PTR:
+			returned = append(returned, strings.ToLower(strings.TrimSuffix(t.Ptr, ".")))
+		}
+	}
+	if len(returned) == 0 && qType == dns.TypeNS {
+		for _, ans := range in.Ns {
+			if t, ok := ans.(*dns.NS); ok {
+				returned = append(returned, strings.ToLower(strings.TrimSuffix(t.Ns, ".")))
+			}
+		}
+	}
+
+	if len(m.DNSExpectedValues) == 0 {
+		if len(returned) == 0 {
+			return DNSProbeResult{
+				Success:      false,
+				Latency:      rtt,
+				ErrClass:     ErrDNS,
+				ErrorMessage: fmt.Sprintf("no %s records found for %s", recordType, hostname),
+			}
+		}
+		return DNSProbeResult{
+			Success: true,
+			Latency: rtt,
+			Rcode:   in.Rcode,
+		}
+	}
+
+	normReturned := make([]string, len(returned))
+	for i, v := range returned {
+		normReturned[i] = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(v), "."))
+	}
+
+	normExpected := make([]string, len(m.DNSExpectedValues))
+	for i, v := range m.DNSExpectedValues {
+		normExpected[i] = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(v), "."))
+	}
+
+	matchMode := m.DNSMatchMode
+	if matchMode == "" {
+		matchMode = "exact_set"
+	}
+
+	match := false
+	switch matchMode {
+	case "exact_set":
+		if len(normReturned) == len(normExpected) {
+			sort.Strings(normReturned)
+			sort.Strings(normExpected)
+			match = true
+			for i := range normReturned {
+				if normReturned[i] != normExpected[i] {
+					match = false
+					break
+				}
+			}
+		}
+	case "contains":
+		match = true
+		for _, exp := range normExpected {
+			found := false
+			for _, ret := range normReturned {
+				if ret == exp {
+					found = true
+					break
+				}
+			}
+			if !found {
+				match = false
+				break
+			}
+		}
+	case "any_match":
+		for _, exp := range normExpected {
+			for _, ret := range normReturned {
+				if ret == exp {
+					match = true
+					break
+				}
+			}
+			if match {
+				break
+			}
+		}
+	default:
+		match = len(normReturned) > 0
+	}
+
+	if !match {
+		return DNSProbeResult{
+			Success:      false,
+			Latency:      rtt,
+			ErrClass:     ErrDNS,
+			ErrorMessage: fmt.Sprintf("records mismatch: got %v, expected %v", normReturned, normExpected),
+		}
+	}
+
+	return DNSProbeResult{
+		Success: true,
+		Latency: rtt,
+		Rcode:   in.Rcode,
+	}
+}
+
 // UDPProbeResult encapsulates the outcome of a UDP port check.
 type UDPProbeResult struct {
 	Success      bool
@@ -234,6 +453,11 @@ func ProbeUDP(ctx context.Context, target string, payload []byte, timeout time.D
 				ErrClass:     classifyNetError(werr, false),
 				ErrorMessage: werr.Error(),
 			}
+		}
+	} else {
+		return UDPProbeResult{
+			Success: true,
+			Latency: time.Since(start),
 		}
 	}
 

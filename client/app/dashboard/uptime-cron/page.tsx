@@ -87,6 +87,16 @@ interface Monitor {
   under_maintenance?: boolean;
 }
 
+interface SystemStatus {
+  healthy: boolean;
+  engine_status: "online" | "offline";
+  active_prober: "go_engine" | "node_fallback" | "none";
+  auto_native_prober: boolean;
+  message?: string;
+  warning?: string;
+  error?: string;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const API = `${process.env.NEXT_PUBLIC_API_URL || ""}/api/uptime-cron`;
@@ -346,9 +356,15 @@ function EditPanel({ monitor, groups, onClose, onSaved }: {
               <label className="mb-1.5 block text-xs font-semibold text-zinc-400">{form.monitor_type === "heartbeat" ? "Expected Interval" : "Check Interval"}</label>
               <select value={form.interval_seconds} onChange={set("interval_seconds")}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500">
-                {[60,120,180,300,600,900,1800,3600].map(s => (
-                  <option key={s} value={s}>{formatInterval(s)}</option>
-                ))}
+                {Array.from(new Set([
+                  Number(form.interval_seconds),
+                  10, 15, 30, 45, 60, 120, 180, 300, 600, 900, 1800, 3600
+                ]))
+                  .filter((s) => typeof s === "number" && !isNaN(s) && s > 0)
+                  .sort((a, b) => a - b)
+                  .map(s => (
+                    <option key={s} value={s}>{formatInterval(s)}</option>
+                  ))}
               </select>
             </div>
           </div>
@@ -844,7 +860,9 @@ function MonitorRow({
           <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
             {monitor.under_maintenance ? "MAINTENANCE" : monitor.status.toUpperCase()}
           </span>
-          {monitor.last_response_ms !== null && <span>{monitor.last_response_ms} ms</span>}
+          {monitor.last_response_ms !== null && (
+            <span>{monitor.last_response_ms === 0 ? "< 1 ms" : `${monitor.last_response_ms} ms`}</span>
+          )}
           {monitor.open_incidents > 0 && (
             <span className="font-semibold text-red-400">
               {monitor.open_incidents} open incident{monitor.open_incidents > 1 ? "s" : ""}
@@ -979,6 +997,7 @@ function SummaryBar({ monitors }: { monitors: Monitor[] }) {
 export default function UptimeCronMonitoringPage() {
   const [monitors, setMonitors]     = useState<Monitor[]>([]);
   const [groups, setGroups]         = useState<Array<{ id: string; name: string }>>([]);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [loading, setLoading]       = useState(true);
   const [search, setSearch]         = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | MonitorStatus>("all");
@@ -986,7 +1005,30 @@ export default function UptimeCronMonitoringPage() {
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingMonitor, setEditingMonitor] = useState<Monitor | null>(null);
+  const [togglingAutoNative, setTogglingAutoNative] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
+
+  async function handleToggleAutoNative() {
+    if (!systemStatus || togglingAutoNative) return;
+    const nextVal = !systemStatus.auto_native_prober;
+    setTogglingAutoNative(true);
+    try {
+      const res = await fetch(`${API}/system-status/auto-native`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: nextVal }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.system_status) setSystemStatus(d.system_status);
+      }
+    } catch (e) {
+      console.error("Failed to toggle auto native prober:", e);
+    } finally {
+      setTogglingAutoNative(false);
+    }
+  }
 
   const fetchMonitors = useCallback(async () => {
     try {
@@ -994,7 +1036,11 @@ export default function UptimeCronMonitoringPage() {
         fetch(`${API}/monitors`, { credentials: "include" }),
         fetch(`${API}/groups`,   { credentials: "include" }),
       ]);
-      if (mRes.ok) { const d = await mRes.json(); setMonitors(d.monitors ?? []); }
+      if (mRes.ok) {
+        const d = await mRes.json();
+        setMonitors(d.monitors ?? []);
+        if (d.system_status) setSystemStatus(d.system_status);
+      }
       if (gRes.ok) { const d = await gRes.json(); setGroups(d.groups  ?? []); }
     } catch { /* silent */ } finally { setLoading(false); }
   }, []);
@@ -1066,15 +1112,57 @@ export default function UptimeCronMonitoringPage() {
           <header className="flex flex-col justify-between gap-5 border-b border-zinc-800 pb-8 md:flex-row md:items-end">
             <div>
               <p className="mb-2 text-xs font-bold tracking-[0.18em] text-emerald-400">UPTIME MONITORING</p>
-              <h1 className="flex items-center gap-3 text-3xl font-bold tracking-tight text-white">
+              <h1 className="flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight text-white">
                 <Activity className="h-7 w-7 text-emerald-400" />
                 Monitors
                 {!loading && <span className="text-zinc-600">.</span>}
                 {loading && <Loader2 className="h-5 w-5 animate-spin text-zinc-600" />}
+
+                {systemStatus && (
+                  <span className="ml-1 inline-flex items-center gap-2">
+                    {systemStatus.engine_status === "online" && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-400">
+                        <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                        Go Engine Online
+                      </span>
+                    )}
+                    {systemStatus.engine_status === "offline" && systemStatus.auto_native_prober && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2.5 py-0.5 text-xs font-semibold text-yellow-400">
+                        <span className="h-2 w-2 rounded-full bg-yellow-400" />
+                        Node.js Fallback Active
+                      </span>
+                    )}
+                    {systemStatus.engine_status === "offline" && !systemStatus.auto_native_prober && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/15 px-2.5 py-0.5 text-xs font-semibold text-red-400">
+                        <span className="h-2 w-2 rounded-full bg-red-400" />
+                        Prober Offline
+                      </span>
+                    )}
+                  </span>
+                )}
               </h1>
               <p className="mt-2 text-sm text-zinc-400">Keep an eye on every endpoint your customers depend on.</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {systemStatus && (
+                <button
+                  onClick={handleToggleAutoNative}
+                  disabled={togglingAutoNative}
+                  title="Toggle Node.js Automatic Fallback Prober Loop"
+                  className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-xs font-semibold transition ${
+                    systemStatus.auto_native_prober
+                      ? "border-emerald-500/40 bg-emerald-950/20 text-emerald-300 hover:bg-emerald-950/40"
+                      : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                  }`}
+                >
+                  {togglingAutoNative ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />
+                  ) : (
+                    <span className={`h-2 w-2 rounded-full ${systemStatus.auto_native_prober ? "bg-emerald-400" : "bg-zinc-600"}`} />
+                  )}
+                  Auto Native Loop: {systemStatus.auto_native_prober ? "ON" : "OFF"}
+                </button>
+              )}
               <button onClick={fetchMonitors}
                 className="grid h-10 w-10 place-items-center rounded-lg border border-zinc-800 text-zinc-400 transition hover:border-zinc-700 hover:text-white"
                 title="Refresh">
@@ -1086,6 +1174,46 @@ export default function UptimeCronMonitoringPage() {
               </Link>
             </div>
           </header>
+
+          {/* System Warning Banner when Go Engine is Offline and AUTO_NATIVE_PROBER=false */}
+          {systemStatus?.engine_status === "offline" && !systemStatus?.auto_native_prober && (
+            <div className="mt-6 flex flex-col gap-3 rounded-xl border border-red-500/40 bg-red-950/30 p-4 text-red-200 shadow-lg shadow-red-950/20 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-500/20 text-red-400">
+                  <X className="h-6 w-6" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold text-white">System is Not Working: Monitoring Engine Offline</h4>
+                  <p className="mt-0.5 text-xs text-red-300/80">
+                    The Go monitoring engine is offline and <code className="rounded bg-red-900/60 px-1.5 py-0.5 font-mono text-[11px] text-red-200">AUTO_NATIVE_PROBER=false</code> is set. System will NOT automatically shift into the Node.js loop. Checks are currently suspended.
+                  </p>
+                </div>
+              </div>
+              <span className="self-start rounded-full border border-red-500/40 bg-red-500/20 px-3 py-1 text-xs font-mono font-bold text-red-300 sm:self-center">
+                CHECKS SUSPENDED
+              </span>
+            </div>
+          )}
+
+          {/* System Fallback Banner when Go Engine is Offline and AUTO_NATIVE_PROBER=true */}
+          {systemStatus?.engine_status === "offline" && systemStatus?.auto_native_prober && (
+            <div className="mt-6 flex flex-col gap-3 rounded-xl border border-yellow-500/40 bg-yellow-950/30 p-4 text-yellow-200 shadow-lg sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-yellow-500/20 text-yellow-400">
+                  <RefreshCw className="h-5 w-5 animate-spin" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold text-white">Fallback Active: Shifting to Node.js Prober</h4>
+                  <p className="mt-0.5 text-xs text-yellow-300/80">
+                    The Go monitoring engine is offline. Checks are automatically running in the Node.js background loop because <code className="rounded bg-yellow-900/60 px-1.5 py-0.5 font-mono text-[11px] text-yellow-200">AUTO_NATIVE_PROBER=true</code>.
+                  </p>
+                </div>
+              </div>
+              <span className="self-start rounded-full border border-yellow-500/40 bg-yellow-500/20 px-3 py-1 text-xs font-mono font-bold text-yellow-300 sm:self-center">
+                NODE.JS FALLBACK
+              </span>
+            </div>
+          )}
 
           {monitors.length > 0 && <div className="pt-7"><SummaryBar monitors={monitors} /></div>}
 

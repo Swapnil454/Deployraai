@@ -289,12 +289,19 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		var ips []net.IP
+		for i := 1; i <= 16; i++ {
+			ips = append(ips, net.ParseIP(fmt.Sprintf("198.20.0.%d", i)))
+		}
+		ips = append(ips, net.ParseIP("127.0.0.1"))
+
 		template := x509.Certificate{
 			SerialNumber: big.NewInt(1),
 			Subject: pkix.Name{
 				Organization: []string{"Brutal Soak Mock Farm"},
 			},
 			DNSNames:              []string{"mock", "*.mock.local", "localhost"},
+			IPAddresses:           ips,
 			NotBefore:             time.Now().Add(-time.Minute),
 			NotAfter:              time.Now().Add(24 * time.Hour),
 			KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
@@ -351,10 +358,34 @@ func main() {
 		if val, ok := overrides.Load(host); ok {
 			return val.(string)
 		}
+		pctStr := os.Getenv("TARGETS_HANG_PERCENT")
+		if pctStr == "" {
+			pctStr = os.Getenv("TARGETS_DOWN_PERCENT")
+		}
+		if pctStr != "" {
+			if pct, err := strconv.Atoi(pctStr); err == nil && pct > 0 {
+				if strings.HasPrefix(host, "mock-") {
+					parts := strings.Split(host, ".")
+					idxStr := strings.TrimPrefix(parts[0], "mock-")
+					if idNum, err := strconv.Atoi(idxStr); err == nil {
+						if (idNum % 100) < pct {
+							return "timeout"
+						}
+					}
+				}
+			}
+		}
 		return ""
 	}
 
 	mux := http.NewServeMux()
+
+	// ── /mock/keyword_fail (for deliberate keyword failure canaries) ───────
+	mux.HandleFunc("/mock/keyword_fail", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`<!DOCTYPE html><html><body><h1>Status: FAILED</h1></body></html>`))
+	})
 
 	// ── / (root handler for port checks) ──────────────────────────────────
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -389,7 +420,13 @@ func main() {
 		recordSampleHost(host)
 		idx := reqIndex.Add(1)
 
-		if checkOverride(r) == "down" {
+		override := checkOverride(r)
+		if override == "timeout" {
+			time.Sleep(15 * time.Second)
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
+		}
+		if override == "down" {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			w.Write([]byte("503 Overridden"))
 			return
@@ -437,6 +474,17 @@ func main() {
 
 	// ── /mock/keyword ─────────────────────────────────────────────────────
 	mux.HandleFunc("/mock/keyword", func(w http.ResponseWriter, r *http.Request) {
+		override := checkOverride(r)
+		if override == "timeout" {
+			time.Sleep(15 * time.Second)
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
+		}
+		if override == "down" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("503 Overridden"))
+			return
+		}
 		idx := reqIndex.Add(1)
 
 		if injectFailure(w, idx) {
@@ -614,14 +662,19 @@ func main() {
 		srv.Shutdown(ctx)
 	}()
 
-	rawLn, err := net.Listen("tcp", ":8443")
+	lc := net.ListenConfig{}
+	rawLn, err := lc.Listen(context.Background(), "tcp", ":8443")
 	if err != nil {
 		log.Fatal(err)
 	}
-	tierLn := newIdleTierListener(rawLn, idleTimeoutTiers)
 
-	log.Printf("Brutal Soak Mock HTTPS server listening on :8443 (latency=50-150ms, per-host idle_timeouts=[5s,15s,60s,75s], injected_failures=3.5%%)")
-	if err := srv.ServeTLS(tierLn, "", ""); err != nil && err != http.ErrServerClosed {
+	var listener net.Listener = rawLn
+	if os.Getenv("DISABLE_INJECTED_FAILURES") != "true" {
+		listener = newIdleTierListener(rawLn, idleTimeoutTiers)
+	}
+
+	log.Printf("Brutal Soak Mock HTTPS server listening on :8443 with large backlog (backlog=65535, clean_keepalive=%v)", os.Getenv("DISABLE_INJECTED_FAILURES") == "true")
+	if err := srv.ServeTLS(listener, "", ""); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }
